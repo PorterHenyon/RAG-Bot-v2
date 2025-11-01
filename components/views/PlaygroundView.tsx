@@ -67,7 +67,6 @@ const PlaygroundView: React.FC = () => {
         } else {
             // Continue with Gemini AI flow
             const classification = await geminiService.classifyIssue(userMessage.content);
-            // FIX: Cannot find name 'user_message'. Did you mean 'userMessage'?
             const relevantDocs = geminiService.findRelevantRagEntries(userMessage.content, ragEntries);
             setBotContext({ classification, relevantDocs });
             botResponseContent = await geminiService.generateBotResponse(userMessage.content, relevantDocs);
