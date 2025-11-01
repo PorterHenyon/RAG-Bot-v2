@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { ForumPost, Message, PostStatus } from '../types';
 import { XMarkIcon, UserIcon, BotIcon, SupportIcon, HashtagIcon, SystemIcon } from './icons';
-import PostStatusBadge from './PostStatusBadge';
-import { geminiService } from '../../services/geminiService';
+import { geminiService } from '../services/geminiService';
 
 interface ForumPostDetailModalProps {
   post: ForumPost;

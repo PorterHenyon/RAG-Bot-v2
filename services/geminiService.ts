@@ -8,7 +8,6 @@ const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 export const geminiService = {
   // This is local logic, no API call needed.
   getAutoResponse: (query: string, autoResponses: AutoResponse[]): AutoResponse | null => {
-    const queryWords = new Set(query.toLowerCase().split(/\s+/).filter(w => w.length > 2));
     for (const response of autoResponses) {
         for (const keyword of response.triggerKeywords) {
             if (query.toLowerCase().includes(keyword)) {
@@ -30,7 +29,7 @@ export const geminiService = {
             contents: prompt,
         });
 
-        return response.text;
+        return response.text ?? "There was an error summarizing the conversation. Please try again.";
     } catch (error) {
         console.error("Error summarizing conversation:", error);
         return "There was an error summarizing the conversation. Please try again.";
@@ -68,7 +67,10 @@ export const geminiService = {
             }
         });
         
-        const jsonString = response.text.trim();
+        const jsonString = response.text?.trim();
+        if (!jsonString) {
+            throw new Error("API returned an empty response for RAG entry creation.");
+        }
         return JSON.parse(jsonString);
 
     } catch (error) {
@@ -105,7 +107,8 @@ export const geminiService = {
             }
         });
         
-        const jsonString = response.text.trim();
+        const jsonString = response.text?.trim();
+        if (!jsonString) return 'User Error'; // Default fallback
         const parsed = JSON.parse(jsonString);
         return parsed.classification;
     } catch (error) {
@@ -149,7 +152,7 @@ export const geminiService = {
             contents: prompt,
         });
 
-        return response.text;
+        return response.text ?? "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
     } catch (error) {
         console.error("Error generating bot response:", error);
         return "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
