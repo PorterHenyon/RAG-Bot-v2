@@ -1,41 +1,44 @@
+import { useState, useEffect } from 'react';
+// fix(types): Import SlashCommand type.
+import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand } from '../types';
 
-import { useState } from 'react';
-import { Ticket, RagEntry, TicketStatus } from '../types';
-
-const initialTickets: Ticket[] = [
+const initialForumPosts: ForumPost[] = [
   {
-    id: 'TKT-001',
-    user: { name: 'Alice', avatar: 'https://i.pravatar.cc/150?u=alice' },
-    title: 'Macro not loading after update',
-    status: TicketStatus.New,
-    priority: 'High',
-    type: 'Unclassified',
-    createdAt: '2024-07-28T10:00:00Z',
+    id: 'POST-001',
+    user: { username: 'BeeKeeper#1234', id: '234567890123456789', avatarUrl: 'https://i.pravatar.cc/150?u=bee' },
+    postTitle: 'why is my charactor resetting instead of converting honey',
+    status: PostStatus.Unsolved,
+    tags: ['bug', 'scripting', 'honey'],
+    createdAt: '2024-10-30T10:00:00Z',
+    forumChannelId: '123456789',
+    postId: '987654321098765432',
     conversation: [
-      { author: 'User', content: 'My macro is not loading after the recent update. I get a "failed to initialize" error.', timestamp: '2024-07-28T10:00:00Z' }
+      { author: 'User', content: 'my character keeps running back to the hive and resetting itslef when it should be converting my honey into pollen, i have bad english sry', timestamp: '2024-10-30T10:00:00Z' }
     ],
   },
   {
-    id: 'TKT-002',
-    user: { name: 'Bob', avatar: 'https://i.pravatar.cc/150?u=bob' },
-    title: 'How do I configure the new feature?',
-    status: TicketStatus.AIResponse,
-    priority: 'Low',
-    type: 'User Error',
-    createdAt: '2024-07-28T09:30:00Z',
+    id: 'POST-002',
+    user: { username: 'Bob#5678', id: '345678901234567890', avatarUrl: 'https://i.pravatar.cc/150?u=bob' },
+    postTitle: 'How do I configure the new feature?',
+    status: PostStatus.AIResponse,
+    tags: ['question', 'feature'],
+    createdAt: '2024-10-30T09:30:00Z',
+    forumChannelId: '123456789',
+    postId: '987654321098765433',
     conversation: [
         { author: 'User', content: 'I see the new "auto-sort" feature but I can\'t figure out how to turn it on.', timestamp: '2024-07-28T09:30:00Z' },
         { author: 'Bot', content: 'I can help with that! To enable "auto-sort", please navigate to Settings > Advanced and check the box labeled "Enable Auto-Sorting".', timestamp: '2024-07-28T09:31:00Z' }
     ],
   },
   {
-    id: 'TKT-003',
-    user: { name: 'Charlie', avatar: 'https://i.pravatar.cc/150?u=charlie' },
-    title: 'Application crashes on startup',
-    status: TicketStatus.HumanSupport,
-    priority: 'High',
-    type: 'Macro Issue',
-    createdAt: '2024-07-27T15:00:00Z',
+    id: 'POST-003',
+    user: { username: 'Charlie#9101', id: '456789012345678901', avatarUrl: 'https://i.pravatar.cc/150?u=charlie' },
+    postTitle: 'Application crashes on startup',
+    status: PostStatus.HumanSupport,
+    tags: ['crash', 'urgent'],
+    createdAt: '2024-10-29T15:00:00Z',
+    forumChannelId: '123456789',
+    postId: '987654321098765434',
     conversation: [
         { author: 'User', content: 'My application is crashing every time I open it. I tried reinstalling it but nothing works.', timestamp: '2024-07-27T15:00:00Z' },
         { author: 'Bot', content: 'I found some potential solutions, but they don\'t seem to match your issue perfectly. I am escalating this to a human support agent.', timestamp: '2024-07-27T15:02:00Z' },
@@ -43,59 +46,148 @@ const initialTickets: Ticket[] = [
     ],
     logs: 'Exception: NullReferenceException at Core.Startup.Initialize()...',
   },
-  {
-    id: 'TKT-004',
-    user: { name: 'Diana', avatar: 'https://i.pravatar.cc/150?u=diana' },
-    title: 'Payment issue',
-    status: TicketStatus.Resolved,
-    priority: 'Medium',
-    type: 'User Error',
-    createdAt: '2024-07-26T11:00:00Z',
-    conversation: [
-        { author: 'User', content: 'My payment was declined but my card is fine.', timestamp: '2024-07-26T11:00:00Z' },
-        { author: 'Support', content: 'It seems there was a temporary issue with our payment processor. I have manually processed your payment. Everything should be working now.', timestamp: '2024-07-26T11:15:00Z' },
-        { author: 'User', content: 'It works! Thank you!', timestamp: '2024-07-26T11:16:00Z' },
-    ],
-  },
-    {
-    id: 'TKT-005',
-    user: { name: 'Eve', avatar: 'https://i.pravatar.cc/150?u=eve' },
-    title: 'Critical bug in production',
-    status: TicketStatus.Escalated,
-    priority: 'High',
-    type: 'Macro Issue',
-    createdAt: '2024-07-28T11:00:00Z',
-    conversation: [
-        { author: 'User', content: 'The main feature is broken and causing data loss for my team!', timestamp: '2024-07-28T11:00:00Z' },
-        { author: 'Support', content: 'This is a critical issue. I have escalated it directly to the lead developer. We are investigating now.', timestamp: '2024-07-28T11:05:00Z' },
-    ],
-    logs: 'FATAL: DataCorruptionException at Services.Data.Save()...',
-  },
 ];
 
 const initialRagEntries: RagEntry[] = [
     {
         id: 'RAG-001',
-        title: 'Fix for "Failed to Initialize" Error on Update',
-        content: 'If the macro shows a "failed to initialize" error after an update, the user should delete the `config.json` file from the installation directory and restart the application. This will regenerate a default config file and resolve the issue.',
-        keywords: ['initialize', 'error', 'update', 'fix', 'config.json'],
-        createdAt: '2024-07-25T14:00:00Z',
-        createdBy: 'Liam',
+        title: 'Character Resets Instead of Converting Honey',
+        content: "This issue typically occurs when the 'Auto-Deposit' setting is enabled, but the main 'Gather' task is not set to pause during the conversion process. The macro incorrectly prioritizes gathering, causing it to reset the character's position and interrupt honey conversion. To fix this, go to Script Settings > Tasks > Gather and check the box 'Pause While Converting Honey'. Alternatively, you can disable 'Auto-Deposit' in the Hive settings.",
+        keywords: ['honey', 'pollen', 'convert', 'reset', 'resets', 'resetting', 'gather', 'auto-deposit', 'stuck', 'hive'],
+        createdAt: '2024-10-30T14:00:00Z',
+        createdBy: 'System Knowledge',
     },
     {
         id: 'RAG-002',
-        title: 'Enabling Beta Features',
-        content: 'To enable beta features, go to Settings > About and click the version number 7 times. A new "Developer" tab will appear where beta features can be toggled.',
-        keywords: ['beta', 'features', 'developer', 'enable', 'hidden'],
-        createdAt: '2024-07-24T18:00:00Z',
-        createdBy: 'Support Team',
+        title: 'Error: "Failed to Initialize" on Startup',
+        content: 'If Revolution Macro shows a "failed to initialize" error, it usually means the configuration file is corrupt. To fix this, close the macro, navigate to its installation directory, find the `config.json` file, and delete it. When you restart the macro, it will generate a fresh, default config file, resolving the issue.',
+        keywords: ['initialize', 'error', 'update', 'fix', 'config.json', 'startup', 'starting up', 'launch'],
+        createdAt: '2024-10-29T14:00:00Z',
+        createdBy: 'System Knowledge',
+    },
+    {
+        id: 'RAG-003',
+        title: 'License Key Error: "Invalid Key" or "Activation Limit Reached"',
+        content: "If you get an 'Invalid Key' error, please double-check that you have copied the entire key from your purchase email without any extra spaces. If the error is 'Activation Limit Reached', it means your key is already active on another machine. You must first deactivate it from the old machine using the 'Deactivate License' button in the macro's 'About' tab, or log into your account on the revolutionmacro.com website to manage your active machines.",
+        keywords: ['license', 'key', 'activation', 'invalid', 'limit', 'hwid', 'deactivate', 'buy'],
+        createdAt: '2024-10-28T11:00:00Z',
+        createdBy: 'System Knowledge',
+    },
+    {
+        id: 'RAG-004',
+        title: 'Antivirus or Firewall is Blocking the Macro',
+        content: "Antivirus software can sometimes incorrectly flag Revolution Macro as a threat due to its nature of controlling mouse and keyboard inputs. This is a false positive. To resolve this, you must add an exception or exclusion in your antivirus settings for the entire Revolution Macro installation folder, not just the .exe file. This will prevent the antivirus from quarantining or deleting critical files.",
+        keywords: ['antivirus', 'virus', 'trojan', 'firewall', 'blocked', 'defender', 'avast', 'norton', 'false positive'],
+        createdAt: '2024-10-27T18:00:00Z',
+        createdBy: 'System Knowledge',
+    },
+    {
+        id: 'RAG-005',
+        title: 'Character is Stuck, Running into Walls, or Not Moving',
+        content: "If your character gets stuck, it's almost always a pathing issue. First, try using the 'Unstuck' button on the main UI. If the problem persists, go to the 'Pathing' tab and click 'Recalculate Navigation Mesh' for your current map. Also, ensure your character's speed setting in the macro matches its in-game speed to avoid desync issues.",
+        keywords: ['stuck', 'moving', 'wall', 'loop', 'pathing', 'navmesh', 'navigation'],
+        createdAt: '2024-10-26T15:20:00Z',
+        createdBy: 'System Knowledge',
+    },
+    {
+        id: 'RAG-006',
+        title: 'Macro Cannot Find the Game Window',
+        content: "For the macro to correctly hook into the game, the game must be running in either 'Windowed' or 'Borderless Windowed' mode. Fullscreen mode is not supported. Additionally, try running Revolution Macro as an Administrator by right-clicking the icon and selecting 'Run as Administrator'. This gives it the necessary permissions to interact with other application windows.",
+        keywords: ['find game', 'detect', 'attach', 'hook', 'windowed', 'fullscreen', 'admin', 'administrator'],
+        createdAt: '2024-10-25T09:00:00Z',
+        createdBy: 'System Knowledge',
+    },
+    {
+        id: 'RAG-007',
+        title: 'How to Configure "Smart Gather"',
+        content: "The 'Smart Gather' feature allows you to prioritize resources. In the 'Gather' tab, you can create a priority list. Add the names of the items you want to collect (e.g., 'Sunflower', 'Blue Flower') and order them from highest to lowest priority. You can also add items to an 'Ignore List' to ensure the macro never collects them.",
+        keywords: ['smart gather', 'priority', 'ignore list', 'filter', 'resources', 'items', 'collect'],
+        createdAt: '2024-10-24T13:00:00Z',
+        createdBy: 'System Knowledge',
+    },
+    {
+        id: 'RAG-008',
+        title: 'Script Settings Not Saving After Restart',
+        content: "If your settings reset every time you restart the macro, it's a file permissions issue. The macro needs to be able to write to its own folder. Navigate to your Revolution Macro installation folder, right-click it, select 'Properties', go to the 'Security' tab, and ensure your user account has 'Full control' permissions. Running the macro as an administrator can also solve this.",
+        keywords: ['saving', 'settings', 'reset', 'restart', 'config', 'permissions', 'read-only'],
+        createdAt: '2024-10-23T10:45:00Z',
+        createdBy: 'System Knowledge',
     }
 ];
 
-export const useMockData = () => {
-    const [tickets, setTickets] = useState<Ticket[]>(initialTickets);
-    const [ragEntries, setRagEntries] = useState<RagEntry[]>(initialRagEntries);
+const initialAutoResponses: AutoResponse[] = [
+    {
+        id: 'AR-001',
+        name: 'Password Reset',
+        triggerKeywords: ['password', 'reset', 'forgot', 'lost account'],
+        responseText: 'You can reset your password by visiting this link: [https://revolutionmacro.com/password-reset](https://revolutionmacro.com/password-reset).',
+        createdAt: '2024-07-28T12:00:00Z'
+    },
+    {
+        id: 'AR-002',
+        name: 'Check Server Status',
+        triggerKeywords: ['down', 'offline', 'server status', 'connection issue'],
+        responseText: 'It seems you might be having a connection issue. You can check our server status in real-time on our status page: [https://status.revolutionmacro.com](https://status.revolutionmacro.com).',
+        createdAt: '2024-07-28T12:05:00Z'
+    },
+    {
+        id: 'AR-003',
+        name: 'Check for Updates',
+        triggerKeywords: ['update', 'new version', 'latest'],
+        responseText: 'You can check for the latest version of the macro by clicking the "Check for Updates" button in the "About" tab. It\'s always a good idea to be on the latest version!',
+        createdAt: '2024-10-30T11:00:00Z'
+    }
+];
 
-    return { tickets, setTickets, ragEntries, setRagEntries };
+const initialSlashCommands: SlashCommand[] = [
+    {
+      id: 'CMD-SYS-001',
+      name: 'reload',
+      description: 'Reloads the bot\'s configuration or command handlers. Requires Admin role.',
+      parameters: [
+        { name: 'module', description: 'The specific module to reload (e.g., "commands", "config").', type: 'string', required: false },
+      ],
+      createdAt: '2024-10-31T10:00:00Z',
+    },
+    {
+      id: 'CMD-SYS-002',
+      name: 'stop',
+      description: 'Stops the bot process gracefully. Requires Admin role.',
+      parameters: [],
+      createdAt: '2024-10-31T10:05:00Z',
+    },
+];
+
+export const useMockData = () => {
+    const [forumPosts, setForumPosts] = useState<ForumPost[]>(initialForumPosts);
+    const [ragEntries, setRagEntries] = useState<RagEntry[]>(initialRagEntries);
+    const [autoResponses, setAutoResponses] = useState<AutoResponse[]>(initialAutoResponses);
+    // fix(state): Add state management for slash commands.
+    const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(initialSlashCommands);
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setForumPosts(prevPosts => {
+                const openPosts = prevPosts.filter(p => p.status !== PostStatus.Closed && p.status !== PostStatus.Solved);
+                if (openPosts.length === 0) return prevPosts;
+                
+                const postToUpdate = openPosts[Math.floor(Math.random() * openPosts.length)];
+                const newMessage: Message = {
+                    author: 'User',
+                    content: 'Any updates on this?? I\'m still stuck',
+                    timestamp: new Date().toISOString()
+                };
+
+                return prevPosts.map(p => 
+                    p.id === postToUpdate.id 
+                        ? { ...p, conversation: [...p.conversation, newMessage] } 
+                        : p
+                );
+            });
+        }, 25000); // Add a new message every 25 seconds
+
+        return () => clearInterval(interval);
+    }, []);
+
+    return { forumPosts, setForumPosts, ragEntries, setRagEntries, autoResponses, setAutoResponses, slashCommands, setSlashCommands };
 };
-   

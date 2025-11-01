@@ -1,15 +1,11 @@
-
 import React from 'react';
-// fix(type): Replaced deprecated TicketStatus with PostStatus.
 import { PostStatus } from '../types';
 
-interface StatusBadgeProps {
-  // fix(type): Changed prop type from TicketStatus to PostStatus.
+interface PostStatusBadgeProps {
   status: PostStatus;
 }
 
-const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
-  // fix(logic): Aligned status styles with the available PostStatus enum values.
+const PostStatusBadge: React.FC<PostStatusBadgeProps> = ({ status }) => {
   const statusStyles: Record<PostStatus, string> = {
     [PostStatus.Unsolved]: 'bg-blue-500 text-blue-100',
     [PostStatus.AIResponse]: 'bg-purple-500 text-purple-100',
@@ -27,4 +23,4 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ status }) => {
   );
 };
 
-export default StatusBadge;
+export default PostStatusBadge;

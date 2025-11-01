@@ -1,10 +1,11 @@
-
 import React, { useState } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import DashboardView from './components/views/DashboardView';
-import TicketsView from './components/views/TicketsView';
+import ForumPostsView from './components/views/ForumPostsView';
 import RagManagementView from './components/views/RagManagementView';
+import SlashCommandsView from './components/views/SlashCommandsView';
+import PlaygroundView from './components/views/PlaygroundView';
 import SettingsView from './components/views/SettingsView';
 import { AppView } from './types';
 
@@ -15,10 +16,14 @@ const App: React.FC = () => {
     switch (currentView) {
       case AppView.Dashboard:
         return <DashboardView />;
-      case AppView.Tickets:
-        return <TicketsView />;
+      case AppView.ForumPosts:
+        return <ForumPostsView />;
       case AppView.RAG:
         return <RagManagementView />;
+      case AppView.SlashCommands:
+        return <SlashCommandsView />;
+      case AppView.Playground:
+        return <PlaygroundView />;
       case AppView.Settings:
         return <SettingsView />;
       default:
@@ -40,4 +45,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-   

@@ -1,14 +1,10 @@
-
-
 import React, { useState } from 'react';
-// fix(types): Use ForumPost and PostStatus types instead of deprecated Ticket types.
 import { ForumPost, Message, PostStatus } from '../types';
 import { XMarkIcon, UserIcon, BotIcon, SupportIcon, HashtagIcon, SystemIcon } from './icons';
-import StatusBadge from './StatusBadge';
+import PostStatusBadge from './PostStatusBadge';
 import { geminiService } from '../../services/geminiService';
 
-// refactor(terminology): Changed prop name from "ticket" to "post".
-interface TicketDetailModalProps {
+interface ForumPostDetailModalProps {
   post: ForumPost;
   onClose: () => void;
   onUpdate: (post: ForumPost) => void;
@@ -42,8 +38,7 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   );
 };
 
-// refactor(terminology): Replaced "Ticket" with "Post" in component and variables.
-const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, onUpdate }) => {
+const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClose, onUpdate }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingAction, setProcessingAction] = useState<string | null>(null);
 
@@ -51,9 +46,9 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, on
     onUpdate({ ...post, status: newStatus });
   };
   
-  const handleResolveAndDelete = () => {
-    if (window.confirm('Are you sure you want to close this post and delete the Discord channel? This action cannot be undone.')) {
-        const systemMessage: Message = { author: 'System', content: `Post closed and channel deleted by an admin.`, timestamp: new Date().toISOString()};
+  const handleResolveAndClose = () => {
+    if (window.confirm('Are you sure you want to close this forum post?')) {
+        const systemMessage: Message = { author: 'System', content: `Post marked as closed by an admin.`, timestamp: new Date().toISOString()};
         onUpdate({...post, status: PostStatus.Closed, conversation: [...post.conversation, systemMessage]});
         onClose();
     }
@@ -81,7 +76,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, on
           <div>
             <h2 className="text-xl font-bold text-white">{post.postTitle}</h2>
             <p className="text-sm text-gray-400">
-              <span className="font-semibold">{post.id}</span> from {post.user.username}
+              Post <span className="font-semibold">{post.id}</span> by {post.user.username}
             </p>
           </div>
           <button onClick={onClose} className="p-2 rounded-full hover:bg-gray-700">
@@ -92,7 +87,7 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, on
         <div className="flex-1 flex overflow-hidden">
           {/* Main Content */}
           <main className="flex-1 p-4 overflow-y-auto">
-            <h3 className="text-lg font-semibold text-white mb-2">Conversation</h3>
+            <h3 className="text-lg font-semibold text-white mb-2">Thread</h3>
             <div className="flex flex-col">
               {post.conversation.map((msg, index) => <MessageBubble key={index} message={msg} />)}
             </div>
@@ -111,6 +106,14 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, on
                   <option key={status} value={status}>{status}</option>
                 ))}
               </select>
+            </div>
+             <div>
+                <h4 className="font-semibold text-gray-300 mb-2">Tags</h4>
+                <div className="flex flex-wrap gap-2">
+                    {post.tags.map(tag => (
+                        <span key={tag} className="bg-gray-700 text-xs text-gray-300 font-semibold px-2 py-1 rounded-full">{tag}</span>
+                    ))}
+                </div>
             </div>
             
             <div className="border-t border-gray-700 pt-4">
@@ -139,10 +142,10 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, on
                 </button>
                 {post.status === PostStatus.Solved && (
                      <button 
-                        onClick={handleResolveAndDelete}
+                        onClick={handleResolveAndClose}
                         disabled={isProcessing}
                         className="w-full text-left bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors animate-pulse">
-                        Close & Delete Channel
+                        Close Post
                     </button>
                 )}
               </div>
@@ -163,4 +166,4 @@ const TicketDetailModal: React.FC<TicketDetailModalProps> = ({ post, onClose, on
   );
 };
 
-export default TicketDetailModal;
+export default ForumPostDetailModal;

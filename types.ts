@@ -1,38 +1,39 @@
-
 export enum AppView {
   Dashboard = 'Dashboard',
-  Tickets = 'Tickets',
+  ForumPosts = 'Forum Posts',
   RAG = 'RAG Management',
+  SlashCommands = 'Slash Commands',
+  Playground = 'Playground',
   Settings = 'Settings',
 }
 
-export enum TicketStatus {
-  New = 'New',
-  KeywordMatch = 'Keyword Match',
+export enum PostStatus {
+  Unsolved = 'Unsolved',
   AIResponse = 'AI Response',
   HumanSupport = 'Human Support',
-  Resolved = 'Resolved',
-  Escalated = 'Escalated',
+  Solved = 'Solved',
   Closed = 'Closed',
 }
 
 export interface Message {
-  author: 'User' | 'Bot' | 'Support';
+  author: 'User' | 'Bot' | 'Support' | 'System';
   content: string;
   timestamp: string;
 }
 
-export interface Ticket {
+export interface ForumPost {
   id: string;
   user: {
-    name: string;
-    avatar: string;
+    username: string;
+    id: string;
+    avatarUrl: string;
   };
-  title: string;
-  status: TicketStatus;
-  priority: 'Low' | 'Medium' | 'High';
-  type: 'User Error' | 'Macro Issue' | 'Unclassified';
+  postTitle: string;
+  status: PostStatus;
+  tags: string[];
   createdAt: string;
+  forumChannelId: string;
+  postId: string;
   conversation: Message[];
   logs?: string;
 }
@@ -45,4 +46,27 @@ export interface RagEntry {
   createdAt: string;
   createdBy: string;
 }
-   
+
+export interface AutoResponse {
+  id: string;
+  name: string;
+  triggerKeywords: string[];
+  responseText: string;
+  createdAt: string;
+}
+
+// fix(types): Add SlashCommand and CommandParameter types for the slash commands view.
+export interface CommandParameter {
+  name: string;
+  description: string;
+  type: 'string' | 'number' | 'boolean' | 'user' | 'channel' | 'role';
+  required: boolean;
+}
+
+export interface SlashCommand {
+  id: string;
+  name: string;
+  description: string;
+  parameters: CommandParameter[];
+  createdAt: string;
+}

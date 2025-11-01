@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { AppView } from '../types';
 
@@ -15,4 +14,3 @@ const Header: React.FC<HeaderProps> = ({ currentView }) => {
 };
 
 export default Header;
-   

@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { useMockData } from '../../hooks/useMockData';
-import { TicketStatus } from '../../types';
+import { PostStatus } from '../../types';
 import { ArrowRightIcon, DatabaseIcon, ChevronDownIcon } from '../icons';
 
 const StatCard: React.FC<{ title: string; value: number; color: string }> = ({ title, value, color }) => (
@@ -28,74 +27,47 @@ const FlowArrow: React.FC<{ label?: string }> = ({ label }) => (
 
 
 const DashboardView: React.FC = () => {
-  const { tickets } = useMockData();
+  const { forumPosts } = useMockData();
   const stats = {
-    new: tickets.filter(t => t.status === TicketStatus.New).length,
-    inProgress: tickets.filter(t => [TicketStatus.AIResponse, TicketStatus.HumanSupport, TicketStatus.KeywordMatch].includes(t.status)).length,
-    escalated: tickets.filter(t => t.status === TicketStatus.Escalated).length,
-    resolved: tickets.filter(t => t.status === TicketStatus.Resolved).length,
+    unsolved: forumPosts.filter(p => p.status === PostStatus.Unsolved).length,
+    inProgress: forumPosts.filter(p => [PostStatus.AIResponse, PostStatus.HumanSupport].includes(p.status)).length,
+    solved: forumPosts.filter(p => p.status === PostStatus.Solved).length,
+    closed: forumPosts.filter(p => p.status === PostStatus.Closed).length
   };
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="New Tickets" value={stats.new} color="text-blue-400" />
+        <StatCard title="Unsolved Posts" value={stats.unsolved} color="text-blue-400" />
         <StatCard title="In Progress" value={stats.inProgress} color="text-purple-400" />
-        <StatCard title="Escalated" value={stats.escalated} color="text-red-400" />
-        <StatCard title="Resolved Today" value={stats.resolved} color="text-green-400" />
+        <StatCard title="Solved Today" value={stats.solved} color="text-green-400" />
+        <StatCard title="Total Closed" value={stats.closed} color="text-gray-400" />
       </div>
 
       <div>
         <h2 className="text-2xl font-bold mb-4 text-white">Support Workflow</h2>
         <div className="bg-gray-800/50 p-6 rounded-lg shadow-inner">
-            <div className="flex flex-col items-center">
-                 <FlowStep title="(Start) Support Needed" description="A new support request is created by a user." />
+            <div className="flex flex-col items-center text-center">
+                 <FlowStep title="(Start) User Creates Forum Post" description="A user creates a new post in the designated support forum channel on Discord." />
                  <FlowArrow />
-                 <FlowStep title="Common Issue/Keyword Matching" description="Bot scans for keywords to match with existing manual solutions." />
-                 
-                 <div className="w-full flex justify-center items-start my-4">
-                    <div className="flex flex-col items-center w-1/3">
-                        <FlowArrow label="if solved"/>
-                        <FlowStep title="Close Ticket" description="The issue is resolved."/>
-                    </div>
-                    <div className="flex flex-col items-center w-1/3 mt-6">
-                       <p className="text-sm italic text-gray-400 mb-1">unsolved</p>
-                       <ArrowRightIcon className="w-6 h-6 text-gray-500"/>
-                    </div>
-                    <div className="flex flex-col items-center w-1/3">
-                        <div className="flex items-center text-gray-400">
-                            <DatabaseIcon className="w-10 h-10 mr-2" />
-                            <span>Well-made Guides & Fixes</span>
-                        </div>
-                    </div>
-                 </div>
-
-                 <FlowStep title="Use AI Response" description="Gemini generates a response using the RAG database of guides and fixes." />
+                 <FlowStep title="Auto-Response & Keyword Matching" description="Bot scans the new post for keywords to provide an instant, pre-written answer for common issues." />
+                 <FlowArrow label="if unsolved" />
+                 <FlowStep title="AI Response Generation (RAG)" description="Gemini uses the knowledge base to generate a detailed, context-aware answer to the user's post." />
+                 <FlowArrow label="if unsolved" />
+                 <FlowStep title="Human Support Escalation" description="The post is flagged for a human agent to step in and provide assistance directly in the forum thread." />
                  <FlowArrow />
-                
-                 <div className="w-full flex justify-center items-start my-4">
-                    <div className="flex flex-col items-center w-1/3">
-                        <FlowArrow label="if solved"/>
-                        <FlowStep title="Close Ticket" description="The issue is resolved."/>
-                    </div>
-                    <div className="flex flex-col items-center w-1/3 px-4">
-                        <FlowArrow label="unsolved"/>
-                        <FlowStep title="Human Support" description="Ticket is escalated to a human agent. *Doesn't include dev responses for macro bugs."/>
-                        <FlowArrow />
-                        <FlowStep title="AI Analyze Solution" description="After human resolution, Gemini analyzes and summarizes the solution."/>
-                        <FlowArrow />
-                        <FlowStep title="Human Editor & Indexer" description="A human confirms the AI summary and adds it to the RAG database."/>
-                    </div>
-                     <div className="flex flex-col items-center w-1/3">
-                       <FlowArrow label="if still unsolved"/>
-                       <FlowStep title="Escalate" description="Tell Liam or escalate to developers."/>
-                    </div>
+                 <div className="flex items-center text-gray-400 mt-4">
+                     <p className="mr-4">Human resolves the issue...</p>
+                     <ArrowRightIcon className="w-6 h-6" />
                  </div>
-
+                 <FlowArrow />
+                 <FlowStep title="AI Summarizes Solution" description="After human resolution, Gemini analyzes the conversation and creates a concise summary of the fix." />
+                  <FlowArrow />
+                 <FlowStep title="Human Edits & Adds to Knowledge Base" description="An admin reviews the AI summary, refines it, and adds it to the RAG database for future use."/>
                  <div className="flex items-center text-gray-400 mt-4">
                      <ArrowRightIcon className="w-6 h-6 rotate-90" />
                      <DatabaseIcon className="w-12 h-12 mx-4" />
-                     <span className="font-semibold">RAG Database</span>
+                     <span className="font-semibold">RAG Database Grows Smarter</span>
                  </div>
             </div>
         </div>
@@ -105,4 +77,3 @@ const DashboardView: React.FC = () => {
 };
 
 export default DashboardView;
-   

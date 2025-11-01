@@ -1,7 +1,6 @@
-
 import React from 'react';
 import { AppView } from '../types';
-import { BotIcon, DashboardIcon, TicketIcon, DatabaseIcon, CogIcon } from './icons';
+import { BotIcon, DashboardIcon, ForumIcon, DatabaseIcon, CogIcon, BeakerIcon, TerminalIcon } from './icons';
 
 interface SidebarProps {
   currentView: AppView;
@@ -32,8 +31,10 @@ const NavItem: React.FC<{
 const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView }) => {
   const navItems = [
     { view: AppView.Dashboard, label: 'Dashboard', icon: <DashboardIcon className="w-6 h-6" /> },
-    { view: AppView.Tickets, label: 'Tickets', icon: <TicketIcon className="w-6 h-6" /> },
+    { view: AppView.ForumPosts, label: 'Forum Posts', icon: <ForumIcon className="w-6 h-6" /> },
     { view: AppView.RAG, label: 'RAG Management', icon: <DatabaseIcon className="w-6 h-6" /> },
+    { view: AppView.SlashCommands, label: 'Slash Commands', icon: <TerminalIcon className="w-6 h-6" /> },
+    { view: AppView.Playground, label: 'Playground', icon: <BeakerIcon className="w-6 h-6" /> },
     { view: AppView.Settings, label: 'Settings', icon: <CogIcon className="w-6 h-6" /> },
   ];
 
@@ -61,11 +62,10 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView }) => {
       </div>
       <div className="text-center text-xs text-gray-500">
         <p>&copy; 2024 Support Bot Inc.</p>
-        <p>Version 1.0.0</p>
+        <p>Version 1.1.0</p>
       </div>
     </aside>
   );
 };
 
 export default Sidebar;
-   
