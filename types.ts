@@ -2,16 +2,15 @@ export enum AppView {
   Dashboard = 'Dashboard',
   ForumPosts = 'Forum Posts',
   RAG = 'RAG Management',
-  SlashCommands = 'Slash Commands',
   Playground = 'Playground',
   Settings = 'Settings',
 }
 
 export enum PostStatus {
-  Unsolved = 'Unsolved',
+  New = 'New',
   AIResponse = 'AI Response',
   HumanSupport = 'Human Support',
-  Solved = 'Solved',
+  Resolved = 'Resolved',
   Closed = 'Closed',
 }
 
@@ -52,21 +51,5 @@ export interface AutoResponse {
   name: string;
   triggerKeywords: string[];
   responseText: string;
-  createdAt: string;
-}
-
-// fix(types): Add SlashCommand and CommandParameter types for the slash commands view.
-export interface CommandParameter {
-  name: string;
-  description: string;
-  type: 'string' | 'number' | 'boolean' | 'user' | 'channel' | 'role';
-  required: boolean;
-}
-
-export interface SlashCommand {
-  id: string;
-  name: string;
-  description: string;
-  parameters: CommandParameter[];
   createdAt: string;
 }

@@ -1,11 +1,13 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Message, RagEntry, AutoResponse } from '../types';
 
+// This is a MOCK service. In a real application, you would implement actual API calls.
 // The API key is assumed to be set in the environment variables.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+const MOCK_LATENCY = 1500;
 
 export const geminiService = {
-  // This is local logic, no API call needed.
   getAutoResponse: (query: string, autoResponses: AutoResponse[]): AutoResponse | null => {
     const queryWords = new Set(query.toLowerCase().split(/\s+/).filter(w => w.length > 2));
     for (const response of autoResponses) {
@@ -19,102 +21,33 @@ export const geminiService = {
   },
 
   summarizeConversation: async (conversation: Message[]): Promise<string> => {
-    console.log("Calling Gemini API for summarization...");
-    try {
-        const conversationText = conversation.map(m => `${m.author}: ${m.content}`).join('\n');
-        const prompt = `Summarize the following support conversation into a concise paragraph that explains the user's problem and the final solution. This will be used for a knowledge base article. \n\nConversation:\n${conversationText}`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-
-        return response.text;
-    } catch (error) {
-        console.error("Error summarizing conversation:", error);
-        return "There was an error summarizing the conversation. Please try again.";
-    }
+    console.log("Simulating Gemini API call for summarization...");
+    await new Promise(resolve => setTimeout(resolve, MOCK_LATENCY));
+    const userQuery = conversation.find(m => m.author === 'User')?.content || "the user's issue";
+    return `The user is experiencing an issue related to "${userQuery.substring(0, 30)}...". They have tried basic troubleshooting steps. The core problem seems to be a configuration error in their settings file.`;
   },
 
   analyzeAndCreateRagEntry: async (conversation: Message[]): Promise<Omit<RagEntry, 'id' | 'createdAt' | 'createdBy'>> => {
-    console.log("Calling Gemini API for RAG entry creation...");
-    try {
-        const conversationText = conversation.map(m => `${m.author}: ${m.content}`).join('\n');
-        const prompt = `Analyze the following support conversation and generate a structured knowledge base entry from it.
-        - The "title" should be a clear, concise summary of the problem (e.g., "Fix for '...' Error").
-        - The "content" should be a detailed explanation of the solution.
-        - The "keywords" should be an array of relevant search terms.
-
-        Conversation:\n${conversationText}`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        title: { type: Type.STRING },
-                        content: { type: Type.STRING },
-                        keywords: {
-                            type: Type.ARRAY,
-                            items: { type: Type.STRING }
-                        }
-                    },
-                    required: ['title', 'content', 'keywords'],
-                }
-            }
-        });
-        
-        const jsonString = response.text.trim();
-        return JSON.parse(jsonString);
-
-    } catch (error) {
-        console.error("Error creating RAG entry:", error);
-        // Return a default error structure
-        return {
-            title: "Error Generating Entry",
-            content: "The AI failed to generate a RAG entry from this conversation.",
-            keywords: ["error"],
-        };
-    }
+    console.log("Simulating Gemini API call for RAG entry creation...");
+    await new Promise(resolve => setTimeout(resolve, MOCK_LATENCY + 500));
+    const userQuery = conversation.find(m => m.author === 'User')?.content || "a specific issue";
+     return {
+      title: `Fix for "${userQuery.substring(0, 20)}..." Error`,
+      content: `When a user encounters the error "${userQuery.substring(0, 30)}...", the solution is to navigate to the settings file and ensure the 'enable_beta_features' flag is set to false. Then, restart the application. This resolves the conflict.`,
+      keywords: ['error', 'fix', 'settings', 'configuration', 'crash'],
+    };
   },
   
   classifyIssue: async (firstMessage: string): Promise<'User Error' | 'Macro Issue'> => {
-    console.log("Calling Gemini API for issue classification...");
-    try {
-        const prompt = `Classify the following user issue as either "User Error" or "Macro Issue". Only return one of these two options as a JSON object with a single "classification" key. Issue: "${firstMessage}"`;
-        
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        classification: {
-                            type: Type.STRING,
-                            enum: ['User Error', 'Macro Issue']
-                        }
-                    },
-                    required: ['classification']
-                }
-            }
-        });
-        
-        const jsonString = response.text.trim();
-        const parsed = JSON.parse(jsonString);
-        return parsed.classification;
-    } catch (error) {
-        console.error("Error classifying issue:", error);
-        return 'User Error'; // Default fallback
+    console.log("Simulating Gemini API call for issue classification...");
+    await new Promise(resolve => setTimeout(resolve, MOCK_LATENCY - 1000));
+    if (firstMessage.toLowerCase().includes('crash') || firstMessage.toLowerCase().includes('bug') || firstMessage.toLowerCase().includes('broken')) {
+      return 'Macro Issue';
     }
+    return 'User Error';
   },
 
-  // This is local logic for scoring, no API call needed.
-  findRelevantRagEntries: (query: string, allEntries: RagEntry[]): Array<{ entry: RagEntry, score: number }> => {
+  findRelevantRagEntries: (query: string, allEntries: RagEntry[]): RagEntry[] => {
     const queryWords = new Set(query.toLowerCase().split(/\s+/).filter(w => w.length > 2));
     const scoredEntries = allEntries.map(entry => {
         let score = 0;
@@ -130,28 +63,16 @@ export const geminiService = {
         return { entry, score };
     });
 
-    return scoredEntries.filter(e => e.score > 0).sort((a, b) => b.score - a.score);
+    return scoredEntries.filter(e => e.score > 0).sort((a, b) => b.score - a.score).map(e => e.entry).slice(0, 2);
   },
 
   generateBotResponse: async (query: string, contextEntries: RagEntry[]): Promise<string> => {
-    console.log("Calling Gemini API for bot response...");
-    try {
-        const contextText = contextEntries.map(entry => `Title: ${entry.title}\nContent: ${entry.content}`).join('\n\n');
-        const prompt = `You are an expert support bot. A user has the following question: "${query}".
-        
-        Using the following context from the knowledge base, provide a helpful and friendly answer. If the context doesn't seem to perfectly match, you can say "Based on our documentation for '${contextEntries[0].title}', here's what I found:" before giving the answer.
-
-        Context:\n${contextText}`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-
-        return response.text;
-    } catch (error) {
-        console.error("Error generating bot response:", error);
-        return "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
+    console.log("Simulating Gemini API call for bot response...");
+    await new Promise(resolve => setTimeout(resolve, MOCK_LATENCY));
+    if (contextEntries.length > 0) {
+      return `Based on our documentation for "${contextEntries[0].title}", here's what I found: ${contextEntries[0].content}. Does this solve your issue?`;
+    } else {
+      return "I'm sorry, I couldn't find any specific information about that in my knowledge base. Could you please provide more details? I can escalate this to a human agent if you'd like.";
     }
   },
 };

@@ -1,5 +1,5 @@
-import React from 'react';
-import { useMockData } from '../../hooks/useMockData';
+import React, { useContext } from 'react';
+import { DataContext } from '../../context/DataContext';
 import { PostStatus } from '../../types';
 import { ArrowRightIcon, DatabaseIcon, ChevronDownIcon } from '../icons';
 
@@ -27,20 +27,20 @@ const FlowArrow: React.FC<{ label?: string }> = ({ label }) => (
 
 
 const DashboardView: React.FC = () => {
-  const { forumPosts } = useMockData();
+  const { forumPosts } = useContext(DataContext);
   const stats = {
-    unsolved: forumPosts.filter(p => p.status === PostStatus.Unsolved).length,
+    new: forumPosts.filter(p => p.status === PostStatus.New).length,
     inProgress: forumPosts.filter(p => [PostStatus.AIResponse, PostStatus.HumanSupport].includes(p.status)).length,
-    solved: forumPosts.filter(p => p.status === PostStatus.Solved).length,
+    resolved: forumPosts.filter(p => p.status === PostStatus.Resolved).length,
     closed: forumPosts.filter(p => p.status === PostStatus.Closed).length
   };
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <StatCard title="Unsolved Posts" value={stats.unsolved} color="text-blue-400" />
+        <StatCard title="New Posts" value={stats.new} color="text-blue-400" />
         <StatCard title="In Progress" value={stats.inProgress} color="text-purple-400" />
-        <StatCard title="Solved Today" value={stats.solved} color="text-green-400" />
+        <StatCard title="Resolved Today" value={stats.resolved} color="text-green-400" />
         <StatCard title="Total Closed" value={stats.closed} color="text-gray-400" />
       </div>
 

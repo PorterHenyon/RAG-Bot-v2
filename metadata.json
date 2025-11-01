@@ -1,5 +1,5 @@
 {
-  "name": "Copy of Discord RAG Bot Dashboard",
-  "description": "A web dashboard to manage and monitor an AI-powered Discord support bot. Configure system prompts, manage the RAG knowledge base, and review support forum posts.",
+  "name": "Discord RAG Bot Dashboard",
+  "description": "A web dashboard to manage and monitor an AI-powered Discord support bot. Configure system prompts, manage the RAG knowledge base, and review support tickets.",
   "requestFramePermissions": []
 }

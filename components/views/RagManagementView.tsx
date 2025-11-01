@@ -1,17 +1,15 @@
-import React, { useState } from 'react';
-import { useMockData } from '../../hooks/useMockData';
+import React, { useState, useContext } from 'react';
+import { DataContext } from '../../context/DataContext';
 import { RagEntry, AutoResponse } from '../../types';
-import { SparklesIcon, DatabaseIcon, TrashIcon } from '../icons';
+import { SparklesIcon, DatabaseIcon, XMarkIcon } from '../icons';
 
-const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; }> = ({ entry, onDelete }) => (
-  <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
-    <div className="flex justify-between items-start">
-        <h3 className="text-lg font-bold text-primary-400 pr-2 flex-1">{entry.title}</h3>
-        <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors flex-shrink-0">
-            <TrashIcon className="w-5 h-5" />
-        </button>
-    </div>
-    <p className="text-gray-300 mt-2 text-sm flex-grow">{entry.content}</p>
+const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: (id: string) => void; }> = ({ entry, onDelete }) => (
+  <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 relative">
+    <button onClick={() => onDelete(entry.id)} className="absolute top-2 right-2 p-1 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded-full transition-colors">
+        <XMarkIcon className="w-5 h-5" />
+    </button>
+    <h3 className="text-lg font-bold text-primary-400 pr-6">{entry.title}</h3>
+    <p className="text-gray-300 mt-2 text-sm">{entry.content}</p>
     <div className="mt-4">
       {entry.keywords.map(kw => (
         <span key={kw} className="inline-block bg-gray-700 rounded-full px-3 py-1 text-xs font-semibold text-gray-300 mr-2 mb-2">
@@ -19,21 +17,19 @@ const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; }> = ({ en
         </span>
       ))}
     </div>
-    <div className="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-700/50">
+    <div className="text-xs text-gray-500 mt-2">
       <span>Created by {entry.createdBy} on {new Date(entry.createdAt).toLocaleDateString()}</span>
     </div>
   </div>
 );
 
-const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void; }> = ({ response, onDelete }) => (
-    <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
-         <div className="flex justify-between items-start">
-            <h3 className="text-lg font-bold text-primary-400 pr-2 flex-1">{response.name}</h3>
-            <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors flex-shrink-0">
-                <TrashIcon className="w-5 h-5" />
-            </button>
-        </div>
-        <p className="text-gray-300 mt-2 text-sm italic flex-grow">"{response.responseText}"</p>
+const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: (id: string) => void; }> = ({ response, onDelete }) => (
+    <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 relative">
+        <button onClick={() => onDelete(response.id)} className="absolute top-2 right-2 p-1 text-gray-500 hover:text-red-400 hover:bg-gray-700 rounded-full transition-colors">
+            <XMarkIcon className="w-5 h-5" />
+        </button>
+        <h3 className="text-lg font-bold text-primary-400 pr-6">{response.name}</h3>
+        <p className="text-gray-300 mt-2 text-sm italic">"{response.responseText}"</p>
         <div className="mt-4">
             <p className="text-xs text-gray-400 mb-2 font-semibold">TRIGGERS:</p>
             {response.triggerKeywords.map(kw => (
@@ -47,7 +43,7 @@ const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void;
 
 
 const RagManagementView: React.FC = () => {
-    const { ragEntries, setRagEntries, autoResponses, setAutoResponses } = useMockData();
+    const { ragEntries, setRagEntries, autoResponses, setAutoResponses } = useContext(DataContext);
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState<'RAG' | 'Auto'>('RAG');
     
@@ -79,7 +75,7 @@ const RagManagementView: React.FC = () => {
             triggerKeywords: newAutoResponse.triggerKeywords.split(',').map(k => k.trim()).filter(Boolean),
             createdAt: new Date().toISOString()
         };
-        setAutoResponses(prev => [...prev, newEntry]);
+        setAutoResponses(prev => [newEntry, ...prev]);
         setNewAutoResponse({ name: '', responseText: '', triggerKeywords: '' });
         setShowNewAutoForm(false);
     };
@@ -98,16 +94,16 @@ const RagManagementView: React.FC = () => {
         setNewRagEntry({ title: '', content: '', keywords: '' });
         setShowNewRagForm(false);
     };
-
+    
     const handleDeleteRagEntry = (id: string) => {
-        if (window.confirm('Are you sure you want to delete this RAG entry? This cannot be undone.')) {
+        if (window.confirm('Are you sure you want to delete this knowledge base entry?')) {
             setRagEntries(prev => prev.filter(entry => entry.id !== id));
         }
     };
-
+    
     const handleDeleteAutoResponse = (id: string) => {
         if (window.confirm('Are you sure you want to delete this auto-response?')) {
-            setAutoResponses(prev => prev.filter(response => response.id !== id));
+            setAutoResponses(prev => prev.filter(resp => resp.id !== id));
         }
     };
 
@@ -165,11 +161,11 @@ const RagManagementView: React.FC = () => {
 
             {activeTab === 'RAG' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} />)}
+                    {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={handleDeleteRagEntry} />)}
                 </div>
             ) : (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredAutoResponses.map(resp => <AutoResponseCard key={resp.id} response={resp} onDelete={() => handleDeleteAutoResponse(resp.id)} />)}
+                    {filteredAutoResponses.map(resp => <AutoResponseCard key={resp.id} response={resp} onDelete={handleDeleteAutoResponse} />)}
                 </div>
             )}
         </div>

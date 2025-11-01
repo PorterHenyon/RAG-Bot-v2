@@ -1,6 +1,6 @@
 import React from 'react';
 import { AppView } from '../types';
-import { BotIcon, DashboardIcon, ForumIcon, DatabaseIcon, CogIcon, BeakerIcon, TerminalIcon } from './icons';
+import { BotIcon, DashboardIcon, ForumIcon, DatabaseIcon, CogIcon, BeakerIcon } from './icons';
 
 interface SidebarProps {
   currentView: AppView;
@@ -33,7 +33,6 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView }) => {
     { view: AppView.Dashboard, label: 'Dashboard', icon: <DashboardIcon className="w-6 h-6" /> },
     { view: AppView.ForumPosts, label: 'Forum Posts', icon: <ForumIcon className="w-6 h-6" /> },
     { view: AppView.RAG, label: 'RAG Management', icon: <DatabaseIcon className="w-6 h-6" /> },
-    { view: AppView.SlashCommands, label: 'Slash Commands', icon: <TerminalIcon className="w-6 h-6" /> },
     { view: AppView.Playground, label: 'Playground', icon: <BeakerIcon className="w-6 h-6" /> },
     { view: AppView.Settings, label: 'Settings', icon: <CogIcon className="w-6 h-6" /> },
   ];

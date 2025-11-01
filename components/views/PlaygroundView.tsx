@@ -1,6 +1,6 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import { Message, RagEntry, AutoResponse } from '../../types';
-import { useMockData } from '../../hooks/useMockData';
+import { DataContext } from '../../context/DataContext';
 import { geminiService } from '../../services/geminiService';
 import { UserIcon, BotIcon, DatabaseIcon, SparklesIcon } from '../icons';
 
@@ -8,7 +8,6 @@ interface BotContext {
     classification?: string;
     relevantDocs?: RagEntry[];
     autoResponse?: AutoResponse | null;
-    escalated?: boolean;
 }
 
 const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
@@ -26,7 +25,7 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
 };
 
 const PlaygroundView: React.FC = () => {
-    const { ragEntries, autoResponses } = useMockData();
+    const { ragEntries, autoResponses } = useContext(DataContext);
     const [messages, setMessages] = useState<Message[]>([
         { author: 'Bot', content: "Welcome to the Playground! Ask me a question to test my response.", timestamp: new Date().toISOString() }
     ]);
@@ -68,26 +67,10 @@ const PlaygroundView: React.FC = () => {
         } else {
             // Continue with Gemini AI flow
             const classification = await geminiService.classifyIssue(userMessage.content);
-            
-            // Step 2: Find RAG entries and check their relevance score
-            const scoredDocs = geminiService.findRelevantRagEntries(userMessage.content, ragEntries);
-            const SCORE_THRESHOLD = 5; // A title match gives 5 points. This is a good minimum confidence.
-            const relevantDocs = scoredDocs
-                .filter(d => d.score >= SCORE_THRESHOLD)
-                .map(d => d.entry);
-            
-            // For the UI, let's show the top 2 documents that were considered, regardless of score.
-            const consideredDocsForUI = scoredDocs.slice(0, 2).map(d => d.entry);
-            
-            if (relevantDocs.length > 0) {
-                // We have a confident match, generate a response
-                setBotContext({ classification, relevantDocs: consideredDocsForUI });
-                botResponseContent = await geminiService.generateBotResponse(userMessage.content, relevantDocs);
-            } else {
-                // No confident match, escalate to human
-                setBotContext({ classification, relevantDocs: consideredDocsForUI, escalated: true });
-                botResponseContent = "I'm sorry, I couldn't find a confident answer in my knowledge base for your issue. I've flagged this for a human support agent to review. They will get back to you shortly.";
-            }
+            // FIX: Cannot find name 'user_message'. Did you mean 'userMessage'?
+            const relevantDocs = geminiService.findRelevantRagEntries(userMessage.content, ragEntries);
+            setBotContext({ classification, relevantDocs });
+            botResponseContent = await geminiService.generateBotResponse(userMessage.content, relevantDocs);
         }
 
         const botMessage: Message = {
@@ -167,12 +150,6 @@ const PlaygroundView: React.FC = () => {
                                     </div>
                                 ) : (
                                     <p className="text-sm text-gray-400">No relevant documents found in the RAG database.</p>
-                                )}
-                                {botContext.escalated && (
-                                    <div className="mt-4 p-3 border-t border-dashed border-yellow-500/50 bg-yellow-500/10 rounded-b-lg">
-                                        <p className="text-sm font-semibold text-yellow-300">Confidence Low</p>
-                                        <p className="text-xs text-yellow-400">No high-confidence documents found. Escalating to human support.</p>
-                                    </div>
                                 )}
                             </div>
                         </>
