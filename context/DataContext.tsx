@@ -109,7 +109,7 @@ const initialRagEntries: RagEntry[] = [
     {
         id: 'RAG-008',
         title: 'Script Settings Not Saving After Restart',
-        content: "If your settings reset every time you restart the macro, it's a file permissions issue. The macro needs to be able to write to its own folder. Navigate to your Revolution Macro installation folder, right-click it, select 'Properties', go to the 'Security' tab, and ensure your user account has 'Full control' permissions. Running the macro as an administrator can also solve this.",
+        content: `If your settings reset every time you restart the macro, it's a file permissions issue. The macro needs to be able to write to its own folder. Navigate to your Revolution Macro installation folder, right-click it, select 'Properties', go to the 'Security' tab, and ensure your user account has 'Full control' permissions. Running the macro as an administrator can also solve this.`,
         keywords: ['saving', 'settings', 'reset', 'restart', 'config', 'permissions', 'read-only'],
         createdAt: '2024-10-23T10:45:00Z',
         createdBy: 'System Knowledge',
@@ -135,7 +135,7 @@ const initialAutoResponses: AutoResponse[] = [
         id: 'AR-003',
         name: 'Check for Updates',
         triggerKeywords: ['update', 'new version', 'latest'],
-        responseText: 'You can check for the latest version of the macro by clicking the "Check for Updates" button in the "About" tab. It\'s always a good idea to be on the latest version!',
+        responseText: `You can check for the latest version of the macro by clicking the "Check for Updates" button in the "About" tab. It's always a good idea to be on the latest version!`,
         createdAt: '2024-10-30T11:00:00Z'
     }
 ];
@@ -155,7 +155,7 @@ export const DataContext = createContext<IDataContext>({} as IDataContext);
 
 export const DataProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     const [forumPosts, setForumPosts] = useState<ForumPost[]>(initialForumPosts);
-    const [ragEntries, setRagEntries] = useState<RagEntry[]>(initialRagEntries);
+    const [ragEntries, setRagEntries] = = useState<RagEntry[]>(initialRagEntries);
     const [autoResponses, setAutoResponses] = useState<AutoResponse[]>(initialAutoResponses);
 
     return (
