@@ -28,7 +28,7 @@ export const geminiService = {
             contents: prompt,
         });
 
-        return response.text ?? "There was an error summarizing the conversation. Please try again.";
+        return response.text;
     } catch (error) {
         console.error("Error summarizing conversation:", error);
         return "There was an error summarizing the conversation. Please try again.";
@@ -151,7 +151,7 @@ export const geminiService = {
             contents: prompt,
         });
 
-        return response.text ?? "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
+        return response.text;
     } catch (error) {
         console.error("Error generating bot response:", error);
         return "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
