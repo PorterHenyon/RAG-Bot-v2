@@ -2,7 +2,6 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { Message, RagEntry, AutoResponse } from '../types';
 
 // The API key is assumed to be set in the environment variables.
-// fix: Use `process.env.API_KEY` for the API key as per the guidelines.
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const geminiService = {
@@ -67,7 +66,7 @@ export const geminiService = {
             }
         });
         
-        const jsonString = response.text?.trim();
+        const jsonString = response.text.trim();
         if (!jsonString) {
             throw new Error("API returned an empty response for RAG entry creation.");
         }
@@ -107,7 +106,7 @@ export const geminiService = {
             }
         });
         
-        const jsonString = response.text?.trim();
+        const jsonString = response.text.trim();
         if (!jsonString) return 'User Error'; // Default fallback
         const parsed = JSON.parse(jsonString);
         return parsed.classification;

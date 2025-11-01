@@ -50,8 +50,12 @@ const SlashCommandsView: React.FC = () => {
     }, [slashCommands, searchTerm]);
 
     const handleParamChange = (index: number, field: keyof CommandParameter, value: string | boolean) => {
-        const updatedParams = [...newCommand.parameters];
-        (updatedParams[index] as any)[field] = value;
+        const updatedParams = newCommand.parameters.map((p, i) => {
+            if (i === index) {
+                return { ...p, [field]: value };
+            }
+            return p;
+        });
         setNewCommand({ ...newCommand, parameters: updatedParams });
     };
     
