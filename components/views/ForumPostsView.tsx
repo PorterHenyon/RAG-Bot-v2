@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useContext } from 'react';
-import { DataContext } from '../../context/DataContext';
+import React, { useState, useMemo } from 'react';
+import { useMockData } from '../../hooks/useMockData';
 import { ForumPost, PostStatus } from '../../types';
 import PostStatusBadge from '../PostStatusBadge';
 import ForumPostDetailModal from '../ForumPostDetailModal';
@@ -29,7 +29,7 @@ const ForumPostCard: React.FC<{ post: ForumPost; onClick: () => void }> = ({ pos
 
 
 const ForumPostsView: React.FC = () => {
-  const { forumPosts, setForumPosts } = useContext(DataContext);
+  const { forumPosts, setForumPosts } = useMockData();
   const [selectedPost, setSelectedPost] = useState<ForumPost | null>(null);
   const [filter, setFilter] = useState<string>('All');
   const [searchTerm, setSearchTerm] = useState<string>('');
@@ -46,8 +46,7 @@ const ForumPostsView: React.FC = () => {
         post.user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
         post.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
         post.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
-      )
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      );
   }, [forumPosts, filter, searchTerm]);
 
   const handleCloseModal = () => {

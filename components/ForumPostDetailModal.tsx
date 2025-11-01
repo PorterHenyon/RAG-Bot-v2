@@ -55,8 +55,8 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
   };
 
   const handleSummarize = async () => {
-    if (post.status !== PostStatus.Resolved) {
-        alert("Can only summarize resolved posts.");
+    if (post.status !== PostStatus.Solved) {
+        alert("Can only summarize solved posts.");
         return;
     }
     setIsProcessing(true);
@@ -136,11 +136,11 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
               <div className="flex flex-col gap-2">
                 <button 
                     onClick={handleSummarize}
-                    disabled={isProcessing || post.status !== PostStatus.Resolved}
+                    disabled={isProcessing || post.status !== PostStatus.Solved}
                     className="w-full text-left bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                     {isProcessing && processingAction === 'Summarizing' ? 'Summarizing...' : 'Summarize for RAG'}
                 </button>
-                {post.status === PostStatus.Resolved && (
+                {post.status === PostStatus.Solved && (
                      <button 
                         onClick={handleResolveAndClose}
                         disabled={isProcessing}
