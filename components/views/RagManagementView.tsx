@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useMemo, useContext } from 'react';
 import { DataContext } from '../../context/DataContext';
 import { RagEntry, AutoResponse } from '../../types';
 import { SparklesIcon, DatabaseIcon, XMarkIcon } from '../icons';
@@ -53,8 +53,7 @@ const RagManagementView: React.FC = () => {
     const [showNewRagForm, setShowNewRagForm] = useState(false);
     const [newRagEntry, setNewRagEntry] = useState({ title: '', content: '', keywords: '' });
     
-    // Simplified filtering logic directly in the component render
-    const getFilteredRagEntries = () => {
+    const filteredRagEntries = useMemo(() => {
         if (!searchTerm) return ragEntries;
         const lowercasedFilter = searchTerm.toLowerCase();
         return ragEntries.filter(entry => 
@@ -62,9 +61,9 @@ const RagManagementView: React.FC = () => {
             entry.content.toLowerCase().includes(lowercasedFilter) ||
             entry.keywords.some(kw => kw.toLowerCase().includes(lowercasedFilter))
         );
-    };
+    }, [ragEntries, searchTerm]);
     
-    const getFilteredAutoResponses = () => {
+    const filteredAutoResponses = useMemo(() => {
         if (!searchTerm) return autoResponses;
         const lowercasedFilter = searchTerm.toLowerCase();
         return autoResponses.filter(resp => 
@@ -72,7 +71,7 @@ const RagManagementView: React.FC = () => {
             resp.responseText.toLowerCase().includes(lowercasedFilter) ||
             resp.triggerKeywords.some(kw => kw.toLowerCase().includes(lowercasedFilter))
         );
-    };
+    }, [autoResponses, searchTerm]);
 
     const handleSaveNewAutoResponse = (e: React.FormEvent) => {
         e.preventDefault();
@@ -114,9 +113,6 @@ const RagManagementView: React.FC = () => {
             setAutoResponses(prevResponses => prevResponses.filter(resp => resp.id !== id));
         }
     };
-    
-    const filteredRagEntries = getFilteredRagEntries();
-    const filteredAutoResponses = getFilteredAutoResponses();
 
     return (
         <div className="space-y-6">
