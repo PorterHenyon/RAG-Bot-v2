@@ -1,4 +1,4 @@
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useMemo } from 'react';
 import { DataContext } from '../../context/DataContext';
 import { RagEntry, AutoResponse } from '../../types';
 import { SparklesIcon, DatabaseIcon, XMarkIcon } from '../icons';
@@ -54,17 +54,17 @@ const RagManagementView: React.FC = () => {
     const [newRagEntry, setNewRagEntry] = useState({ title: '', content: '', keywords: '' });
 
 
-    const filteredRagEntries = ragEntries.filter(entry => 
+    const filteredRagEntries = useMemo(() => ragEntries.filter(entry => 
         entry.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         entry.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
         entry.keywords.some(kw => kw.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    ), [ragEntries, searchTerm]);
     
-    const filteredAutoResponses = autoResponses.filter(resp => 
+    const filteredAutoResponses = useMemo(() => autoResponses.filter(resp => 
         resp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         resp.responseText.toLowerCase().includes(searchTerm.toLowerCase()) ||
         resp.triggerKeywords.some(kw => kw.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
+    ), [autoResponses, searchTerm]);
 
     const handleSaveNewAutoResponse = (e: React.FormEvent) => {
         e.preventDefault();
