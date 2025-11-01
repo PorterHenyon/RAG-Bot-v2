@@ -1,4 +1,4 @@
-import React, { useState, useContext, useMemo } from 'react';
+import React, { useState, useContext } from 'react';
 import { DataContext } from '../../context/DataContext';
 import { RagEntry, AutoResponse } from '../../types';
 import { SparklesIcon, DatabaseIcon, XMarkIcon } from '../icons';
@@ -52,19 +52,27 @@ const RagManagementView: React.FC = () => {
 
     const [showNewRagForm, setShowNewRagForm] = useState(false);
     const [newRagEntry, setNewRagEntry] = useState({ title: '', content: '', keywords: '' });
-
-
-    const filteredRagEntries = useMemo(() => ragEntries.filter(entry => 
-        entry.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        entry.content.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        entry.keywords.some(kw => kw.toLowerCase().includes(searchTerm.toLowerCase()))
-    ), [ragEntries, searchTerm]);
     
-    const filteredAutoResponses = useMemo(() => autoResponses.filter(resp => 
-        resp.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        resp.responseText.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        resp.triggerKeywords.some(kw => kw.toLowerCase().includes(searchTerm.toLowerCase()))
-    ), [autoResponses, searchTerm]);
+    // Simplified filtering logic directly in the component render
+    const getFilteredRagEntries = () => {
+        if (!searchTerm) return ragEntries;
+        const lowercasedFilter = searchTerm.toLowerCase();
+        return ragEntries.filter(entry => 
+            entry.title.toLowerCase().includes(lowercasedFilter) ||
+            entry.content.toLowerCase().includes(lowercasedFilter) ||
+            entry.keywords.some(kw => kw.toLowerCase().includes(lowercasedFilter))
+        );
+    };
+    
+    const getFilteredAutoResponses = () => {
+        if (!searchTerm) return autoResponses;
+        const lowercasedFilter = searchTerm.toLowerCase();
+        return autoResponses.filter(resp => 
+            resp.name.toLowerCase().includes(lowercasedFilter) ||
+            resp.responseText.toLowerCase().includes(lowercasedFilter) ||
+            resp.triggerKeywords.some(kw => kw.toLowerCase().includes(lowercasedFilter))
+        );
+    };
 
     const handleSaveNewAutoResponse = (e: React.FormEvent) => {
         e.preventDefault();
@@ -97,15 +105,18 @@ const RagManagementView: React.FC = () => {
     
     const handleDeleteRagEntry = (id: string) => {
         if (window.confirm('Are you sure you want to delete this knowledge base entry?')) {
-            setRagEntries(prev => prev.filter(entry => entry.id !== id));
+            setRagEntries(prevEntries => prevEntries.filter(entry => entry.id !== id));
         }
     };
     
     const handleDeleteAutoResponse = (id: string) => {
         if (window.confirm('Are you sure you want to delete this auto-response?')) {
-            setAutoResponses(prev => prev.filter(resp => resp.id !== id));
+            setAutoResponses(prevResponses => prevResponses.filter(resp => resp.id !== id));
         }
     };
+    
+    const filteredRagEntries = getFilteredRagEntries();
+    const filteredAutoResponses = getFilteredAutoResponses();
 
     return (
         <div className="space-y-6">
