@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-// fix(types): Import SlashCommand type.
 import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand } from '../types';
+import { dataService } from '../services/dataService';
 
 const initialForumPosts: ForumPost[] = [
   {
@@ -162,8 +162,39 @@ export const useMockData = () => {
     const [forumPosts, setForumPosts] = useState<ForumPost[]>(initialForumPosts);
     const [ragEntries, setRagEntries] = useState<RagEntry[]>(initialRagEntries);
     const [autoResponses, setAutoResponses] = useState<AutoResponse[]>(initialAutoResponses);
-    // fix(state): Add state management for slash commands.
     const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(initialSlashCommands);
+
+    // Load data from API on mount
+    useEffect(() => {
+        const loadData = async () => {
+            try {
+                const data = await dataService.fetchData();
+                if (data.ragEntries && data.ragEntries.length > 0) {
+                    setRagEntries(data.ragEntries);
+                }
+                if (data.autoResponses && data.autoResponses.length > 0) {
+                    setAutoResponses(data.autoResponses);
+                }
+            } catch (error) {
+                console.error('Failed to load data from API, using local data:', error);
+            }
+        };
+        loadData();
+    }, []);
+
+    // Sync data to API whenever RAG entries or auto-responses change
+    useEffect(() => {
+        const syncData = async () => {
+            try {
+                await dataService.saveData(ragEntries, autoResponses);
+            } catch (error) {
+                console.error('Failed to sync data to API:', error);
+            }
+        };
+        // Debounce: only sync after a delay to avoid too many API calls
+        const timeoutId = setTimeout(syncData, 1000);
+        return () => clearTimeout(timeoutId);
+    }, [ragEntries, autoResponses]);
 
     useEffect(() => {
         const interval = setInterval(() => {
