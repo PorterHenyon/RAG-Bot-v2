@@ -7,6 +7,7 @@ interface ForumPostDetailModalProps {
   post: ForumPost;
   onClose: () => void;
   onUpdate: (post: ForumPost) => void;
+  onDelete?: (postId: string) => void;
 }
 
 const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
@@ -37,7 +38,7 @@ const MessageBubble: React.FC<{ message: Message }> = ({ message }) => {
   );
 };
 
-const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClose, onUpdate }) => {
+const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClose, onUpdate, onDelete }) => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingAction, setProcessingAction] = useState<string | null>(null);
 
@@ -50,6 +51,19 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
         const systemMessage: Message = { author: 'System', content: `Post marked as closed by an admin.`, timestamp: new Date().toISOString()};
         onUpdate({...post, status: PostStatus.Closed, conversation: [...post.conversation, systemMessage]});
         onClose();
+    }
+  };
+
+  const handleDelete = () => {
+    const confirmMessage = post.status === PostStatus.Closed || post.status === PostStatus.Solved
+      ? `Are you sure you want to permanently delete this ${post.status.toLowerCase()} post? This action cannot be undone.`
+      : `Are you sure you want to permanently delete this post? This action cannot be undone.`;
+    
+    if (window.confirm(confirmMessage)) {
+      if (onDelete) {
+        onDelete(post.id);
+        onClose();
+      }
     }
   };
 
@@ -143,9 +157,17 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
                      <button 
                         onClick={handleResolveAndClose}
                         disabled={isProcessing}
-                        className="w-full text-left bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors animate-pulse">
+                        className="w-full text-left bg-red-600 hover:bg-red-500 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                         Close Post
                     </button>
+                )}
+                {(post.status === PostStatus.Closed || post.status === PostStatus.Solved) && (
+                  <button 
+                    onClick={handleDelete}
+                    disabled={isProcessing || !onDelete}
+                    className="w-full text-left bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors border border-red-900">
+                    Delete Post
+                  </button>
                 )}
               </div>
             </div>

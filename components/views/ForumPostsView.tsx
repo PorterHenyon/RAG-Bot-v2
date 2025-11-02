@@ -57,6 +57,13 @@ const ForumPostsView: React.FC = () => {
     setForumPosts(prevPosts => prevPosts.map(p => p.id === updatedPost.id ? updatedPost : p));
   };
 
+  const handleDeletePost = (postId: string) => {
+    setForumPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
+    if (selectedPost?.id === postId) {
+      setSelectedPost(null);
+    }
+  };
+
   const filterOptions = ['All', 'In Progress', ...Object.values(PostStatus)];
 
   return (
@@ -86,7 +93,7 @@ const ForumPostsView: React.FC = () => {
         ))}
       </div>
 
-      {selectedPost && <ForumPostDetailModal post={selectedPost} onClose={handleCloseModal} onUpdate={handleUpdatePost} />}
+      {selectedPost && <ForumPostDetailModal post={selectedPost} onClose={handleCloseModal} onUpdate={handleUpdatePost} onDelete={handleDeletePost} />}
     </div>
   );
 };
