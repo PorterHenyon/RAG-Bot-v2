@@ -2,52 +2,6 @@ import { useState, useEffect } from 'react';
 import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand } from '../types';
 import { dataService } from '../services/dataService';
 
-const _initialForumPosts: ForumPost[] = [
-  {
-    id: 'POST-001',
-    user: { username: 'BeeKeeper#1234', id: '234567890123456789', avatarUrl: 'https://i.pravatar.cc/150?u=bee' },
-    postTitle: 'why is my charactor resetting instead of converting honey',
-    status: PostStatus.Unsolved,
-    tags: ['bug', 'scripting', 'honey'],
-    createdAt: '2024-10-30T10:00:00Z',
-    forumChannelId: '123456789',
-    postId: '987654321098765432',
-    conversation: [
-      { author: 'User', content: 'my character keeps running back to the hive and resetting itslef when it should be converting my honey into pollen, i have bad english sry', timestamp: '2024-10-30T10:00:00Z' }
-    ],
-  },
-  {
-    id: 'POST-002',
-    user: { username: 'Bob#5678', id: '345678901234567890', avatarUrl: 'https://i.pravatar.cc/150?u=bob' },
-    postTitle: 'How do I configure the new feature?',
-    status: PostStatus.AIResponse,
-    tags: ['question', 'feature'],
-    createdAt: '2024-10-30T09:30:00Z',
-    forumChannelId: '123456789',
-    postId: '987654321098765433',
-    conversation: [
-        { author: 'User', content: 'I see the new "auto-sort" feature but I can\'t figure out how to turn it on.', timestamp: '2024-07-28T09:30:00Z' },
-        { author: 'Bot', content: 'I can help with that! To enable "auto-sort", please navigate to Settings > Advanced and check the box labeled "Enable Auto-Sorting".', timestamp: '2024-07-28T09:31:00Z' }
-    ],
-  },
-  {
-    id: 'POST-003',
-    user: { username: 'Charlie#9101', id: '456789012345678901', avatarUrl: 'https://i.pravatar.cc/150?u=charlie' },
-    postTitle: 'Application crashes on startup',
-    status: PostStatus.HumanSupport,
-    tags: ['crash', 'urgent'],
-    createdAt: '2024-10-29T15:00:00Z',
-    forumChannelId: '123456789',
-    postId: '987654321098765434',
-    conversation: [
-        { author: 'User', content: 'My application is crashing every time I open it. I tried reinstalling it but nothing works.', timestamp: '2024-07-27T15:00:00Z' },
-        { author: 'Bot', content: 'I found some potential solutions, but they don\'t seem to match your issue perfectly. I am escalating this to a human support agent.', timestamp: '2024-07-27T15:02:00Z' },
-        { author: 'Support', content: 'Hi Charlie, sorry you\'re running into this. Could you please provide your log files?', timestamp: '2024-07-27T16:00:00Z' },
-    ],
-    logs: 'Exception: NullReferenceException at Core.Startup.Initialize()...',
-  },
-];
-
 const initialRagEntries: RagEntry[] = [
     {
         id: 'RAG-001',
