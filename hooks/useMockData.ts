@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand } from '../types';
 import { dataService } from '../services/dataService';
 
+// RAG entries initial data
 const initialRagEntries: RagEntry[] = [
     {
         id: 'RAG-001',
