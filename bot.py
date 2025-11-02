@@ -653,7 +653,15 @@ async def on_thread_create(thread):
         print(f"⚠ Could not get thread owner: {e}")
 
     print(f"New forum post created: '{thread.name}' by {owner_name}")
-    await thread.send(f"Hi {owner_mention}, thanks for your question! I'm analyzing it now...")
+    
+    # Send fancy greeting embed
+    greeting_embed = discord.Embed(
+        title="🤖 Revolution Macro Support Bot",
+        description=f"Hi {owner_mention}, thanks for your question! I'm analyzing it now...",
+        color=0x5865F2  # Discord blurple color
+    )
+    greeting_embed.set_footer(text="Revolution Macro", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+    await thread.send(embed=greeting_embed)
 
     history = [message async for message in thread.history(limit=1, oldest_first=True)]
     if not history:
@@ -671,7 +679,14 @@ async def on_thread_create(thread):
     bot_response_text = None
     
     if auto_response:
-        await thread.send(auto_response)
+        # Send auto-response as fancy embed
+        auto_embed = discord.Embed(
+            title="💬 Quick Response",
+            description=auto_response,
+            color=0x3498DB  # Blue color for auto-responses
+        )
+        auto_embed.set_footer(text="Auto-response from knowledge base", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+        await thread.send(embed=auto_embed)
         bot_response_text = auto_response
         print(f"✓ Responded to '{thread.name}' with an auto-response.")
     else:
@@ -739,14 +754,45 @@ async def on_thread_create(thread):
 
         if confident_docs:
             bot_response_text = await generate_ai_response(user_question, confident_docs[:2])  # Use top 2 confident docs
-            await thread.send(bot_response_text)
+            
+            # Send AI response as fancy embed
+            ai_embed = discord.Embed(
+                title="✅ AI Support Response",
+                description=bot_response_text,
+                color=0x2ECC71  # Green color for successful AI responses
+            )
+            
+            # Add field showing which docs were used
+            if len(confident_docs) > 0:
+                doc_titles = [doc.get('title', 'Unknown') for doc in confident_docs[:2]]
+                ai_embed.add_field(
+                    name="📚 Knowledge Base References",
+                    value="\n".join([f"• {title}" for title in doc_titles]),
+                    inline=False
+                )
+            
+            ai_embed.set_footer(text=f"AI-powered response using {len(confident_docs)} knowledge base entries", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+            await thread.send(embed=ai_embed)
             print(f"Responded to '{thread.name}' with a RAG-based AI answer ({len(confident_docs)} confident matches).")
         else:
             escalation_message = (
                 "I'm sorry, I couldn't find a confident answer in my knowledge base. "
                 "I've flagged this for a human support agent to review."
             )
-            await thread.send(escalation_message)
+            
+            # Send escalation message as fancy embed
+            escalation_embed = discord.Embed(
+                title="⚠️ Escalation Required",
+                description=escalation_message,
+                color=0xE67E22  # Orange color for escalation
+            )
+            escalation_embed.add_field(
+                name="📋 Next Steps",
+                value="A human support agent will review your question and respond shortly.",
+                inline=False
+            )
+            escalation_embed.set_footer(text="Revolution Macro Support Team", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+            await thread.send(embed=escalation_embed)
             bot_response_text = escalation_message
             print(f"Could not find a confident answer for '{thread.name}'. Escalated.")
     
