@@ -1,9 +1,20 @@
 // Service for syncing data with the API
 import type { RagEntry, AutoResponse } from '../types';
 
-const API_URL = import.meta.env.VITE_API_URL 
-  ? `${import.meta.env.VITE_API_URL}/api/data`
-  : `${window.location.origin}/api/data`;
+const getApiUrl = (): string => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.length > 0) {
+    return `${envUrl}/api/data`;
+  }
+  // Fallback to current origin (works in browser)
+  if (typeof window !== 'undefined') {
+    return `${window.location.origin}/api/data`;
+  }
+  // Server-side fallback
+  return '/api/data';
+};
+
+const API_URL = getApiUrl();
 
 export const dataService = {
   async fetchData(): Promise<{ ragEntries: RagEntry[]; autoResponses: AutoResponse[] }> {

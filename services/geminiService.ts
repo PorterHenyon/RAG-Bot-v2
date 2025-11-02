@@ -2,7 +2,9 @@ import { GoogleGenAI, Type } from "@google/genai";
 import type { Message, RagEntry, AutoResponse } from '../types';
 
 // The API key is assumed to be set in the environment variables.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// In Vite, environment variables are accessed via import.meta.env
+const apiKey = import.meta.env.API_KEY || (typeof process !== 'undefined' ? (process.env as any).API_KEY : undefined);
+const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
 export const geminiService = {
   // This is local logic, no API call needed.
@@ -66,7 +68,11 @@ export const geminiService = {
             }
         });
         
-        const jsonString = response.text.trim();
+        const responseText = response.text;
+        if (!responseText) {
+            throw new Error("API returned an empty response for RAG entry creation.");
+        }
+        const jsonString = responseText.trim();
         if (!jsonString) {
             throw new Error("API returned an empty response for RAG entry creation.");
         }
@@ -106,10 +112,12 @@ export const geminiService = {
             }
         });
         
-        const jsonString = response.text.trim();
+        const responseText = response.text;
+        if (!responseText) return 'User Error'; // Default fallback
+        const jsonString = responseText.trim();
         if (!jsonString) return 'User Error'; // Default fallback
         const parsed = JSON.parse(jsonString);
-        return parsed.classification;
+        return parsed.classification || 'User Error';
     } catch (error) {
         console.error("Error classifying issue:", error);
         return 'User Error'; // Default fallback
