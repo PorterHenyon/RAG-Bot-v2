@@ -30,7 +30,7 @@ export const geminiService = {
             contents: prompt,
         });
 
-        return response.text;
+        return response.text || "There was an error generating the summary. Please try again.";
     } catch (error) {
         console.error("Error summarizing conversation:", error);
         return "There was an error summarizing the conversation. Please try again.";
