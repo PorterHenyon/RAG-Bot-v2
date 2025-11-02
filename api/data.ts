@@ -113,10 +113,16 @@ async function getDataStore(): Promise<DataStore> {
         if (typeof autoResponses === 'string') {
           try {
             autoResponses = JSON.parse(autoResponses);
+            console.log(`✓ Parsed auto_responses from JSON string: ${Array.isArray(autoResponses) ? autoResponses.length : 'not array'} entries`);
           } catch (e) {
-            console.error('Error parsing auto_responses JSON:', e);
+            console.error('❌ Error parsing auto_responses JSON:', e);
+            console.error(`   Raw value: ${autoResponses.substring(0, 200)}...`);
             autoResponses = null;
           }
+        } else if (autoResponses === null || autoResponses === undefined) {
+          console.log(`⚠ auto_responses is null/undefined in Redis`);
+        } else {
+          console.log(`✓ auto_responses from Redis: ${Array.isArray(autoResponses) ? autoResponses.length : typeof autoResponses} entries`);
         }
       } else {
         // Vercel KV (different API)
@@ -177,11 +183,28 @@ async function saveDataStore(data: DataStore): Promise<void> {
       // Check if using direct Redis (ioredis) or Vercel KV
       if (typeof kvClient.set === 'function') {
         // Direct Redis - store as JSON strings
-        await kvClient.set('rag_entries', JSON.stringify(data.ragEntries));
-        await kvClient.set('auto_responses', JSON.stringify(data.autoResponses));
+        const ragJson = JSON.stringify(data.ragEntries);
+        const autoJson = JSON.stringify(data.autoResponses);
+        console.log(`💾 Saving to Redis: rag_entries (${data.ragEntries.length} entries, ${ragJson.length} bytes), auto_responses (${data.autoResponses.length} entries, ${autoJson.length} bytes)`);
+        await kvClient.set('rag_entries', ragJson);
+        await kvClient.set('auto_responses', autoJson);
         console.log(`✓ Saved ${data.ragEntries.length} RAG entries and ${data.autoResponses.length} auto-responses to Redis`);
+        
+        // Verify immediately after save
+        const verifyRag = await kvClient.get('rag_entries');
+        const verifyAuto = await kvClient.get('auto_responses');
+        console.log(`🔍 Immediate verification: rag_entries exists: ${!!verifyRag}, auto_responses exists: ${!!verifyAuto}`);
+        if (verifyAuto) {
+          try {
+            const parsed = JSON.parse(verifyAuto as string);
+            console.log(`   ✓ auto_responses parsed: ${Array.isArray(parsed) ? parsed.length : 'not array'} entries`);
+          } catch (e) {
+            console.error(`   ❌ Failed to parse auto_responses: ${e}`);
+          }
+        }
       } else {
         // Vercel KV
+        console.log(`💾 Saving to Vercel KV: rag_entries (${data.ragEntries.length} entries), auto_responses (${data.autoResponses.length} entries)`);
         await kvClient.set('rag_entries', data.ragEntries);
         await kvClient.set('auto_responses', data.autoResponses);
         console.log(`✓ Saved ${data.ragEntries.length} RAG entries and ${data.autoResponses.length} auto-responses to Vercel KV`);
@@ -250,11 +273,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
       
+      console.log(`📝 Before save - RAG: ${updatedData.ragEntries.length}, Auto: ${updatedData.autoResponses.length}`);
       await saveDataStore(updatedData);
       
       // Verify the save by reading back (only if we have persistent storage)
       if (kvClient) {
+        // Wait a brief moment to ensure Redis write is complete
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
         const verifyData = await getDataStore();
+        console.log(`🔍 After save verification - RAG: ${verifyData.ragEntries.length}, Auto: ${verifyData.autoResponses.length}`);
+        
         let verificationPassed = true;
         let errors: string[] = [];
         
@@ -266,6 +295,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (verifyData.autoResponses.length !== updatedData.autoResponses.length) {
           verificationPassed = false;
           errors.push(`Auto-responses: expected ${updatedData.autoResponses.length}, got ${verifyData.autoResponses.length}`);
+          // Debug: Log what we actually got
+          console.error(`❌ Auto-responses mismatch!`);
+          console.error(`   Expected: ${updatedData.autoResponses.length} entries`);
+          console.error(`   Got: ${verifyData.autoResponses.length} entries`);
+          console.error(`   Expected IDs: ${updatedData.autoResponses.map(a => a.id).join(', ')}`);
+          console.error(`   Got IDs: ${verifyData.autoResponses.map(a => a.id).join(', ')}`);
         }
         
         if (!verificationPassed) {
