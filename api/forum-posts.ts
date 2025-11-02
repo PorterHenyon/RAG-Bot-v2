@@ -49,10 +49,12 @@ async function initKV() {
   }
   
   // Try direct Redis connection (Redis Cloud, etc.)
-  if (process.env.REDIS_URL) {
+  // Check both REDIS_URL and STORAGE_URL (Vercel custom prefix)
+  const redisUrl = process.env.REDIS_URL || process.env.STORAGE_URL;
+  if (redisUrl) {
     try {
       const Redis = (await import('ioredis')).default;
-      kvClient = new Redis(process.env.REDIS_URL);
+      kvClient = new Redis(redisUrl);
       console.log('✓ Using direct Redis connection for forum posts (persistent storage)');
       
       // Test connection
