@@ -150,7 +150,7 @@ export const geminiService = {
         const contextText = contextEntries.map(entry => `Title: ${entry.title}\nContent: ${entry.content}`).join('\n\n');
         const prompt = `You are an expert support bot. A user has the following question: "${query}".
         
-        Using the following context from the knowledge base, provide a helpful and friendly answer. If the context doesn't seem to perfectly match, you can say "Based on our documentation for '${contextEntries[0].title}', here's what I found:" before giving the answer.
+        Using the following context from the knowledge base, provide a helpful and friendly answer. If the context doesn't seem to perfectly match, you can say "Based on our documentation for '${contextEntries[0]?.title || 'the issue'}', here's what I found:" before giving the answer.
 
         Context:\n${contextText}`;
 
@@ -159,7 +159,7 @@ export const geminiService = {
             contents: prompt,
         });
 
-        return response.text;
+        return response.text || "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
     } catch (error) {
         console.error("Error generating bot response:", error);
         return "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
