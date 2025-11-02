@@ -255,14 +255,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Verify the save by reading back (only if we have persistent storage)
       if (kvClient) {
         const verifyData = await getDataStore();
+        let verificationPassed = true;
+        let errors: string[] = [];
+        
         if (verifyData.ragEntries.length !== updatedData.ragEntries.length) {
-          console.error(`⚠ Data mismatch after save! Expected ${updatedData.ragEntries.length} RAG entries, got ${verifyData.ragEntries.length}`);
+          verificationPassed = false;
+          errors.push(`RAG entries: expected ${updatedData.ragEntries.length}, got ${verifyData.ragEntries.length}`);
+        }
+        
+        if (verifyData.autoResponses.length !== updatedData.autoResponses.length) {
+          verificationPassed = false;
+          errors.push(`Auto-responses: expected ${updatedData.autoResponses.length}, got ${verifyData.autoResponses.length}`);
+        }
+        
+        if (!verificationPassed) {
+          console.error(`⚠ Data mismatch after save! ${errors.join(', ')}`);
           return res.status(500).json({ 
             error: 'Data verification failed after save',
-            warning: 'Data may not have persisted correctly'
+            warning: `Data may not have persisted correctly: ${errors.join(', ')}`
           });
         } else {
-          console.log(`✓ Data verified: ${verifyData.ragEntries.length} RAG entries persisted successfully`);
+          console.log(`✓ Data verified: ${verifyData.ragEntries.length} RAG entries and ${verifyData.autoResponses.length} auto-responses persisted successfully`);
         }
       }
       

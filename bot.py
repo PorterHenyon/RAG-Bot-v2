@@ -678,13 +678,19 @@ async def on_thread_create(thread):
         relevant_docs = find_relevant_rag_entries(user_question)
         
         # Use a score threshold similar to dashboard (score of 5 = title match minimum)
-        # Get entries with scores if available
-        SCORE_THRESHOLD = 5  # Minimum confidence threshold
+        # Lower threshold to 3 to catch keyword matches (not just title matches)
+        SCORE_THRESHOLD = 3  # Minimum confidence threshold (allows keyword matches)
         confident_docs = []
         
         # Recalculate scores to filter by threshold
         query_words = set(user_question.lower().split())
         query_words = {word for word in query_words if len(word) > 2}
+        
+        if not query_words:
+            # If no words > 2 chars, try with all words (might be short keywords like "api")
+            query_words = set(user_question.lower().split())
+        
+        print(f"🔍 Searching for matches with query words: {query_words}")
         
         for entry in relevant_docs:
             score = 0
@@ -702,6 +708,34 @@ async def on_thread_create(thread):
             
             if score >= SCORE_THRESHOLD:
                 confident_docs.append(entry)
+                print(f"   ✓ Match found: '{entry.get('title', 'Unknown')}' (score: {score})")
+        
+        if not confident_docs and relevant_docs:
+            print(f"⚠ No entries met threshold ({SCORE_THRESHOLD}). Top matches:")
+            # Show top 3 scores even if below threshold
+            query_words = set(user_question.lower().split())
+            query_words = {word for word in query_words if len(word) > 2} if {word for word in query_words if len(word) > 2} else set(user_question.lower().split())
+            
+            scored_entries = []
+            for entry in relevant_docs[:5]:  # Check top 5
+                score = 0
+                entry_title = entry.get('title', '').lower()
+                entry_keywords = ' '.join(entry.get('keywords', [])).lower()
+                entry_content = entry.get('content', '').lower()
+                
+                for word in query_words:
+                    if word in entry_title:
+                        score += 5
+                    if word in entry_keywords:
+                        score += 3
+                    if word in entry_content:
+                        score += 1
+                
+                scored_entries.append({'entry': entry, 'score': score})
+            
+            scored_entries.sort(key=lambda x: x['score'], reverse=True)
+            for item in scored_entries[:3]:
+                print(f"     - '{item['entry'].get('title', 'Unknown')}' (score: {item['score']})")
 
         if confident_docs:
             bot_response_text = await generate_ai_response(user_question, confident_docs[:2])  # Use top 2 confident docs
