@@ -128,14 +128,25 @@ export const useMockData = () => {
             if (hasLoaded) return; // Prevent multiple loads
             try {
                 const data = await dataService.fetchData();
-                // Only update if component is still mounted and data exists
+                // Only update if component is still mounted
                 if (isMounted) {
-                    // Only update if API has data (don't overwrite with empty arrays)
-                    if (data.ragEntries && Array.isArray(data.ragEntries) && data.ragEntries.length > 0) {
+                    // Always use API data if available (even if empty) to clear defaults
+                    // This ensures we show what's actually in Redis, not hardcoded defaults
+                    if (data.ragEntries && Array.isArray(data.ragEntries)) {
                         setRagEntries(data.ragEntries);
+                        if (data.ragEntries.length > 0) {
+                            console.log(`✓ Loaded ${data.ragEntries.length} RAG entries from API`);
+                        } else {
+                            console.log(`✓ API returned empty RAG entries (database is empty)`);
+                        }
                     }
-                    if (data.autoResponses && Array.isArray(data.autoResponses) && data.autoResponses.length > 0) {
+                    if (data.autoResponses && Array.isArray(data.autoResponses)) {
                         setAutoResponses(data.autoResponses);
+                        if (data.autoResponses.length > 0) {
+                            console.log(`✓ Loaded ${data.autoResponses.length} auto-responses from API`);
+                        } else {
+                            console.log(`✓ API returned empty auto-responses (database is empty)`);
+                        }
                     }
                     hasLoaded = true;
                 }

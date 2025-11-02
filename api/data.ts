@@ -210,9 +210,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Return all data
     try {
       const data = await getDataStore();
+      // Log what we're returning for debugging
+      console.log(`📤 GET /api/data returning: ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses`);
       return res.status(200).json(data);
     } catch (error) {
       console.error('Error fetching data:', error);
+      // Only return inMemoryStore as last resort (when Redis fails)
+      console.log(`⚠ Returning fallback in-memory data due to error`);
       return res.status(200).json(inMemoryStore);
     }
   }
