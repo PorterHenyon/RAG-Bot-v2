@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { ForumPost, Message, PostStatus } from '../types';
 import { XMarkIcon, UserIcon, BotIcon, SupportIcon, HashtagIcon, SystemIcon } from './icons';
 import { geminiService } from '../services/geminiService';
+import { forumPostService } from '../services/forumPostService';
 
 interface ForumPostDetailModalProps {
   post: ForumPost;
@@ -42,8 +43,43 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingAction, setProcessingAction] = useState<string | null>(null);
 
-  const handleStatusChange = (newStatus: PostStatus) => {
-    onUpdate({ ...post, status: newStatus });
+  const handleStatusChange = async (newStatus: PostStatus) => {
+    setIsProcessing(true);
+    setProcessingAction(`Updating to ${newStatus}`);
+    
+    // If changing to Closed, automatically close the Discord thread
+    if (newStatus === PostStatus.Closed) {
+      try {
+        await forumPostService.closeDiscordThread(post);
+      } catch (error) {
+        console.error('Error closing thread in Discord:', error);
+        alert('Status updated locally, but failed to close thread in Discord. Check your Discord bot token configuration.');
+      }
+    }
+    
+    const systemMessage: Message = { 
+      author: 'System', 
+      content: `Post status changed to ${newStatus} by an admin.`, 
+      timestamp: new Date().toISOString()
+    };
+    
+    const updatedPost = {
+      ...post, 
+      status: newStatus, 
+      conversation: [...post.conversation, systemMessage]
+    };
+    
+    try {
+      await forumPostService.updateForumPost(updatedPost);
+      onUpdate(updatedPost);
+    } catch (error) {
+      console.error('Error updating post:', error);
+      // Still update locally even if API fails
+      onUpdate(updatedPost);
+    } finally {
+      setIsProcessing(false);
+      setProcessingAction(null);
+    }
   };
   
   const handleResolveAndClose = () => {
@@ -61,25 +97,64 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
     
     if (window.confirm(confirmMessage)) {
       if (onDelete) {
-        onDelete(post.id);
-        onClose();
+        setIsProcessing(true);
+        setProcessingAction('Deleting');
+        try {
+          await onDelete(post.id);
+          onClose();
+        } catch (error) {
+          console.error('Error deleting post:', error);
+          alert('Failed to delete post. Please try again.');
+        } finally {
+          setIsProcessing(false);
+          setProcessingAction(null);
+        }
       }
     }
   };
 
   const handleSummarize = async () => {
     if (post.status !== PostStatus.Solved) {
-        alert("Can only summarize solved posts.");
-        return;
+      alert("Can only summarize solved posts. Please change status to 'Solved' first.");
+      return;
     }
+    
     setIsProcessing(true);
     setProcessingAction('Summarizing');
-    const summary = await geminiService.summarizeConversation(post.conversation);
-    const summaryMessage: Message = { author: 'Bot', content: `AI Summary: ${summary}`, timestamp: new Date().toISOString()};
-    onUpdate({...post, conversation: [...post.conversation, summaryMessage]});
-    setIsProcessing(false);
-    setProcessingAction(null);
-    alert('Summary generated and added to conversation history. Next, you would add this to the RAG database.');
+    
+    try {
+      console.log('Starting summarization...', post.conversation);
+      const summary = await geminiService.summarizeConversation(post.conversation);
+      
+      if (!summary || summary.includes('error') || summary.includes('Error')) {
+        throw new Error('Failed to generate summary');
+      }
+      
+      const summaryMessage: Message = { 
+        author: 'Bot', 
+        content: `AI Summary: ${summary}`, 
+        timestamp: new Date().toISOString()
+      };
+      
+      const updatedPost = {
+        ...post, 
+        conversation: [...post.conversation, summaryMessage]
+      };
+      
+      // Update via API
+      await forumPostService.updateForumPost(updatedPost);
+      onUpdate(updatedPost);
+      
+      // Show success message
+      alert('Summary generated and added to conversation history. You can now add this to the RAG database from the RAG Management view.');
+    } catch (error: any) {
+      console.error('Error summarizing:', error);
+      const errorMsg = error?.message || 'Unknown error';
+      alert(`Failed to generate summary: ${errorMsg}. Please check that VITE_GEMINI_API_KEY is set in Vercel environment variables and try again.`);
+    } finally {
+      setIsProcessing(false);
+      setProcessingAction(null);
+    }
   };
 
   return (
@@ -113,12 +188,16 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
               <select 
                 value={post.status}
                 onChange={(e) => handleStatusChange(e.target.value as PostStatus)}
-                className="w-full bg-gray-700 text-white border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isProcessing}
+                className="w-full bg-gray-700 text-white border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {Object.values(PostStatus).map(status => (
                   <option key={status} value={status}>{status}</option>
                 ))}
               </select>
+              {isProcessing && processingAction && (
+                <p className="text-xs text-gray-400 mt-1">{processingAction}...</p>
+              )}
             </div>
              <div>
                 <h4 className="font-semibold text-gray-300 mb-2">Tags</h4>
@@ -161,14 +240,13 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
                         Close Post
                     </button>
                 )}
-                {(post.status === PostStatus.Closed || post.status === PostStatus.Solved) && (
-                  <button 
-                    onClick={handleDelete}
-                    disabled={isProcessing || !onDelete}
-                    className="w-full text-left bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors border border-red-900">
-                    Delete Post
-                  </button>
-                )}
+                {/* Delete button available for all posts */}
+                <button 
+                  onClick={handleDelete}
+                  disabled={isProcessing || !onDelete}
+                  className="w-full text-left bg-red-800 hover:bg-red-700 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors border border-red-900">
+                  {isProcessing && processingAction === 'Deleting' ? 'Deleting...' : 'Delete Post'}
+                </button>
               </div>
             </div>
 

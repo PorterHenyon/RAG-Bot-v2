@@ -159,40 +159,110 @@ const initialSlashCommands: SlashCommand[] = [
 ];
 
 export const useMockData = () => {
-    const [forumPosts, setForumPosts] = useState<ForumPost[]>(initialForumPosts);
+    // Start with empty array - API will populate if available
+    const [forumPosts, setForumPosts] = useState<ForumPost[]>([]);
     const [ragEntries, setRagEntries] = useState<RagEntry[]>(initialRagEntries);
     const [autoResponses, setAutoResponses] = useState<AutoResponse[]>(initialAutoResponses);
     const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(initialSlashCommands);
 
-    // Load data from API on mount
+    // Load data from API on mount (only once, prevent flashing)
     useEffect(() => {
+        let isMounted = true;
+        let hasLoaded = false;
         const loadData = async () => {
+            if (hasLoaded) return; // Prevent multiple loads
             try {
                 const data = await dataService.fetchData();
-                if (data.ragEntries && data.ragEntries.length > 0) {
-                    setRagEntries(data.ragEntries);
-                }
-                if (data.autoResponses && data.autoResponses.length > 0) {
-                    setAutoResponses(data.autoResponses);
+                // Only update if component is still mounted and data exists
+                if (isMounted) {
+                    // Only update if API has data (don't overwrite with empty arrays)
+                    if (data.ragEntries && Array.isArray(data.ragEntries) && data.ragEntries.length > 0) {
+                        setRagEntries(data.ragEntries);
+                    }
+                    if (data.autoResponses && Array.isArray(data.autoResponses) && data.autoResponses.length > 0) {
+                        setAutoResponses(data.autoResponses);
+                    }
+                    hasLoaded = true;
                 }
             } catch (error) {
                 console.error('Failed to load data from API, using local data:', error);
+                hasLoaded = true; // Mark as loaded even on error to prevent retries
             }
         };
         loadData();
+        return () => {
+            isMounted = false;
+        };
     }, []);
 
-    // Sync data to API whenever RAG entries or auto-responses change
+    // Load forum posts from API on mount and periodically
     useEffect(() => {
-        const syncData = async () => {
+        let isMounted = true;
+        const loadForumPosts = async () => {
             try {
-                await dataService.saveData(ragEntries, autoResponses);
+                const apiUrl = import.meta.env.VITE_API_URL 
+                    ? `${import.meta.env.VITE_API_URL}/api/forum-posts`
+                    : `${window.location.origin}/api/forum-posts`;
+                
+                const response = await fetch(apiUrl);
+                if (response.ok) {
+                    const posts = await response.json();
+                    // Always update with API data, even if empty array (clears mock data)
+                    if (isMounted && posts && Array.isArray(posts)) {
+                        setForumPosts(posts);
+                        if (posts.length > 0) {
+                            console.log(`✓ Loaded ${posts.length} forum post(s) from API`);
+                        } else {
+                            console.log(`✓ API returned empty array - cleared mock posts`);
+                        }
+                    }
+                } else {
+                    console.warn(`Failed to load forum posts: HTTP ${response.status}`);
+                    // Clear posts if API fails (don't show mock data)
+                    if (isMounted) {
+                        setForumPosts([]);
+                    }
+                }
             } catch (error) {
-                console.error('Failed to sync data to API:', error);
+                console.error('Failed to load forum posts from API:', error);
+                // Clear posts if API fails (don't show mock data)
+                if (isMounted) {
+                    setForumPosts([]);
+                }
             }
         };
-        // Debounce: only sync after a delay to avoid too many API calls
-        const timeoutId = setTimeout(syncData, 1000);
+        
+        // Load immediately on mount
+        loadForumPosts();
+        // Refresh forum posts every 5 seconds for faster updates
+        const interval = setInterval(() => {
+            if (isMounted) {
+                loadForumPosts();
+            }
+        }, 5000);
+        return () => {
+            isMounted = false;
+            clearInterval(interval);
+        };
+    }, []);
+
+    // Sync data to API whenever RAG entries or auto-responses change (with debounce)
+    useEffect(() => {
+        // Skip sync on initial mount to prevent flashing
+        let skipFirst = true;
+        const timeoutId = setTimeout(() => {
+            if (!skipFirst) {
+                const syncData = async () => {
+                    try {
+                        await dataService.saveData(ragEntries, autoResponses);
+                    } catch (error) {
+                        console.error('Failed to sync data to API:', error);
+                    }
+                };
+                syncData();
+            }
+            skipFirst = false;
+        }, 2000); // Increased debounce to 2 seconds to reduce flashing
         return () => clearTimeout(timeoutId);
     }, [ragEntries, autoResponses]);
 

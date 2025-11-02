@@ -23,10 +23,10 @@ interface DataStore {
   autoResponses: AutoResponse[];
 }
 
-// In-memory storage (for demo - in production, use a database like Supabase, MongoDB, etc.)
-// Note: This will reset on each Vercel serverless function restart
-// For persistent storage, use a database like Supabase, MongoDB Atlas, or Vercel Postgres
-let dataStore: DataStore = {
+// Persistent storage using Vercel KV (Redis)
+// Falls back to in-memory if KV not configured
+let kvClient: any = null;
+let inMemoryStore: DataStore = {
   ragEntries: [
     {
       id: 'RAG-001',
@@ -48,6 +48,112 @@ let dataStore: DataStore = {
   ],
 };
 
+// Initialize KV/Redis client if available (lazy import)
+async function initKV() {
+  if (kvClient) return; // Already initialized
+  
+  // Try Vercel KV first (REST API)
+  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
+    try {
+      const kvModule = await import('@vercel/kv');
+      kvClient = kvModule.kv;
+      console.log('✓ Using Vercel KV for persistent storage');
+      return;
+    } catch (e) {
+      console.log('⚠ Vercel KV not available, trying direct Redis connection...');
+    }
+  }
+  
+  // Try direct Redis connection (Redis Cloud, etc.)
+  if (process.env.REDIS_URL) {
+    try {
+      const Redis = (await import('ioredis')).default;
+      kvClient = new Redis(process.env.REDIS_URL);
+      console.log('✓ Using direct Redis connection for persistent storage');
+      
+      // Test connection
+      await kvClient.ping();
+      return;
+    } catch (e) {
+      console.log('⚠ Redis connection failed:', e);
+      kvClient = null;
+    }
+  }
+  
+  if (!kvClient) {
+    console.log('⚠ No persistent storage configured, using in-memory storage (data won\'t persist)');
+  }
+}
+
+// Helper functions to get/set data
+async function getDataStore(): Promise<DataStore> {
+  await initKV();
+  if (kvClient) {
+    try {
+      // Check if using Vercel KV (has .get method) or direct Redis (has .get method)
+      let ragEntries: any;
+      let autoResponses: any;
+      
+      if (typeof kvClient.get === 'function') {
+        // Direct Redis (ioredis)
+        ragEntries = await kvClient.get('rag_entries');
+        autoResponses = await kvClient.get('auto_responses');
+        
+        // Parse JSON if stored as strings
+        if (typeof ragEntries === 'string') {
+          try {
+            ragEntries = JSON.parse(ragEntries);
+          } catch (e) {
+            ragEntries = null;
+          }
+        }
+        if (typeof autoResponses === 'string') {
+          try {
+            autoResponses = JSON.parse(autoResponses);
+          } catch (e) {
+            autoResponses = null;
+          }
+        }
+      } else {
+        // Vercel KV (different API)
+        ragEntries = await kvClient.get('rag_entries');
+        autoResponses = await kvClient.get('auto_responses');
+      }
+      
+      return {
+        ragEntries: ragEntries || inMemoryStore.ragEntries,
+        autoResponses: autoResponses || inMemoryStore.autoResponses,
+      };
+    } catch (error) {
+      console.error('Error reading from Redis/KV:', error);
+      return inMemoryStore;
+    }
+  }
+  return inMemoryStore;
+}
+
+async function saveDataStore(data: DataStore): Promise<void> {
+  await initKV();
+  if (kvClient) {
+    try {
+      // Check if using direct Redis (ioredis) or Vercel KV
+      if (typeof kvClient.set === 'function') {
+        // Direct Redis - store as JSON strings
+        await kvClient.set('rag_entries', JSON.stringify(data.ragEntries));
+        await kvClient.set('auto_responses', JSON.stringify(data.autoResponses));
+      } else {
+        // Vercel KV
+        await kvClient.set('rag_entries', data.ragEntries);
+        await kvClient.set('auto_responses', data.autoResponses);
+      }
+    } catch (error) {
+      console.error('Error saving to Redis/KV:', error);
+    }
+  } else {
+    inMemoryStore = data;
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Enable CORS
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -60,23 +166,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'GET') {
     // Return all data
-    return res.status(200).json(dataStore);
+    try {
+      const data = await getDataStore();
+      return res.status(200).json(data);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      return res.status(200).json(inMemoryStore);
+    }
   }
 
   if (req.method === 'POST') {
     // Update data
     try {
+      const currentData = await getDataStore();
       const { ragEntries, autoResponses } = req.body as Partial<DataStore>;
       
-      if (ragEntries && Array.isArray(ragEntries)) {
-        dataStore.ragEntries = ragEntries;
-      }
-      if (autoResponses && Array.isArray(autoResponses)) {
-        dataStore.autoResponses = autoResponses;
-      }
+      const updatedData: DataStore = {
+        ragEntries: (ragEntries && Array.isArray(ragEntries)) ? ragEntries : currentData.ragEntries,
+        autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : currentData.autoResponses,
+      };
       
-      return res.status(200).json({ success: true, data: dataStore });
+      await saveDataStore(updatedData);
+      return res.status(200).json({ success: true, data: updatedData });
     } catch (error) {
+      console.error('Error saving data:', error);
       return res.status(400).json({ error: 'Invalid request body' });
     }
   }

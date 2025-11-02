@@ -1,8 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useMockData } from '../../hooks/useMockData';
 import { ForumPost, PostStatus } from '../../types';
 import PostStatusBadge from '../PostStatusBadge';
 import ForumPostDetailModal from '../ForumPostDetailModal';
+import { forumPostService } from '../../services/forumPostService';
 
 const ForumPostCard: React.FC<{ post: ForumPost; onClick: () => void }> = ({ post, onClick }) => {
   return (
@@ -53,16 +54,63 @@ const ForumPostsView: React.FC = () => {
     setSelectedPost(null);
   };
   
-  const handleUpdatePost = (updatedPost: ForumPost) => {
-    setForumPosts(prevPosts => prevPosts.map(p => p.id === updatedPost.id ? updatedPost : p));
-  };
-
-  const handleDeletePost = (postId: string) => {
-    setForumPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
-    if (selectedPost?.id === postId) {
-      setSelectedPost(null);
+  const handleUpdatePost = async (updatedPost: ForumPost) => {
+    try {
+      await forumPostService.updateForumPost(updatedPost);
+      setForumPosts(prevPosts => prevPosts.map(p => p.id === updatedPost.id ? updatedPost : p));
+    } catch (error) {
+      console.error('Error updating post:', error);
+      // Still update locally even if API fails
+      setForumPosts(prevPosts => prevPosts.map(p => p.id === updatedPost.id ? updatedPost : p));
     }
   };
+
+  const handleDeletePost = async (postId: string): Promise<void> => {
+    try {
+      await forumPostService.deleteForumPost(postId);
+      setForumPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
+      if (selectedPost?.id === postId) {
+        setSelectedPost(null);
+      }
+    } catch (error) {
+      console.error('Error deleting post:', error);
+      // Still delete locally even if API fails
+      setForumPosts(prevPosts => prevPosts.filter(p => p.id !== postId));
+      if (selectedPost?.id === postId) {
+        setSelectedPost(null);
+      }
+      // Re-throw so modal can handle it
+      throw error;
+    }
+  };
+
+  // Periodically refresh forum posts from API
+  useEffect(() => {
+    let isMounted = true;
+    const refreshForumPosts = async () => {
+      try {
+        const posts = await forumPostService.fetchForumPosts();
+        // Always update with API data, even if empty array (clears mock data)
+        if (isMounted && posts && Array.isArray(posts)) {
+          setForumPosts(posts);
+        }
+      } catch (error) {
+        console.error('Error refreshing forum posts:', error);
+      }
+    };
+    
+    // Load immediately and refresh every 5 seconds for faster updates
+    refreshForumPosts();
+    const interval = setInterval(() => {
+      if (isMounted) {
+        refreshForumPosts();
+      }
+    }, 5000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const filterOptions = ['All', 'In Progress', ...Object.values(PostStatus)];
 
@@ -87,11 +135,23 @@ const ForumPostsView: React.FC = () => {
         </select>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-        {filteredPosts.map((post) => (
-          <ForumPostCard key={post.id} post={post} onClick={() => setSelectedPost(post)} />
-        ))}
-      </div>
+      {filteredPosts.length === 0 ? (
+        <div className="bg-gray-800 rounded-lg shadow-lg p-8 text-center">
+          <p className="text-gray-400 text-lg">No forum posts found</p>
+          <p className="text-gray-500 text-sm mt-2">
+            Forum posts from Discord will appear here automatically when created.
+          </p>
+          <p className="text-gray-500 text-xs mt-4">
+            Dashboard refreshes every 5 seconds. Make sure your bot is running!
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {filteredPosts.map((post) => (
+            <ForumPostCard key={post.id} post={post} onClick={() => setSelectedPost(post)} />
+          ))}
+        </div>
+      )}
 
       {selectedPost && <ForumPostDetailModal post={selectedPost} onClose={handleCloseModal} onUpdate={handleUpdatePost} onDelete={handleDeletePost} />}
     </div>

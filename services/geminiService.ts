@@ -3,7 +3,16 @@ import type { Message, RagEntry, AutoResponse } from '../types';
 
 // The API key is assumed to be set in the environment variables.
 // In Vite, environment variables are accessed via import.meta.env
-const apiKey = import.meta.env.API_KEY || (typeof process !== 'undefined' ? (process.env as any).API_KEY : undefined);
+// Try multiple possible env var names
+const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
+  || import.meta.env.GEMINI_API_KEY 
+  || import.meta.env.API_KEY 
+  || (typeof process !== 'undefined' ? (process.env as any).GEMINI_API_KEY || (process.env as any).API_KEY : undefined);
+
+if (!apiKey) {
+  console.warn('⚠ Gemini API key not found in environment variables. Summarization will fail.');
+}
+
 const ai = new GoogleGenAI({ apiKey: apiKey || '' });
 
 export const geminiService = {
@@ -148,11 +157,20 @@ export const geminiService = {
     console.log("Calling Gemini API for bot response...");
     try {
         const contextText = contextEntries.map(entry => `Title: ${entry.title}\nContent: ${entry.content}`).join('\n\n');
-        const prompt = `You are an expert support bot. A user has the following question: "${query}".
-        
-        Using the following context from the knowledge base, provide a helpful and friendly answer. If the context doesn't seem to perfectly match, you can say "Based on our documentation for '${contextEntries[0]?.title || 'the issue'}', here's what I found:" before giving the answer.
+        const prompt = `You are an expert support bot for Revolution Macro, a powerful scripting application for gaming automation. Your role is to help users troubleshoot issues and understand features.
 
-        Context:\n${contextText}`;
+Guidelines:
+- Be friendly, professional, and helpful
+- Provide clear, step-by-step solutions when possible
+- Reference specific Revolution Macro features and settings by name
+- If the context doesn't fully answer the question, be honest about limitations
+- Always maintain a positive, supportive tone
+
+User Question: "${query}"
+
+Using the following knowledge base context, provide a helpful answer. If the context is highly relevant, you can reference it directly.
+
+Knowledge Base Context:\n${contextText}`;
 
         const response = await ai.models.generateContent({
             model: 'gemini-2.5-flash',
