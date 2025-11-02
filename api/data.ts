@@ -123,21 +123,39 @@ async function getDataStore(): Promise<DataStore> {
       }
       
       // Use stored data if available, otherwise fall back to in-memory
-      const result = {
-        ragEntries: (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) ? ragEntries : inMemoryStore.ragEntries,
-        autoResponses: (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) ? autoResponses : inMemoryStore.autoResponses,
-      };
+      // IMPORTANT: Only use fallback if we have NO persistent storage configured
+      // If persistent storage exists but is empty, return empty arrays to avoid confusion
+      const hasPersistentStorage = !!kvClient;
       
-      if (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) {
-        console.log(`✓ Loaded ${ragEntries.length} RAG entries from persistent storage`);
-      } else {
-        console.log(`⚠ No RAG entries in persistent storage, using fallback (${result.ragEntries.length} entries)`);
-      }
+      let result: DataStore;
       
-      if (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) {
-        console.log(`✓ Loaded ${autoResponses.length} auto-responses from persistent storage`);
+      if (hasPersistentStorage) {
+        // We have persistent storage - use what's stored (even if empty)
+        result = {
+          ragEntries: (ragEntries && Array.isArray(ragEntries)) ? ragEntries : [],
+          autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : [],
+        };
+        
+        if (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) {
+          console.log(`✓ Loaded ${ragEntries.length} RAG entries from persistent storage`);
+        } else {
+          console.log(`⚠ No RAG entries found in persistent storage (database is empty)`);
+        }
+        
+        if (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) {
+          console.log(`✓ Loaded ${autoResponses.length} auto-responses from persistent storage`);
+        } else {
+          console.log(`⚠ No auto-responses found in persistent storage (database is empty)`);
+        }
       } else {
-        console.log(`⚠ No auto-responses in persistent storage, using fallback (${result.autoResponses.length} responses)`);
+        // No persistent storage - use in-memory fallback
+        result = {
+          ragEntries: (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) ? ragEntries : inMemoryStore.ragEntries,
+          autoResponses: (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) ? autoResponses : inMemoryStore.autoResponses,
+        };
+        
+        console.log(`⚠ Using in-memory fallback data (persistent storage not configured)`);
+        console.log(`   ⚠⚠⚠ WARNING: Data will be lost on redeploy! Configure Vercel KV or Redis.`);
       }
       
       return result;
@@ -200,6 +218,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'POST') {
     // Update data
     try {
+      await initKV(); // Ensure KV is initialized before saving
+      
       const currentData = await getDataStore();
       const { ragEntries, autoResponses } = req.body as Partial<DataStore>;
       
@@ -211,12 +231,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       
       console.log(`📝 Saving data: ${updatedData.ragEntries.length} RAG entries, ${updatedData.autoResponses.length} auto-responses`);
       
+      // Check if we have persistent storage before saving
+      if (!kvClient) {
+        console.error('❌ CRITICAL: No persistent storage configured! Data will be lost on redeploy.');
+        console.error('   Please configure Vercel KV or Redis. See SETUP_VERCEL_KV.md for instructions.');
+        // Still save to in-memory as fallback, but warn the user
+        await saveDataStore(updatedData);
+        return res.status(200).json({ 
+          success: true, 
+          data: updatedData,
+          warning: 'No persistent storage configured. Data saved to memory only and will be lost on redeploy. Please configure Vercel KV or Redis.'
+        });
+      }
+      
       await saveDataStore(updatedData);
       
-      // Verify the save by reading back
-      const verifyData = await getDataStore();
-      if (verifyData.ragEntries.length !== updatedData.ragEntries.length) {
-        console.error(`⚠ Data mismatch after save! Expected ${updatedData.ragEntries.length} RAG entries, got ${verifyData.ragEntries.length}`);
+      // Verify the save by reading back (only if we have persistent storage)
+      if (kvClient) {
+        const verifyData = await getDataStore();
+        if (verifyData.ragEntries.length !== updatedData.ragEntries.length) {
+          console.error(`⚠ Data mismatch after save! Expected ${updatedData.ragEntries.length} RAG entries, got ${verifyData.ragEntries.length}`);
+          return res.status(500).json({ 
+            error: 'Data verification failed after save',
+            warning: 'Data may not have persisted correctly'
+          });
+        } else {
+          console.log(`✓ Data verified: ${verifyData.ragEntries.length} RAG entries persisted successfully`);
+        }
       }
       
       return res.status(200).json({ success: true, data: updatedData });
