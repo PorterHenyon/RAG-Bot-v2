@@ -104,6 +104,7 @@ async function getDataStore(): Promise<DataStore> {
           try {
             ragEntries = JSON.parse(ragEntries);
           } catch (e) {
+            console.error('Error parsing rag_entries JSON:', e);
             ragEntries = null;
           }
         }
@@ -111,6 +112,7 @@ async function getDataStore(): Promise<DataStore> {
           try {
             autoResponses = JSON.parse(autoResponses);
           } catch (e) {
+            console.error('Error parsing auto_responses JSON:', e);
             autoResponses = null;
           }
         }
@@ -120,15 +122,31 @@ async function getDataStore(): Promise<DataStore> {
         autoResponses = await kvClient.get('auto_responses');
       }
       
-      return {
-        ragEntries: ragEntries || inMemoryStore.ragEntries,
-        autoResponses: autoResponses || inMemoryStore.autoResponses,
+      // Use stored data if available, otherwise fall back to in-memory
+      const result = {
+        ragEntries: (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) ? ragEntries : inMemoryStore.ragEntries,
+        autoResponses: (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) ? autoResponses : inMemoryStore.autoResponses,
       };
+      
+      if (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) {
+        console.log(`✓ Loaded ${ragEntries.length} RAG entries from persistent storage`);
+      } else {
+        console.log(`⚠ No RAG entries in persistent storage, using fallback (${result.ragEntries.length} entries)`);
+      }
+      
+      if (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) {
+        console.log(`✓ Loaded ${autoResponses.length} auto-responses from persistent storage`);
+      } else {
+        console.log(`⚠ No auto-responses in persistent storage, using fallback (${result.autoResponses.length} responses)`);
+      }
+      
+      return result;
     } catch (error) {
       console.error('Error reading from Redis/KV:', error);
       return inMemoryStore;
     }
   }
+  console.log(`⚠ No persistent storage configured, using in-memory store (${inMemoryStore.ragEntries.length} RAG entries, ${inMemoryStore.autoResponses.length} auto-responses)`);
   return inMemoryStore;
 }
 
@@ -141,16 +159,20 @@ async function saveDataStore(data: DataStore): Promise<void> {
         // Direct Redis - store as JSON strings
         await kvClient.set('rag_entries', JSON.stringify(data.ragEntries));
         await kvClient.set('auto_responses', JSON.stringify(data.autoResponses));
+        console.log(`✓ Saved ${data.ragEntries.length} RAG entries and ${data.autoResponses.length} auto-responses to Redis`);
       } else {
         // Vercel KV
         await kvClient.set('rag_entries', data.ragEntries);
         await kvClient.set('auto_responses', data.autoResponses);
+        console.log(`✓ Saved ${data.ragEntries.length} RAG entries and ${data.autoResponses.length} auto-responses to Vercel KV`);
       }
     } catch (error) {
       console.error('Error saving to Redis/KV:', error);
+      throw error; // Re-throw so caller knows save failed
     }
   } else {
     inMemoryStore = data;
+    console.log(`⚠ Saved to in-memory storage (will be lost on restart): ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses`);
   }
 }
 
@@ -181,16 +203,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const currentData = await getDataStore();
       const { ragEntries, autoResponses } = req.body as Partial<DataStore>;
       
+      // Only update fields that are provided and valid
       const updatedData: DataStore = {
         ragEntries: (ragEntries && Array.isArray(ragEntries)) ? ragEntries : currentData.ragEntries,
         autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : currentData.autoResponses,
       };
       
+      console.log(`📝 Saving data: ${updatedData.ragEntries.length} RAG entries, ${updatedData.autoResponses.length} auto-responses`);
+      
       await saveDataStore(updatedData);
+      
+      // Verify the save by reading back
+      const verifyData = await getDataStore();
+      if (verifyData.ragEntries.length !== updatedData.ragEntries.length) {
+        console.error(`⚠ Data mismatch after save! Expected ${updatedData.ragEntries.length} RAG entries, got ${verifyData.ragEntries.length}`);
+      }
+      
       return res.status(200).json({ success: true, data: updatedData });
     } catch (error) {
       console.error('Error saving data:', error);
-      return res.status(400).json({ error: 'Invalid request body' });
+      return res.status(500).json({ error: `Failed to save data: ${error instanceof Error ? error.message : 'Unknown error'}` });
     }
   }
 

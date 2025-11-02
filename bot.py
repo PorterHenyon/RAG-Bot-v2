@@ -101,6 +101,13 @@ async def fetch_data_from_api():
                         print(f"✓ Synced {len(RAG_DATABASE)} RAG entries and {len(AUTO_RESPONSES)} auto-responses from dashboard.")
                         if rag_changed:
                             print(f"  → RAG entries changed: {len(new_rag)} (was {old_rag_count})")
+                            # Log new RAG entry titles for debugging
+                            old_rag_ids = {e.get('id') for e in RAG_DATABASE}
+                            for rag in new_rag:
+                                rag_id = rag.get('id')
+                                if rag_id and rag_id not in old_rag_ids:
+                                    print(f"    + New RAG entry: '{rag.get('title', 'Unknown')}' (ID: {rag_id})")
+                                    print(f"      Keywords: {', '.join(rag.get('keywords', []))}")
                         if auto_changed:
                             print(f"  → Auto-responses changed: {len(new_auto)} (was {old_auto_count})")
                             # Log new auto-response names for debugging
@@ -110,6 +117,12 @@ async def fetch_data_from_api():
                                     print(f"    + New auto-response: '{auto.get('name', 'Unknown')}' with triggers: {auto.get('triggerKeywords', [])}")
                     else:
                         print(f"✓ Data already up to date ({len(RAG_DATABASE)} RAG entries, {len(AUTO_RESPONSES)} auto-responses)")
+                        # Log all RAG entry titles for debugging
+                        print(f"  📋 Available RAG entries:")
+                        for rag in RAG_DATABASE[:5]:  # Show first 5
+                            print(f"     - {rag.get('title', 'Unknown')} (ID: {rag.get('id', 'N/A')})")
+                        if len(RAG_DATABASE) > 5:
+                            print(f"     ... and {len(RAG_DATABASE) - 5} more")
                     return True
                 elif response.status == 404:
                     print(f"⚠ Dashboard API not found (404) at {DATA_API_URL}. Check your URL configuration.")
@@ -256,18 +269,47 @@ def get_auto_response(query: str) -> str | None:
     return None
 
 def find_relevant_rag_entries(query, db=RAG_DATABASE):
+    """Find relevant RAG entries with improved scoring algorithm"""
+    # Filter out short words (less than 3 chars) for better matching
     query_words = set(query.lower().split())
+    query_words = {word for word in query_words if len(word) > 2}
+    
     scored_entries = []
     for entry in db:
         score = 0
-        # Combine all text fields for searching
-        search_text = f"{entry['title']} {entry['content']} {' '.join(entry['keywords'])}".lower()
+        entry_title = entry.get('title', '').lower()
+        entry_content = entry.get('content', '').lower()
+        entry_keywords = ' '.join(entry.get('keywords', [])).lower()
+        
+        # Weighted scoring (same as dashboard):
+        # - Title match: 5 points (highest priority)
+        # - Keyword match: 3 points (high priority)
+        # - Content match: 1 point (lower priority)
         for word in query_words:
-            if word in search_text:
+            if word in entry_title:
+                score += 5
+            if word in entry_keywords:
+                score += 3
+            if word in entry_content:
                 score += 1
+        
         if score > 0:
             scored_entries.append({'entry': entry, 'score': score})
+    
+    # Sort by score (highest first) and filter out very low scores
     scored_entries.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Log for debugging
+    if scored_entries:
+        top_score = scored_entries[0]['score']
+        print(f"📊 Found {len(scored_entries)} relevant RAG entries (top score: {top_score})")
+        for item in scored_entries[:3]:  # Log top 3
+            entry_title = item['entry'].get('title', 'Unknown')
+            print(f"   - '{entry_title}' (score: {item['score']})")
+    else:
+        print(f"⚠ No RAG entries matched query: '{query[:50]}...'")
+        print(f"   Total RAG entries in database: {len(db)}")
+    
     return [item['entry'] for item in scored_entries]
 
 SYSTEM_PROMPT = (
@@ -634,11 +676,37 @@ async def on_thread_create(thread):
         print(f"✓ Responded to '{thread.name}' with an auto-response.")
     else:
         relevant_docs = find_relevant_rag_entries(user_question)
+        
+        # Use a score threshold similar to dashboard (score of 5 = title match minimum)
+        # Get entries with scores if available
+        SCORE_THRESHOLD = 5  # Minimum confidence threshold
+        confident_docs = []
+        
+        # Recalculate scores to filter by threshold
+        query_words = set(user_question.lower().split())
+        query_words = {word for word in query_words if len(word) > 2}
+        
+        for entry in relevant_docs:
+            score = 0
+            entry_title = entry.get('title', '').lower()
+            entry_keywords = ' '.join(entry.get('keywords', [])).lower()
+            entry_content = entry.get('content', '').lower()
+            
+            for word in query_words:
+                if word in entry_title:
+                    score += 5
+                if word in entry_keywords:
+                    score += 3
+                if word in entry_content:
+                    score += 1
+            
+            if score >= SCORE_THRESHOLD:
+                confident_docs.append(entry)
 
-        if relevant_docs:
-            bot_response_text = await generate_ai_response(user_question, relevant_docs[:2])  # Use top 2 docs
+        if confident_docs:
+            bot_response_text = await generate_ai_response(user_question, confident_docs[:2])  # Use top 2 confident docs
             await thread.send(bot_response_text)
-            print(f"Responded to '{thread.name}' with a RAG-based AI answer.")
+            print(f"Responded to '{thread.name}' with a RAG-based AI answer ({len(confident_docs)} confident matches).")
         else:
             escalation_message = (
                 "I'm sorry, I couldn't find a confident answer in my knowledge base. "
