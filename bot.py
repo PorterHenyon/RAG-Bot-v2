@@ -1,7 +1,9 @@
 import os
 import asyncio
 import json
+import re
 from datetime import datetime
+from pathlib import Path
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -50,9 +52,16 @@ intents.members = True
 # Thread detection works automatically with these intents
 bot = commands.Bot(command_prefix="!unused-prefix!", intents=intents)
 
+# --- Constants ---
+IGNORE = "!"  # Messages starting with this prefix are ignored
+
 # --- DATA STORAGE (Synced from Dashboard) ---
 RAG_DATABASE = []
 AUTO_RESPONSES = []
+
+# --- Local RAG Storage ---
+LOCALRAG_DIR = Path("localrag")
+LOCALRAG_DIR.mkdir(exist_ok=True)
 
 # --- DATA SYNC FUNCTIONS ---
 async def fetch_data_from_api():
@@ -60,14 +69,16 @@ async def fetch_data_from_api():
     global RAG_DATABASE, AUTO_RESPONSES
     
     # Skip API call if URL is still the placeholder
-    if 'your-vercel-app' in DATA_API_URL or DATA_API_URL.endswith('/api/data') and 'vercel.app' not in DATA_API_URL.replace('your-vercel-app.vercel.app', ''):
+    if 'your-vercel-app' in DATA_API_URL:
         print("ℹ Skipping API sync - Vercel URL not configured. Bot will use local data.")
         load_local_fallback_data()
         return False
     
+    print(f"🔗 Attempting to fetch data from: {DATA_API_URL}")
+    
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{DATA_API_URL}", timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.get(f"{DATA_API_URL}", timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
                     new_rag = data.get('ragEntries', [])
@@ -85,6 +96,7 @@ async def fetch_data_from_api():
                     AUTO_RESPONSES = new_auto
                     
                     # Log changes for visibility
+                    print(f"✓ Successfully connected to dashboard API!")
                     if rag_changed or auto_changed:
                         print(f"✓ Synced {len(RAG_DATABASE)} RAG entries and {len(AUTO_RESPONSES)} auto-responses from dashboard.")
                         if rag_changed:
@@ -96,22 +108,36 @@ async def fetch_data_from_api():
                                 auto_id = auto.get('id')
                                 if auto_id and auto_id not in old_auto_ids:
                                     print(f"    + New auto-response: '{auto.get('name', 'Unknown')}' with triggers: {auto.get('triggerKeywords', [])}")
+                    else:
+                        print(f"✓ Data already up to date ({len(RAG_DATABASE)} RAG entries, {len(AUTO_RESPONSES)} auto-responses)")
                     return True
                 elif response.status == 404:
-                    print("ℹ Dashboard API not found (404). Using local data. Deploy to Vercel to sync with dashboard.")
+                    print(f"⚠ Dashboard API not found (404) at {DATA_API_URL}. Check your URL configuration.")
+                    print("ℹ Using local data. Deploy to Vercel to sync with dashboard.")
                     load_local_fallback_data()
                     return False
                 else:
-                    print(f"⚠ Failed to fetch data from API: Status {response.status}. Using local data.")
+                    text = await response.text()
+                    print(f"⚠ Failed to fetch data from API: Status {response.status}")
+                    print(f"   Response: {text[:200]}")
+                    print("ℹ Using local data.")
                     load_local_fallback_data()
                     return False
     except asyncio.TimeoutError:
-        print("ℹ API request timed out. Using local data.")
+        print(f"⚠ API request timed out when connecting to {DATA_API_URL}")
+        print("ℹ Using local data.")
+        load_local_fallback_data()
+        return False
+    except aiohttp.ClientError as e:
+        print(f"⚠ Network error connecting to dashboard API: {type(e).__name__}: {str(e)}")
+        print(f"   URL attempted: {DATA_API_URL}")
+        print("ℹ Using local data. Check your DATA_API_URL environment variable.")
         load_local_fallback_data()
         return False
     except Exception as e:
-        print(f"ℹ Could not connect to dashboard API: {type(e).__name__}. Using local data.")
-        # Fall back to local data if API fails
+        print(f"⚠ Error connecting to dashboard API: {type(e).__name__}: {str(e)}")
+        print(f"   URL attempted: {DATA_API_URL}")
+        print("ℹ Using local data.")
         load_local_fallback_data()
         return False
 
@@ -135,6 +161,75 @@ def load_local_fallback_data():
         },
     ]
     print("✓ Loaded fallback local data.")
+
+# --- Context Fetching Functions ---
+async def fetch_context(msg):
+    """Fetch last 10 messages and format them"""
+    messages = []
+    async for m in msg.channel.history(limit=10):
+        if m.content.startswith(IGNORE):  # Ignore
+            continue
+        messages.append(m)
+    messages.reverse()  # Oldest to newest
+    formatted_lines = []
+    emoji_pattern = re.compile(r'<a?:([a-zA-Z0-9_]+):\d+>')
+    for m in messages:
+        author = m.author.display_name
+        content = m.content
+        
+        # Replace mentions with display names
+        for user in m.mentions:
+            content = content.replace(f"<@{user.id}>", f"<@{user.display_name}>")
+            content = content.replace(f"<@!{user.id}>", f"<@{user.display_name}>")
+        
+        # Replace emojis
+        content = emoji_pattern.sub(r'<Emoji: \1>', content)
+        
+        # Check for attachments
+        if m.attachments:
+            for attachment in m.attachments:
+                if attachment.content_type and "image" in attachment.content_type:
+                    content += " <Media: Image>"
+                else:
+                    content += " <Media: File>"
+        
+        # Replies
+        if m.reference and m.reference.resolved:
+            replied_to = m.reference.resolved.author.display_name
+            formatted_line = f"<@{author}> Replied to <@{replied_to}> with: {content}"
+        else:
+            formatted_line = f"<@{author}> Said: {content}"
+        
+        formatted_lines.append(formatted_line)
+    
+    formatted_string = "\n".join(formatted_lines)
+    return formatted_string
+
+# --- Local RAG Functions ---
+async def download_rag_to_local():
+    """Download RAG entries to local files"""
+    try:
+        # Clear existing local files
+        for file in LOCALRAG_DIR.glob("*.txt"):
+            file.unlink()
+        
+        # Write each RAG entry to a file
+        for entry in RAG_DATABASE:
+            entry_id = entry.get('id', f"RAG-{hash(entry.get('title', 'unknown'))}")
+            filename = f"{entry_id}.txt"
+            filepath = LOCALRAG_DIR / filename
+            
+            content = f"Title: {entry.get('title', '')}\n"
+            content += f"Content: {entry.get('content', '')}\n"
+            content += f"Keywords: {', '.join(entry.get('keywords', []))}"
+            
+            filepath.write_text(content, encoding='utf-8')
+        
+        print(f"✓ Downloaded {len(RAG_DATABASE)} RAG entries to localrag/")
+        return len(RAG_DATABASE)
+    except Exception as e:
+        print(f"⚠ Error downloading RAG to local: {e}")
+        return 0
 
 # --- CORE BOT LOGIC (MIRRORS PLAYGROUND) ---
 def get_auto_response(query: str) -> str | None:
@@ -175,41 +270,88 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE):
     scored_entries.sort(key=lambda x: x['score'], reverse=True)
     return [item['entry'] for item in scored_entries]
 
+SYSTEM_PROMPT = (
+    "You are an expert support bot for a macroing application called 'Revolution Macro'. "
+    "Using the context from the knowledge base provided in user messages, provide helpful and friendly answers. "
+    "If the context is highly relevant, you can reference the documentation by title in your response."
+)
+
+def build_user_context(query, context_entries):
+    """Build the user message with query and knowledge base context."""
+    context_text = "\n\n".join(
+        [f"Title: {entry['title']}\nContent: {entry['content']}"
+         for entry in context_entries]
+    )
+    return (
+        f"Knowledge Base Context:\n{context_text}\n\n"
+        f"User Question:\n{query}"
+    )
+
 async def generate_ai_response(query, context_entries):
     try:
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
-        context_text = "\n\n".join(
-            [f"Title: {entry['title']}\nContent: {entry['content']}" for entry in context_entries]
+        model = genai.GenerativeModel(
+            'gemini-2.5-flash',
+            system_instruction=SYSTEM_PROMPT
         )
-
-        prompt = (
-            "You are an expert support bot for Revolution Macro, a powerful scripting application for gaming automation. "
-            "Your role is to help users troubleshoot issues, understand features, and get the most out of Revolution Macro.\n\n"
-            "Guidelines:\n"
-            "- Be friendly, professional, and helpful\n"
-            "- Provide clear, step-by-step solutions when possible\n"
-            "- Reference specific Revolution Macro features and settings by name\n"
-            "- If the context doesn't fully answer the question, be honest about limitations\n"
-            "- Always maintain a positive, supportive tone\n\n"
-            f"User Question:\n\"\"\"{query}\"\"\"\n\n"
-            "Using the following knowledge base context, provide a helpful answer. "
-            "If the context is highly relevant, you can reference it directly.\n\n"
-            f"Knowledge Base Context:\n{context_text}"
-        )
-
-        # Run the synchronous generate_content in a thread to avoid blocking
+        
+        # User context separated
+        user_context = build_user_context(query, context_entries)
+        
+        # Generate response
         loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, model.generate_content, prompt)
+        response = await loop.run_in_executor(
+            None,
+            model.generate_content,
+            user_context
+        )
         return response.text
     except Exception as e:
         print(f"An error occurred with the Gemini API: {e}")
         return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
 
+async def analyze_conversation(conversation_text):
+    """Analyze a conversation and create a RAG entry from it"""
+    try:
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        prompt = (
+            "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
+            "- The 'title' should be a clear, concise summary of the problem (e.g., 'Fix for ... Error').\n"
+            "- The 'content' should be a detailed explanation of the solution.\n"
+            "- The 'keywords' should be an array of relevant search terms.\n\n"
+            f"Conversation:\n{conversation_text}\n\n"
+            "Return only a valid JSON object with this structure:\n"
+            '{\n'
+            '  "title": "string",\n'
+            '  "content": "string",\n'
+            '  "keywords": ["string1", "string2", ...]\n'
+            '}'
+        )
+        
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, model.generate_content, prompt)
+        
+        # Parse JSON response
+        response_text = response.text.strip()
+        # Try to extract JSON from response (handle markdown code blocks)
+        if "```json" in response_text:
+            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in response_text:
+            response_text = response_text.split("```")[1].split("```")[0].strip()
+        
+        parsed = json.loads(response_text)
+        return parsed
+    except Exception as e:
+        print(f"Error analyzing conversation: {e}")
+        return None
+
 # --- PERIODIC DATA SYNC ---
-@tasks.loop(minutes=0.5)  # Sync every 30 seconds to pick up new RAG entries quickly
+@tasks.loop(hours=1)  # Sync every hour
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
+    # Also download to local RAG after syncing
+    await download_rag_to_local()
 
 @sync_data_task.before_loop
 async def before_sync_task():
@@ -219,9 +361,19 @@ async def before_sync_task():
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
+    print('-------------------')
+    print(f'📡 API Configuration:')
+    if 'your-vercel-app' in DATA_API_URL:
+        print(f'   ⚠ DATA_API_URL not configured (using placeholder)')
+        print(f'   ℹ Set DATA_API_URL in .env file to connect to dashboard')
+    else:
+        print(f'   ✓ DATA_API_URL: {DATA_API_URL}')
+    print('-------------------')
     
     # Initial data sync
     await fetch_data_from_api()
+    # Initial local RAG download
+    await download_rag_to_local()
     
     # Start periodic sync
     sync_data_task.start()
@@ -303,10 +455,12 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
     """Send forum post data to the dashboard API with full Discord information"""
     # Skip API call if URL is still the placeholder
     if 'your-vercel-app' in DATA_API_URL:
+        print("ℹ Skipping forum post sync - Vercel URL not configured.")
         return  # Silently skip if API not configured
     
     try:
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        print(f"🔗 Sending forum post to: {forum_api_url}")
         
         # Get thread creation time
         thread_created = thread.created_at if hasattr(thread, 'created_at') else datetime.now()
@@ -345,7 +499,7 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
         }
         
         async with aiohttp.ClientSession() as session:
-            async with session.post(forum_api_url, json=post_data, timeout=aiohttp.ClientTimeout(total=3)) as response:
+            async with session.post(forum_api_url, json=post_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     print(f"✓ Forum post sent to dashboard: '{thread.name}' by {owner_name}")
                 else:
@@ -353,6 +507,9 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
                     print(f"⚠ Failed to send forum post to API: Status {response.status}")
                     print(f"   Response: {text[:200]}")
                     print(f"   API URL: {forum_api_url}")
+    except aiohttp.ClientError as e:
+        print(f"⚠ Network error sending forum post to API: {type(e).__name__}: {str(e)}")
+        print(f"   API URL attempted: {forum_api_url}")
     except Exception as e:
         print(f"⚠ Error sending forum post to API: {type(e).__name__}: {str(e)}")
         print(f"   API URL attempted: {forum_api_url}")
@@ -487,6 +644,7 @@ async def on_thread_create(thread):
     
         # Update forum post in API with bot response (must include all post data for full update)
         if bot_response_text and 'your-vercel-app' not in DATA_API_URL:
+            print(f"🔗 Updating forum post with bot response...")
             try:
                 # Determine status based on response type
                 post_status = 'AI Response' if auto_response or (bot_response_text != "I'm sorry, I couldn't find a confident answer in my knowledge base. I've flagged this for a human support agent to review.") else 'Human Support'
@@ -664,10 +822,130 @@ async def reload(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True)
     success = await fetch_data_from_api()
     if success:
-        await interaction.followup.send("✓ Data reloaded successfully from dashboard!", ephemeral=True)
+        count = await download_rag_to_local()
+        await interaction.followup.send(f"✓ Data reloaded successfully from dashboard! Downloaded {count} RAG entries to localrag/.", ephemeral=True)
     else:
         await interaction.followup.send("⚠ Failed to reload data. Using cached data.", ephemeral=True)
     print(f"Reload command issued by {interaction.user}.")
+
+@bot.tree.command(name="mark_as_solve", description="Mark thread as solved and send conversation to analyzer (Staff only).")
+@app_commands.default_permissions(administrator=True)
+async def mark_as_solve(interaction: discord.Interaction):
+    """Mark a thread as solved and analyze the conversation for RAG entry creation"""
+    # Check if this is in a thread
+    if not isinstance(interaction.channel, discord.Thread):
+        await interaction.response.send_message("❌ This command can only be used in a thread.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        # Fetch all messages from the thread and format them
+        messages = []
+        async for m in interaction.channel.history(limit=50, oldest_first=False):
+            if m.content and not m.content.startswith(IGNORE):
+                messages.append(m)
+        messages.reverse()  # Oldest to newest
+        
+        if not messages:
+            await interaction.followup.send("❌ No messages found in this thread.", ephemeral=True)
+            return
+        
+        # Format messages using the same logic as fetch_context
+        formatted_lines = []
+        emoji_pattern = re.compile(r'<a?:([a-zA-Z0-9_]+):\d+>')
+        for m in messages:
+            author = m.author.display_name
+            content = m.content
+            
+            # Replace mentions with display names
+            for user in m.mentions:
+                content = content.replace(f"<@{user.id}>", f"<@{user.display_name}>")
+                content = content.replace(f"<@!{user.id}>", f"<@{user.display_name}>")
+            
+            # Replace emojis
+            content = emoji_pattern.sub(r'<Emoji: \1>', content)
+            
+            # Check for attachments
+            if m.attachments:
+                for attachment in m.attachments:
+                    if attachment.content_type and "image" in attachment.content_type:
+                        content += " <Media: Image>"
+                    else:
+                        content += " <Media: File>"
+            
+            # Replies
+            if m.reference and m.reference.resolved:
+                replied_to = m.reference.resolved.author.display_name
+                formatted_line = f"<@{author}> Replied to <@{replied_to}> with: {content}"
+            else:
+                formatted_line = f"<@{author}> Said: {content}"
+            
+            formatted_lines.append(formatted_line)
+        
+        conversation_text = "\n".join(formatted_lines)
+        
+        # Analyze conversation to create RAG entry
+        await interaction.followup.send("🔍 Analyzing conversation...", ephemeral=True)
+        rag_entry = await analyze_conversation(conversation_text)
+        
+        if rag_entry:
+            # Update forum post status to Solved
+            thread = interaction.channel
+            forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+            
+            if 'your-vercel-app' not in DATA_API_URL:
+                try:
+                    # Get current post
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(forum_api_url) as get_response:
+                            current_posts = []
+                            if get_response.status == 200:
+                                current_posts = await get_response.json()
+                            
+                            # Find matching post
+                            matching_post = None
+                            for post in current_posts:
+                                if post.get('postId') == str(thread.id) or post.get('id') == f'POST-{thread.id}':
+                                    matching_post = post
+                                    break
+                            
+                            if matching_post:
+                                # Update post status to Solved
+                                matching_post['status'] = 'Solved'
+                                
+                                post_update = {
+                                    'action': 'update',
+                                    'post': matching_post
+                                }
+                                
+                                async with session.post(forum_api_url, json=post_update, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                    if post_response.status == 200:
+                                        print(f"✓ Updated forum post status to Solved for thread {thread.id}")
+            
+                except Exception as e:
+                    print(f"⚠ Error updating forum post status: {e}")
+            
+            # Return the RAG entry for staff to review
+            entry_preview = f"**Title:** {rag_entry.get('title', 'N/A')}\n"
+            entry_preview += f"**Content:** {rag_entry.get('content', 'N/A')[:200]}...\n"
+            entry_preview += f"**Keywords:** {', '.join(rag_entry.get('keywords', []))}"
+            
+            await interaction.followup.send(
+                f"✅ Thread marked as solved!\n\n"
+                f"**Generated RAG Entry:**\n{entry_preview}\n\n"
+                f"You can add this to the RAG database from the dashboard.",
+                ephemeral=True
+            )
+            print(f"✓ Marked thread {thread.id} as solved and analyzed conversation")
+        else:
+            await interaction.followup.send("⚠ Failed to analyze conversation. Thread status updated but no RAG entry generated.", ephemeral=True)
+    
+    except Exception as e:
+        print(f"Error in mark_as_solve command: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
 # --- RUN THE BOT ---
 if __name__ == "__main__":
