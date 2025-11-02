@@ -114,11 +114,14 @@ const initialSlashCommands: SlashCommand[] = [
 ];
 
 export const useMockData = () => {
-    // Start with empty array - API will populate if available
+    // Start with empty arrays - API will populate, prevents flashing
     const [forumPosts, setForumPosts] = useState<ForumPost[]>([]);
-    const [ragEntries, setRagEntries] = useState<RagEntry[]>(initialRagEntries);
-    const [autoResponses, setAutoResponses] = useState<AutoResponse[]>(initialAutoResponses);
+    const [ragEntries, setRagEntries] = useState<RagEntry[]>([]);
+    const [autoResponses, setAutoResponses] = useState<AutoResponse[]>([]);
     const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(initialSlashCommands);
+    
+    // Track if we've loaded from API to prevent sync during initial load
+    const [isLoading, setIsLoading] = useState(true);
 
     // Load data from API on mount (only once, prevent flashing)
     useEffect(() => {
@@ -130,8 +133,7 @@ export const useMockData = () => {
                 const data = await dataService.fetchData();
                 // Only update if component is still mounted
                 if (isMounted) {
-                    // Always use API data if available (even if empty) to clear defaults
-                    // This ensures we show what's actually in Redis, not hardcoded defaults
+                    // Always use API data (even if empty) - this is the source of truth
                     if (data.ragEntries && Array.isArray(data.ragEntries)) {
                         setRagEntries(data.ragEntries);
                         if (data.ragEntries.length > 0) {
@@ -149,10 +151,17 @@ export const useMockData = () => {
                         }
                     }
                     hasLoaded = true;
+                    setIsLoading(false); // Mark as loaded, now allow sync
                 }
             } catch (error) {
-                console.error('Failed to load data from API, using local data:', error);
-                hasLoaded = true; // Mark as loaded even on error to prevent retries
+                console.error('Failed to load data from API, using local defaults:', error);
+                // Only use defaults if API fails - this is fallback behavior
+                if (isMounted) {
+                    setRagEntries(initialRagEntries);
+                    setAutoResponses(initialAutoResponses);
+                }
+                hasLoaded = true;
+                setIsLoading(false);
             }
         };
         loadData();
@@ -213,24 +222,29 @@ export const useMockData = () => {
     }, []);
 
     // Sync data to API whenever RAG entries or auto-responses change (with debounce)
+    // IMPORTANT: Only sync after initial load is complete to prevent overwriting API data
     useEffect(() => {
-        // Skip sync on initial mount to prevent flashing
-        let skipFirst = true;
+        // Don't sync if we're still loading initial data from API
+        if (isLoading) {
+            return;
+        }
+        
+        // Debounce to prevent excessive API calls
         const timeoutId = setTimeout(() => {
-            if (!skipFirst) {
-                const syncData = async () => {
-                    try {
-                        await dataService.saveData(ragEntries, autoResponses);
-                    } catch (error) {
-                        console.error('Failed to sync data to API:', error);
-                    }
-                };
-                syncData();
-            }
-            skipFirst = false;
-        }, 2000); // Increased debounce to 2 seconds to reduce flashing
+            const syncData = async () => {
+                try {
+                    console.log(`💾 Syncing to API: ${ragEntries.length} RAG entries, ${autoResponses.length} auto-responses`);
+                    await dataService.saveData(ragEntries, autoResponses);
+                    console.log(`✓ Successfully synced to API`);
+                } catch (error) {
+                    console.error('Failed to sync data to API:', error);
+                }
+            };
+            syncData();
+        }, 1000); // 1 second debounce
+        
         return () => clearTimeout(timeoutId);
-    }, [ragEntries, autoResponses]);
+    }, [ragEntries, autoResponses, isLoading]);
 
     useEffect(() => {
         const interval = setInterval(() => {
