@@ -137,7 +137,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'POST') {
     try {
-      const action = req.body.action;
+      // Log request for debugging
+      console.log('POST request received to /api/forum-posts');
+      console.log('Request body:', JSON.stringify(req.body, null, 2));
+      
+      const action = req.body?.action;
+
+      if (!action) {
+        console.error('No action specified in request body');
+        return res.status(400).json({ error: 'Missing action in request body' });
+      }
 
       if (action === 'create') {
         // Bot is creating a new forum post

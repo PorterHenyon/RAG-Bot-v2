@@ -498,8 +498,13 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
             }
         }
         
+        headers = {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        
         async with aiohttp.ClientSession() as session:
-            async with session.post(forum_api_url, json=post_data, timeout=aiohttp.ClientTimeout(total=5)) as response:
+            async with session.post(forum_api_url, json=post_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
                     print(f"✓ Forum post sent to dashboard: '{thread.name}' by {owner_name}")
                 else:
@@ -507,6 +512,7 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
                     print(f"⚠ Failed to send forum post to API: Status {response.status}")
                     print(f"   Response: {text[:200]}")
                     print(f"   API URL: {forum_api_url}")
+                    print(f"   Request body: {json.dumps(post_data)[:200]}")
     except aiohttp.ClientError as e:
         print(f"⚠ Network error sending forum post to API: {type(e).__name__}: {str(e)}")
         print(f"   API URL attempted: {forum_api_url}")
@@ -681,13 +687,20 @@ async def on_thread_create(thread):
                         ]
                     }
                 }
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+                
                 async with aiohttp.ClientSession() as session:
-                    async with session.post(forum_api_url, json=post_update, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                    async with session.post(forum_api_url, json=post_update, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                         if response.status == 200:
                             print(f"✓ Updated forum post with bot response in dashboard API")
                         else:
                             text = await response.text()
                             print(f"⚠ Failed to update forum post: Status {response.status}, Response: {text[:200]}")
+                            print(f"   API URL: {forum_api_url}")
+                            print(f"   Request body: {json.dumps(post_update)[:200]}")
             except Exception as e:
                 print(f"⚠ Error updating forum post with bot response: {type(e).__name__}: {str(e)}")
                 import traceback
@@ -800,9 +813,16 @@ async def on_message(message):
                         }
                     
                     # Update post immediately
-                    async with session.post(forum_api_url, json=post_update, timeout=aiohttp.ClientTimeout(total=3)) as post_response:
+                    headers = {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    }
+                    async with session.post(forum_api_url, json=post_update, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
                         if post_response.status == 200:
                             print(f"✓ Updated forum post with message from {user_name}")
+                        else:
+                            text = await post_response.text()
+                            print(f"⚠ Failed to update forum post with message: Status {post_response.status}, Response: {text[:100]}")
         except Exception:
             pass  # Silently fail - bot continues working
     
@@ -919,9 +939,16 @@ async def mark_as_solve(interaction: discord.Interaction):
                                     'post': matching_post
                                 }
                                 
-                                async with session.post(forum_api_url, json=post_update, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                headers = {
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json'
+                                }
+                                async with session.post(forum_api_url, json=post_update, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
                                     if post_response.status == 200:
                                         print(f"✓ Updated forum post status to Solved for thread {thread.id}")
+                                    else:
+                                        text = await post_response.text()
+                                        print(f"⚠ Failed to update forum post status: Status {post_response.status}, Response: {text[:100]}")
             
                 except Exception as e:
                     print(f"⚠ Error updating forum post status: {e}")
