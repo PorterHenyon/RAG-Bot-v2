@@ -90,7 +90,7 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
     }
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     const confirmMessage = post.status === PostStatus.Closed || post.status === PostStatus.Solved
       ? `Are you sure you want to permanently delete this ${post.status.toLowerCase()} post? This action cannot be undone.`
       : `Are you sure you want to permanently delete this post? This action cannot be undone.`;

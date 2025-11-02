@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand } from '../types';
 import { dataService } from '../services/dataService';
 
-const initialForumPosts: ForumPost[] = [
+const _initialForumPosts: ForumPost[] = [
   {
     id: 'POST-001',
     user: { username: 'BeeKeeper#1234', id: '234567890123456789', avatarUrl: 'https://i.pravatar.cc/150?u=bee' },

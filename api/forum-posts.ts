@@ -190,7 +190,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (action === 'close-thread') {
         // Close a Discord thread
-        const { threadId, channelId }: CloseThreadRequest = req.body;
+        const { threadId }: CloseThreadRequest = req.body;
         const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
         
         if (!DISCORD_BOT_TOKEN) {
