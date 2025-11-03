@@ -11,6 +11,7 @@ export enum PostStatus {
   Unsolved = 'Unsolved',
   AIResponse = 'AI Response',
   HumanSupport = 'Human Support',
+  HighPriority = 'High Priority',
   Solved = 'Solved',
   Closed = 'Closed',
 }

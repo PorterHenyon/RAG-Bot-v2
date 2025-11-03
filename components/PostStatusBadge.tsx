@@ -10,6 +10,7 @@ const PostStatusBadge: React.FC<PostStatusBadgeProps> = ({ status }) => {
     [PostStatus.Unsolved]: 'bg-blue-500 text-blue-100',
     [PostStatus.AIResponse]: 'bg-purple-500 text-purple-100',
     [PostStatus.HumanSupport]: 'bg-yellow-500 text-yellow-100',
+    [PostStatus.HighPriority]: 'bg-red-600 text-red-100 animate-pulse',
     [PostStatus.Solved]: 'bg-green-500 text-green-100',
     [PostStatus.Closed]: 'bg-gray-600 text-gray-100',
   };

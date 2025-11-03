@@ -30,7 +30,7 @@ const DashboardView: React.FC = () => {
   const { forumPosts } = useMockData();
   const stats = {
     unsolved: forumPosts.filter(p => p.status === PostStatus.Unsolved).length,
-    inProgress: forumPosts.filter(p => [PostStatus.AIResponse, PostStatus.HumanSupport].includes(p.status)).length,
+    inProgress: forumPosts.filter(p => [PostStatus.AIResponse, PostStatus.HumanSupport, PostStatus.HighPriority].includes(p.status)).length,
     solved: forumPosts.filter(p => p.status === PostStatus.Solved).length,
     closed: forumPosts.filter(p => p.status === PostStatus.Closed).length
   };

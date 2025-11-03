@@ -558,6 +558,102 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
+@tasks.loop(hours=1)  # Run every hour
+async def check_old_posts():
+    """Background task to check for old unsolved posts and escalate them"""
+    try:
+        if 'your-vercel-app' in DATA_API_URL:
+            return  # Skip if API not configured
+        
+        print(f"\n🔍 Checking for old unsolved posts (>12 hours)...")
+        
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(forum_api_url) as response:
+                if response.status != 200:
+                    print(f"⚠ Failed to fetch posts for age check: {response.status}")
+                    return
+                
+                all_posts = await response.json()
+                now = datetime.now()
+                escalated_count = 0
+                
+                for post in all_posts:
+                    status = post.get('status', '')
+                    
+                    # Skip if already solved, closed, or already escalated
+                    if status in ['Solved', 'Closed', 'High Priority']:
+                        continue
+                    
+                    # Check post age
+                    created_at_str = post.get('createdAt')
+                    if not created_at_str:
+                        continue
+                    
+                    try:
+                        # Parse ISO timestamp
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                        # Remove timezone info for comparison
+                        if created_at.tzinfo:
+                            created_at = created_at.replace(tzinfo=None)
+                        
+                        age_hours = (now - created_at).total_seconds() / 3600
+                        
+                        if age_hours > 12:
+                            # Post is older than 12 hours and not solved
+                            thread_id = post.get('postId')
+                            post_title = post.get('postTitle', 'Unknown')
+                            
+                            print(f"⚠ Found old post: '{post_title}' ({age_hours:.1f} hours old)")
+                            
+                            # Update status to High Priority
+                            post['status'] = 'High Priority'
+                            
+                            update_payload = {
+                                'action': 'update',
+                                'post': post
+                            }
+                            
+                            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                            async with session.post(forum_api_url, json=update_payload, headers=headers) as update_response:
+                                if update_response.status == 200:
+                                    print(f"✅ Escalated to High Priority: '{post_title}'")
+                                    escalated_count += 1
+                                    
+                                    # Try to ping support in the thread
+                                    try:
+                                        thread_channel = bot.get_channel(int(thread_id))
+                                        if thread_channel and thread_id not in escalated_threads:
+                                            escalate_embed = discord.Embed(
+                                                title="🚨 Support Team Notified",
+                                                description=f"This post has been open for {int(age_hours)} hours. Our support team has been pinged and will help you soon.",
+                                                color=0xE74C3C  # Red for high priority
+                                            )
+                                            escalate_embed.set_footer(text="Revolution Macro Support • Auto-escalation")
+                                            
+                                            await thread_channel.send(embed=escalate_embed)
+                                            escalated_threads.add(thread_id)  # Mark as escalated
+                                            print(f"📢 Sent high priority notification to thread {thread_id}")
+                                    except Exception as ping_error:
+                                        print(f"⚠ Could not send notification to thread {thread_id}: {ping_error}")
+                                else:
+                                    print(f"❌ Failed to escalate post '{post_title}': {update_response.status}")
+                    
+                    except Exception as parse_error:
+                        print(f"⚠ Error parsing timestamp for post: {parse_error}")
+                        continue
+                
+                if escalated_count > 0:
+                    print(f"✅ Escalated {escalated_count} old post(s) to High Priority")
+                else:
+                    print(f"✓ No old posts found needing escalation")
+    
+    except Exception as e:
+        print(f"❌ Error in check_old_posts task: {e}")
+        import traceback
+        traceback.print_exc()
+
 @bot.event
 async def on_ready():
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
@@ -582,6 +678,11 @@ async def on_ready():
     
     # Start periodic sync
     sync_data_task.start()
+    
+    # Start old post check task
+    if not check_old_posts.is_running():
+        check_old_posts.start()
+        print("✓ Started background task: check_old_posts (runs every hour)")
     
     try:
         synced = await bot.tree.sync()
@@ -834,18 +935,13 @@ async def on_thread_create(thread):
 
     initial_message = history[0].content
     
-    # Send greeting embed AFTER we have the initial message (Discord requirement)
+    # Send greeting embed AFTER we have the initial message (Discord requirement) - SHORTER
     greeting_embed = discord.Embed(
-        title="👋 Welcome to Revolution Macro Support!",
-        description=f"Hi {owner_mention}! Thanks for reaching out. I'm analyzing your question and will respond shortly with the best answer I can provide.",
-        color=0x5865F2  # Discord blurple color
+        title="👋 Revolution Macro Support",
+        description=f"Hi {owner_mention}! Looking for an answer...",
+        color=0x5865F2
     )
-    greeting_embed.add_field(
-        name="⚡ What to Expect",
-        value="I'll search our knowledge base and provide a detailed answer. If I can't fully help, I'll connect you with our support team!",
-        inline=False
-    )
-    greeting_embed.set_footer(text="Revolution Macro AI Support • Powered by Gemini", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+    greeting_embed.set_footer(text="Revolution Macro AI")
     
     try:
         await thread.send(embed=greeting_embed)
@@ -949,28 +1045,18 @@ async def on_thread_create(thread):
             # Found confident matches in knowledge base
             bot_response_text = await generate_ai_response(user_question, confident_docs[:2])  # Use top 2 confident docs
             
-            # Send AI response as professional embed
+            # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
-                title="✅ Revolution Macro Support",
+                title="✅ Solution",
                 description=bot_response_text,
-                color=0x2ECC71  # Green for successful knowledge base matches
+                color=0x2ECC71
             )
-            
-            # Add field showing which docs were used
-            if len(confident_docs) > 0:
-                doc_titles = [doc.get('title', 'Unknown') for doc in confident_docs[:2]]
-                ai_embed.add_field(
-                    name="📚 Based on Documentation",
-                    value="\n".join([f"• {title}" for title in doc_titles]),
-                    inline=False
-                )
-                ai_embed.add_field(
-                    name="✨ Need More Help?",
-                    value="If this doesn't fully solve your issue, let me know and I can provide more details or connect you with our support team!",
-                    inline=False
-                )
-            
-            ai_embed.set_footer(text=f"Revolution Macro AI • Using {len(confident_docs)} knowledge base {'entry' if len(confident_docs) == 1 else 'entries'}", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+            ai_embed.add_field(
+                name="💬 Did this help?",
+                value="Let me know if you need more help!",
+                inline=False
+            )
+            ai_embed.set_footer(text="Revolution Macro AI")
             await thread.send(embed=ai_embed)
             print(f"✅ Responded to '{thread.name}' with RAG-based answer ({len(confident_docs)} documentation {'match' if len(confident_docs) == 1 else 'matches'}).")
         else:
@@ -1033,19 +1119,17 @@ async def on_thread_create(thread):
                 
             except Exception as e:
                 print(f"⚠ Error generating general AI response: {e}")
-                # Fallback: polite message asking for more info
-                bot_response_text = (
-                    "I'm not entirely sure about this specific question. Could you provide a bit more detail? "
-                    "Or if you'd prefer, I can connect you with our support team who can help!"
-                )
+                # Fallback: shorter message
+                bot_response_text = "Not sure about this. Can you give more details or wait for our support team?"
                 
                 fallback_embed = discord.Embed(
-                    title="🤔 Need More Information",
+                    title="🤔 Need More Info",
                     description=bot_response_text,
-                    color=0xF39C12  # Yellow/orange for uncertainty
+                    color=0xF39C12
                 )
-                fallback_embed.set_footer(text="Revolution Macro Support")
+                fallback_embed.set_footer(text="Revolution Macro")
                 await thread.send(embed=fallback_embed)
+                thread_response_type[thread_id] = 'ai'  # Track as AI attempt
                 print(f"⚠ Sent fallback response for '{thread.name}' (AI generation failed).")
     
         # Update forum post in API with bot response (must include all post data for full update)
@@ -1205,10 +1289,24 @@ async def on_message(message):
                         print(f"📊 Conversation has {len(conversation)} messages, bot response: {has_bot_response}")
                         
                         # Start delayed satisfaction analysis if bot has already responded and this is a USER message
+                        # BUT: Don't respond if thread has been escalated to human support
                         new_status = matching_post.get('status', 'Unsolved')
-                        if not is_bot_message and has_bot_response and matching_post.get('status') not in ['Solved', 'Closed']:
+                        thread_id = thread.id
+                        
+                        # Check if thread is escalated to human - if so, bot stays silent
+                        if thread_id in escalated_threads:
+                            print(f"🔇 Thread {thread_id} escalated to human support - bot will not respond")
+                            # Just update the conversation, don't trigger any bot responses
+                            post_update = {
+                                'action': 'update',
+                                'post': {
+                                    **matching_post,
+                                    'conversation': conversation,
+                                    'status': matching_post.get('status', 'Human Support')  # Keep as Human Support
+                                }
+                            }
+                        elif not is_bot_message and has_bot_response and matching_post.get('status') not in ['Solved', 'Closed', 'High Priority']:
                             # Cancel any existing timer for this thread
-                            thread_id = thread.id
                             if thread_id in satisfaction_timers:
                                 satisfaction_timers[thread_id].cancel()
                                 print(f"⏰ Cancelled previous satisfaction timer for thread {thread_id}")
@@ -1239,47 +1337,49 @@ async def on_message(message):
                                     
                                     # Update status based on analysis
                                     updated_status = matching_post.get('status', 'Unsolved')
+                                    response_type = thread_response_type.get(thread_id)  # Get what type of response we gave
                                     
                                     if satisfaction.get('wants_human'):
-                                        # User explicitly wants human support
+                                        # User explicitly wants human support OR is unsatisfied after AI
                                         updated_status = 'Human Support'
+                                        escalated_threads.add(thread_id)  # Mark thread as escalated - bot stops talking
                                         
-                                        # Send human support embed
+                                        # Send shorter human support embed
                                         human_embed = discord.Embed(
-                                            title="👨‍💼 Connecting You with Our Support Team",
-                                            description="I understand you'd like to speak with a member of our support team. No problem! Your request has been escalated and our team has been notified.",
-                                            color=0x3498DB  # Blue color
+                                            title="👨‍💼 Support Team Notified",
+                                            description="Got it! I've notified our support team. They'll help you soon.",
+                                            color=0x3498DB
                                         )
                                         human_embed.add_field(
-                                            name="⏱️ What Happens Next",
-                                            value="A Revolution Macro support team member will review your question and respond as soon as possible. Response times are typically under 24 hours.",
-                                            inline=False
+                                            name="⏰ Response Time",
+                                            value="Usually under 24 hours",
+                                            inline=True
                                         )
                                         human_embed.add_field(
-                                            name="💡 While You Wait",
-                                            value="Feel free to add any additional details or screenshots that might help our team assist you better!",
-                                            inline=False
+                                            name="📸 Tip",
+                                            value="Send screenshots if you have any!",
+                                            inline=True
                                         )
-                                        human_embed.set_footer(text="Revolution Macro Support Team • Human assistance requested")
+                                        human_embed.set_footer(text="Revolution Macro Support Team")
                                         await thread_channel.send(embed=human_embed)
-                                        print(f"👥 User requested human support - thread {thread_id} escalated to staff")
+                                        print(f"👥 User requested human support - thread {thread_id} escalated (bot will stop responding)")
                                         
                                     elif satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
                                         # User is satisfied - mark as solved
                                         updated_status = 'Solved'
                                         
-                                        # Send satisfaction confirmation embed
+                                        # Send shorter satisfaction confirmation embed
                                         confirm_embed = discord.Embed(
-                                            title="✅ Awesome! Issue Resolved",
-                                            description="I'm glad I could help you with this issue! This ticket has been automatically marked as **Solved** and will be locked to keep things organized.",
+                                            title="✅ Great! Issue Solved",
+                                            description="Glad I could help! This post will now be locked.",
                                             color=0x2ECC71
                                         )
                                         confirm_embed.add_field(
-                                            name="💬 Need More Help?",
-                                            value="If you have any other questions, feel free to create a new post anytime. We're here to help!",
+                                            name="💬 More Questions?",
+                                            value="Create a new post anytime!",
                                             inline=False
                                         )
-                                        confirm_embed.set_footer(text="Revolution Macro Support • Satisfaction detected automatically")
+                                        confirm_embed.set_footer(text="Revolution Macro Support")
                                         await thread_channel.send(embed=confirm_embed)
                                         print(f"✅ User satisfaction detected - marking thread {thread_id} as Solved")
                                         
@@ -1369,23 +1469,13 @@ async def on_message(message):
                                                                 print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
                                                                 print(f"   API response: {response_text[:200]}")
                                                                 
-                                                                # Send notification in thread
+                                                                # Send shorter notification in thread
                                                                 rag_notification = discord.Embed(
-                                                                    title="📋 Knowledge Entry Submitted for Review",
-                                                                    description="Your conversation has been analyzed and a knowledge base entry has been created! It's currently pending review by our support team to ensure quality before being added to the knowledge base.",
+                                                                    title="📋 Entry Saved for Review",
+                                                                    description=f"**{new_pending_entry['title']}**\n\nThis will be reviewed and added to help future users!",
                                                                     color=0xF39C12
                                                                 )
-                                                                rag_notification.add_field(
-                                                                    name="📝 Submitted Entry",
-                                                                    value=f"**{new_pending_entry['title']}**\n\nOnce approved, this will help other users facing similar issues!",
-                                                                    inline=False
-                                                                )
-                                                                rag_notification.add_field(
-                                                                    name="👀 What's Next?",
-                                                                    value="Our team will review this entry in the dashboard. If approved, it will be added to the knowledge base automatically!",
-                                                                    inline=False
-                                                                )
-                                                                rag_notification.set_footer(text="Revolution Macro Quality Control • Awaiting approval")
+                                                                rag_notification.set_footer(text="Revolution Macro • Pending Approval")
                                                                 await thread_channel.send(embed=rag_notification)
                                                             else:
                                                                 print(f"❌ Failed to create pending RAG entry!")
@@ -1401,28 +1491,80 @@ async def on_message(message):
                                             traceback.print_exc()
                                         
                                     elif not satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
-                                        # User needs more help - escalate to human
-                                        updated_status = 'Human Support'
-                                        
-                                        # Send escalation embed
-                                        escalate_embed = discord.Embed(
-                                            title="🔄 Escalating to Support Team",
-                                            description="I noticed my previous answer might not have fully resolved your issue. No worries! I've escalated your question to our human support team for more personalized assistance.",
-                                            color=0xE67E22
-                                        )
-                                        escalate_embed.add_field(
-                                            name="👨‍💼 Next Steps",
-                                            value="A Revolution Macro support team member will review the conversation and provide a more detailed solution shortly.",
-                                            inline=False
-                                        )
-                                        escalate_embed.add_field(
-                                            name="📝 Help Us Help You",
-                                            value="If you have any error messages, screenshots, or additional details, feel free to share them now!",
-                                            inline=False
-                                        )
-                                        escalate_embed.set_footer(text="Revolution Macro Support • AI-detected escalation needed")
-                                        await thread_channel.send(embed=escalate_embed)
-                                        print(f"⚠ User needs more help - escalating thread {thread_id} to Human Support")
+                                        # User is unsatisfied - check what we gave them before
+                                        if response_type == 'auto':
+                                            # They got auto-response and were unsatisfied - try AI now
+                                            print(f"🔄 User unsatisfied with auto-response - trying AI...")
+                                            
+                                            # Get the user's question from conversation
+                                            user_messages = [msg.get('content', '') for msg in conversation if msg.get('author') == 'User']
+                                            if user_messages:
+                                                user_question = ' '.join(user_messages[:2])  # First 2 messages
+                                                
+                                                # Try to find RAG entries
+                                                relevant_docs = find_relevant_rag_entries(user_question)
+                                                if relevant_docs:
+                                                    # Generate AI response
+                                                    ai_response = await generate_ai_response(user_question, relevant_docs[:2])
+                                                    
+                                                    ai_embed = discord.Embed(
+                                                        title="💡 Let Me Try Again",
+                                                        description=ai_response,
+                                                        color=0x5865F2
+                                                    )
+                                                    ai_embed.add_field(
+                                                        name="💬 Better?",
+                                                        value="Let me know if this helps!",
+                                                        inline=False
+                                                    )
+                                                    ai_embed.set_footer(text="Revolution Macro AI")
+                                                    await thread_channel.send(embed=ai_embed)
+                                                    thread_response_type[thread_id] = 'ai'  # Now we've given AI response
+                                                    print(f"🔄 Sent AI response after unsatisfactory auto-response")
+                                                    # Don't escalate yet - give AI a chance
+                                                    updated_status = 'AI Response'
+                                                else:
+                                                    # No RAG entries - escalate directly
+                                                    updated_status = 'Human Support'
+                                                    escalated_threads.add(thread_id)
+                                                    
+                                                    escalate_embed = discord.Embed(
+                                                        title="👨‍💼 Support Team Notified",
+                                                        description="I need more expertise for this. Our team has been notified!",
+                                                        color=0xE67E22
+                                                    )
+                                                    escalate_embed.add_field(
+                                                        name="⏰ Response Time",
+                                                        value="Usually under 24 hours",
+                                                        inline=False
+                                                    )
+                                                    escalate_embed.set_footer(text="Revolution Macro Support Team")
+                                                    await thread_channel.send(embed=escalate_embed)
+                                                    print(f"⚠ Escalating to human support (no RAG available)")
+                                        else:
+                                            # They got AI response and were still unsatisfied - escalate to human
+                                            updated_status = 'Human Support'
+                                            escalated_threads.add(thread_id)  # Mark thread - bot stops talking
+                                            
+                                            # Send shorter escalation embed
+                                            escalate_embed = discord.Embed(
+                                                title="👨‍💼 Support Team Notified",
+                                                description="I wasn't able to fully help. Our support team has been notified!",
+                                                color=0xE67E22
+                                            )
+                                            escalate_embed.add_field(
+                                                name="⏰ Response Time",
+                                                value="Usually under 24 hours",
+                                                inline=True
+                                            )
+                                            escalate_embed.add_field(
+                                                name="📸 Tip",
+                                                value="Send screenshots if helpful!",
+                                                inline=True
+                                            )
+                                            escalate_embed.set_footer(text="Revolution Macro Support Team")
+                                            await thread_channel.send(embed=escalate_embed)
+                                            print(f"⚠ User unsatisfied after AI - escalating thread {thread_id} to Human Support (bot stops)")
                                     
                                     # Update forum post status in dashboard
                                     if updated_status != matching_post.get('status'):
@@ -1484,14 +1626,16 @@ async def on_message(message):
                             delay = BOT_SETTINGS.get('satisfaction_delay', 15)
                             print(f"⏰ Started {delay}-second satisfaction timer for thread {thread_id}")
                         
-                        post_update = {
-                            'action': 'update',
-                            'post': {
-                                **matching_post,
-                                'conversation': conversation,
-                                'status': new_status
+                        # Only update if not already handled by escalation check
+                        if thread_id not in escalated_threads or 'post_update' not in locals():
+                            post_update = {
+                                'action': 'update',
+                                'post': {
+                                    **matching_post,
+                                    'conversation': conversation,
+                                    'status': new_status
+                                }
                             }
-                        }
                     else:
                         # Create new post if it doesn't exist
                         thread_name = thread.name if hasattr(thread, 'name') else 'New Thread'
