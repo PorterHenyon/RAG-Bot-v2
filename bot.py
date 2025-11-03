@@ -2277,16 +2277,16 @@ async def mark_as_solve(interaction: discord.Interaction):
                     )
             else:
                 # API not configured - show preview but can't save
-            entry_preview = f"**Title:** {rag_entry.get('title', 'N/A')}\n"
-            entry_preview += f"**Content:** {rag_entry.get('content', 'N/A')[:200]}...\n"
-            entry_preview += f"**Keywords:** {', '.join(rag_entry.get('keywords', []))}"
-            
-            await interaction.followup.send(
+                entry_preview = f"**Title:** {rag_entry.get('title', 'N/A')}\n"
+                entry_preview += f"**Content:** {rag_entry.get('content', 'N/A')[:200]}...\n"
+                entry_preview += f"**Keywords:** {', '.join(rag_entry.get('keywords', []))}"
+                
+                await interaction.followup.send(
                     f"⚠️ API not configured - cannot save RAG entry.\n\n"
                     f"**Generated RAG Entry (preview only):**\n{entry_preview}\n\n"
                     f"Configure DATA_API_URL in .env to enable saving.",
-                ephemeral=True
-            )
+                    ephemeral=True
+                )
                 print(f"✓ Marked thread {thread.id} as solved but could not save RAG entry (API not configured)")
             
             # Lock and archive the thread since it's marked as solved
