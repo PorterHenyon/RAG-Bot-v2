@@ -1733,18 +1733,18 @@ async def status(interaction: discord.Interaction):
         )
         
         status_embed.add_field(
-            name="📡 API Connection",
-            value=f"{api_status}\n{DATA_API_URL if 'your-vercel-app' not in DATA_API_URL else 'Not configured'}",
-            inline=False
+            name="📡 API Status",
+            value=api_status,
+            inline=True
         )
         
         status_embed.add_field(
             name="🧠 System Prompt",
-            value=f"Using {'custom' if SYSTEM_PROMPT_TEXT else 'default'} prompt ({len(SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)} characters)",
-            inline=False
+            value=f"Using {'custom' if SYSTEM_PROMPT_TEXT else 'default'} prompt",
+            inline=True
         )
         
-        status_embed.set_footer(text=f"Last updated: {BOT_SETTINGS.get('last_updated', 'Never')}")
+        status_embed.set_footer(text=f"Last updated: {BOT_SETTINGS.get('last_updated', 'Never')} • Use /api_info for sensitive details")
         
         await interaction.followup.send(embed=status_embed, ephemeral=False)
         print(f"Status command used by {interaction.user}")
@@ -1752,6 +1752,64 @@ async def status(interaction: discord.Interaction):
     except Exception as e:
         print(f"Error in status command: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
+
+@bot.tree.command(name="api_info", description="View sensitive API configuration (Private, Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def api_info(interaction: discord.Interaction):
+    """Show sensitive API and configuration details (private)"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        # API configuration
+        api_status = "✅ Connected" if 'your-vercel-app' not in DATA_API_URL else "⚠️ Not configured"
+        api_url = DATA_API_URL if 'your-vercel-app' not in DATA_API_URL else 'Not configured (using placeholder)'
+        
+        # System prompt details
+        prompt_source = "Custom (from API)" if SYSTEM_PROMPT_TEXT else "Default (hardcoded)"
+        prompt_length = len(SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)
+        prompt_preview = (SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)[:200] + "..." if prompt_length > 200 else (SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)
+        
+        # Bot settings file
+        settings_file_exists = BOT_SETTINGS_FILE.exists()
+        
+        api_embed = discord.Embed(
+            title="🔐 Sensitive API Configuration",
+            description="This information is private and only visible to you.",
+            color=0xE74C3C
+        )
+        
+        api_embed.add_field(
+            name="📡 API Connection",
+            value=f"**Status:** {api_status}\n**URL:** `{api_url}`",
+            inline=False
+        )
+        
+        api_embed.add_field(
+            name="🧠 System Prompt Details",
+            value=f"**Source:** {prompt_source}\n**Length:** {prompt_length} characters\n**Preview:** {prompt_preview}",
+            inline=False
+        )
+        
+        api_embed.add_field(
+            name="💾 Bot Settings File",
+            value=f"**File:** `{BOT_SETTINGS_FILE}`\n**Exists:** {'✅ Yes' if settings_file_exists else '❌ No'}\n**Contents:** {len(BOT_SETTINGS)} settings",
+            inline=False
+        )
+        
+        api_embed.add_field(
+            name="🔑 Environment Variables",
+            value=f"**DISCORD_BOT_TOKEN:** {'✅ Set' if DISCORD_BOT_TOKEN else '❌ Missing'}\n**GEMINI_API_KEY:** {'✅ Set' if GEMINI_API_KEY else '❌ Missing'}",
+            inline=False
+        )
+        
+        api_embed.set_footer(text="⚠️ Keep this information private! Only visible to you.")
+        
+        await interaction.followup.send(embed=api_embed, ephemeral=True)
+        print(f"api_info command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in api_info command: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="check_rag_entries", description="List all loaded RAG knowledge base entries (Admin only).")
 @app_commands.default_permissions(administrator=True)

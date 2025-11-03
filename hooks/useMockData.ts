@@ -184,6 +184,13 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [],
       createdAt: '2024-11-03T11:30:00Z',
     },
+    {
+      id: 'CMD-SYS-012',
+      name: 'api_info',
+      description: 'View sensitive API configuration including URLs and system prompt details. PRIVATE - only you can see. Requires Admin role.',
+      parameters: [],
+      createdAt: '2024-11-03T11:35:00Z',
+    },
 ];
 
 const initialBotSettings: BotSettings = {
