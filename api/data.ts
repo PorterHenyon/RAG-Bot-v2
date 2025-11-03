@@ -99,6 +99,63 @@ let inMemoryStore: DataStore = {
       parameters: [],
       createdAt: new Date().toISOString(),
     },
+    {
+      id: 'CMD-SYS-005',
+      name: 'set_forums_id',
+      description: 'Set the support forum channel ID that the bot monitors for new posts. Saves to bot_settings.json file. Requires Admin role.',
+      parameters: [
+        { name: 'channel_id', description: 'The Discord channel ID (right-click channel → Copy ID)', type: 'string', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-006',
+      name: 'set_satisfaction_delay',
+      description: 'Set the delay (in seconds) before bot analyzes user satisfaction. Default: 15s. Range: 5-300s. Requires Admin role.',
+      parameters: [
+        { name: 'seconds', description: 'Delay in seconds (5-300)', type: 'number', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-007',
+      name: 'set_temperature',
+      description: 'Set AI response temperature (0.0-2.0). Lower = consistent, Higher = creative. Default: 1.0. Requires Admin role.',
+      parameters: [
+        { name: 'temperature', description: 'Temperature value (0.0-2.0)', type: 'number', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-008',
+      name: 'set_max_tokens',
+      description: 'Set maximum tokens for AI responses (100-8192). Controls response length. Default: 2048. Requires Admin role.',
+      parameters: [
+        { name: 'max_tokens', description: 'Max tokens (100-8192)', type: 'number', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-009',
+      name: 'status',
+      description: 'Check bot status including loaded data, AI settings, active timers, and configuration. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-010',
+      name: 'check_rag_entries',
+      description: 'List all loaded RAG knowledge base entries with titles and keywords. Useful for debugging. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-011',
+      name: 'check_auto_entries',
+      description: 'List all loaded auto-responses with triggers and previews. Useful for debugging. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
   ],
   botSettings: {
     systemPrompt: `You are the official support bot for Revolution Macro - a professional automation application designed for game macroing and task automation.
