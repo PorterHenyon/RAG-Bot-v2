@@ -1536,27 +1536,27 @@ async def stop(interaction: discord.Interaction):
 @bot.tree.command(name="reload", description="Reloads data from dashboard (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def reload(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     success = await fetch_data_from_api()
     if success:
         count = await download_rag_to_local()
-        await interaction.followup.send(f"✓ Data reloaded successfully from dashboard! Downloaded {count} RAG entries to localrag/.", ephemeral=True)
+        await interaction.followup.send(f"✅ Data reloaded successfully from dashboard! Downloaded {count} RAG entries to localrag/.", ephemeral=False)
     else:
-        await interaction.followup.send("⚠ Failed to reload data. Using cached data.", ephemeral=True)
+        await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
     print(f"Reload command issued by {interaction.user}.")
 
 @bot.tree.command(name="set_forums_id", description="Set the support forum channel ID for the bot to monitor (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def set_forums_id(interaction: discord.Interaction, channel_id: str):
     """Set the forum channel ID and save to settings file"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         # Validate channel ID
         try:
             new_channel_id = int(channel_id)
         except ValueError:
-            await interaction.followup.send("❌ Invalid channel ID. Must be a number.", ephemeral=True)
+            await interaction.followup.send("❌ Invalid channel ID. Must be a number.", ephemeral=False)
             return
         
         # Try to get the channel
@@ -1569,7 +1569,7 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
                 f"2. Bot has access to this channel\n"
                 f"3. Bot is in the same server\n\n"
                 f"I'll save it anyway, but the bot may not work until these are fixed.",
-                ephemeral=True
+                ephemeral=False
             )
         else:
             channel_type = type(channel).__name__
@@ -1579,7 +1579,7 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
                 f"**ID:** {new_channel_id}\n"
                 f"**Type:** {channel_type}\n\n"
                 f"Bot will now monitor this channel for new forum posts.",
-                ephemeral=True
+                ephemeral=False
             )
         
         # Update global variable
@@ -1593,7 +1593,7 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
         else:
             await interaction.followup.send(
                 "⚠️ Channel ID updated in memory but failed to save to file.",
-                ephemeral=True
+                ephemeral=False
             )
             
     except Exception as e:
@@ -1606,11 +1606,11 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
 @app_commands.default_permissions(administrator=True)
 async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int):
     """Set the satisfaction analysis delay"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         if seconds < 5 or seconds > 300:
-            await interaction.followup.send("❌ Delay must be between 5 and 300 seconds.", ephemeral=True)
+            await interaction.followup.send("❌ Delay must be between 5 and 300 seconds.", ephemeral=False)
             return
         
         global BOT_SETTINGS
@@ -1620,11 +1620,11 @@ async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int)
             await interaction.followup.send(
                 f"✅ Satisfaction delay updated to **{seconds} seconds**!\n\n"
                 f"The bot will now wait {seconds} seconds after a user's last message before analyzing their satisfaction.",
-                ephemeral=True
+                ephemeral=False
             )
             print(f"✓ Satisfaction delay updated to {seconds} seconds by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=True)
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_satisfaction_delay: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -1633,11 +1633,11 @@ async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int)
 @app_commands.default_permissions(administrator=True)
 async def set_temperature(interaction: discord.Interaction, temperature: float):
     """Set the AI temperature"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         if temperature < 0.0 or temperature > 2.0:
-            await interaction.followup.send("❌ Temperature must be between 0.0 and 2.0.", ephemeral=True)
+            await interaction.followup.send("❌ Temperature must be between 0.0 and 2.0.", ephemeral=False)
             return
         
         global BOT_SETTINGS
@@ -1649,11 +1649,11 @@ async def set_temperature(interaction: discord.Interaction, temperature: float):
                 f"✅ AI temperature updated to **{temperature}**!\n\n"
                 f"Responses will be **{temp_desc}**.\n"
                 f"Lower = more consistent, Higher = more creative",
-                ephemeral=True
+                ephemeral=False
             )
             print(f"✓ AI temperature updated to {temperature} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=True)
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_temperature: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -1662,11 +1662,11 @@ async def set_temperature(interaction: discord.Interaction, temperature: float):
 @app_commands.default_permissions(administrator=True)
 async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
     """Set the maximum tokens for AI responses"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         if max_tokens < 100 or max_tokens > 8192:
-            await interaction.followup.send("❌ Max tokens must be between 100 and 8192.", ephemeral=True)
+            await interaction.followup.send("❌ Max tokens must be between 100 and 8192.", ephemeral=False)
             return
         
         global BOT_SETTINGS
@@ -1677,11 +1677,11 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
             await interaction.followup.send(
                 f"✅ Max tokens updated to **{max_tokens}**!\n\n"
                 f"Responses will be **{length_desc}** (approximately {max_tokens // 4} words max).",
-                ephemeral=True
+                ephemeral=False
             )
             print(f"✓ Max tokens updated to {max_tokens} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=True)
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_max_tokens: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -1690,7 +1690,7 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
 @app_commands.default_permissions(administrator=True)
 async def status(interaction: discord.Interaction):
     """Show bot status and configuration"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         # Get channel info
@@ -1746,22 +1746,22 @@ async def status(interaction: discord.Interaction):
         
         status_embed.set_footer(text=f"Last updated: {BOT_SETTINGS.get('last_updated', 'Never')}")
         
-        await interaction.followup.send(embed=status_embed, ephemeral=True)
+        await interaction.followup.send(embed=status_embed, ephemeral=False)
         print(f"Status command used by {interaction.user}")
         
     except Exception as e:
         print(f"Error in status command: {e}")
-        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="check_rag_entries", description="List all loaded RAG knowledge base entries (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def check_rag_entries(interaction: discord.Interaction):
     """Show all RAG entries"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         if not RAG_DATABASE:
-            await interaction.followup.send("⚠️ No RAG entries loaded. Add some in the dashboard or run /reload.", ephemeral=True)
+            await interaction.followup.send("⚠️ No RAG entries loaded. Add some in the dashboard or run /reload.", ephemeral=False)
             return
         
         rag_embed = discord.Embed(
@@ -1784,22 +1784,22 @@ async def check_rag_entries(interaction: discord.Interaction):
         if len(RAG_DATABASE) > 10:
             rag_embed.set_footer(text=f"Showing 10 of {len(RAG_DATABASE)} entries")
         
-        await interaction.followup.send(embed=rag_embed, ephemeral=True)
+        await interaction.followup.send(embed=rag_embed, ephemeral=False)
         print(f"check_rag_entries command used by {interaction.user}")
         
     except Exception as e:
         print(f"Error in check_rag_entries: {e}")
-        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="check_auto_entries", description="List all loaded auto-responses (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def check_auto_entries(interaction: discord.Interaction):
     """Show all auto-responses"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         if not AUTO_RESPONSES:
-            await interaction.followup.send("⚠️ No auto-responses loaded. Add some in the dashboard or run /reload.", ephemeral=True)
+            await interaction.followup.send("⚠️ No auto-responses loaded. Add some in the dashboard or run /reload.", ephemeral=False)
             return
         
         auto_embed = discord.Embed(
@@ -1822,18 +1822,18 @@ async def check_auto_entries(interaction: discord.Interaction):
                 inline=False
             )
         
-        await interaction.followup.send(embed=auto_embed, ephemeral=True)
+        await interaction.followup.send(embed=auto_embed, ephemeral=False)
         print(f"check_auto_entries command used by {interaction.user}")
         
     except Exception as e:
         print(f"Error in check_auto_entries: {e}")
-        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 @app_commands.default_permissions(administrator=True)
 async def ask(interaction: discord.Interaction, question: str):
     """Staff command to query the RAG knowledge base"""
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer(ephemeral=False)
     
     try:
         # Check auto-responses first
@@ -1846,7 +1846,7 @@ async def ask(interaction: discord.Interaction, question: str):
                 color=0x3498DB
             )
             embed.set_footer(text="From Auto-Response Database")
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=False)
             return
         
         # Find relevant RAG entries
@@ -1871,7 +1871,7 @@ async def ask(interaction: discord.Interaction, question: str):
             )
             
             embed.set_footer(text=f"Based on {len(relevant_docs)} knowledge base entries")
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=False)
         else:
             embed = discord.Embed(
                 title="⚠️ No Match Found",
@@ -1879,13 +1879,13 @@ async def ask(interaction: discord.Interaction, question: str):
                 color=0xE67E22
             )
             embed.set_footer(text="Try rephrasing or adding keywords")
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=False)
             
     except Exception as e:
         print(f"Error in /ask command: {e}")
         import traceback
         traceback.print_exc()
-        await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="mark_as_solve", description="Mark thread as solved and send conversation to analyzer (Staff only).")
 @app_commands.default_permissions(administrator=True)
