@@ -18,9 +18,31 @@ interface AutoResponse {
   createdAt: string;
 }
 
+interface CommandParameter {
+  name: string;
+  description: string;
+  type: 'string' | 'number' | 'boolean' | 'user' | 'channel' | 'role';
+  required: boolean;
+}
+
+interface SlashCommand {
+  id: string;
+  name: string;
+  description: string;
+  parameters: CommandParameter[];
+  createdAt: string;
+}
+
+interface BotSettings {
+  systemPrompt: string;
+  updatedAt: string;
+}
+
 interface DataStore {
   ragEntries: RagEntry[];
   autoResponses: AutoResponse[];
+  slashCommands: SlashCommand[];
+  botSettings: BotSettings;
 }
 
 // Persistent storage using Vercel KV (Redis)
@@ -46,6 +68,76 @@ let inMemoryStore: DataStore = {
       createdAt: new Date().toISOString(),
     },
   ],
+  slashCommands: [
+    {
+      id: 'CMD-SYS-001',
+      name: 'reload',
+      description: 'Reloads the bot\'s RAG database and auto-responses from the dashboard. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-002',
+      name: 'stop',
+      description: 'Stops the bot process gracefully. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-003',
+      name: 'ask',
+      description: 'Ask the bot a question using the RAG knowledge base. Staff can use this to quickly find answers. Requires Admin role.',
+      parameters: [
+        { name: 'question', description: 'The question you want to ask the knowledge base', type: 'string', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-004',
+      name: 'mark_as_solve',
+      description: 'Mark a forum thread as solved. Analyzes the conversation and SAVES it as a RAG entry to the knowledge base. Updates dashboard status. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  botSettings: {
+    systemPrompt: `You are the official support bot for Revolution Macro - a professional automation application designed for game macroing and task automation.
+
+KEY FEATURES OF REVOLUTION MACRO:
+- Automated gathering and resource collection
+- Smart pathing and navigation systems
+- Task scheduling and prioritization
+- Auto-deposit and inventory management
+- License key activation and management
+- Custom script support and configuration
+- Anti-AFK and safety features
+- Multi-instance support
+
+COMMON ISSUES USERS FACE:
+- Character resetting during tasks (usually auto-deposit conflicts)
+- Initialization errors (corrupt config files)
+- License activation limits (HWID management)
+- Antivirus false positives (requires exceptions)
+- Pathing stuck/navigation issues (navmesh recalculation needed)
+- Settings not saving (file permissions)
+- Game window detection (must use windowed mode)
+
+YOUR ROLE:
+1. Provide clear, step-by-step solutions
+2. Use the knowledge base context when available
+3. Be friendly but professional
+4. If uncertain, acknowledge it honestly
+5. Encourage users to ask follow-up questions
+6. Never make up features that don't exist
+
+RESPONSE GUIDELINES:
+- Keep answers concise (2-4 paragraphs max)
+- Use numbered steps for troubleshooting
+- Reference specific settings/tabs when relevant
+- Acknowledge if the question is complex and may need human support
+- Always be encouraging and supportive`,
+    updatedAt: new Date().toISOString(),
+  },
 };
 
 // Initialize KV/Redis client if available (lazy import)
@@ -95,11 +187,15 @@ async function getDataStore(): Promise<DataStore> {
       // Check if using Vercel KV (has .get method) or direct Redis (has .get method)
       let ragEntries: any;
       let autoResponses: any;
+      let slashCommands: any;
+      let botSettings: any;
       
       if (typeof kvClient.get === 'function') {
         // Direct Redis (ioredis)
         ragEntries = await kvClient.get('rag_entries');
         autoResponses = await kvClient.get('auto_responses');
+        slashCommands = await kvClient.get('slash_commands');
+        botSettings = await kvClient.get('bot_settings');
         
         // Parse JSON if stored as strings
         if (typeof ragEntries === 'string') {
@@ -124,10 +220,30 @@ async function getDataStore(): Promise<DataStore> {
         } else {
           console.log(`✓ auto_responses from Redis: ${Array.isArray(autoResponses) ? autoResponses.length : typeof autoResponses} entries`);
         }
+        
+        if (typeof slashCommands === 'string') {
+          try {
+            slashCommands = JSON.parse(slashCommands);
+          } catch (e) {
+            console.error('Error parsing slash_commands JSON:', e);
+            slashCommands = null;
+          }
+        }
+        
+        if (typeof botSettings === 'string') {
+          try {
+            botSettings = JSON.parse(botSettings);
+          } catch (e) {
+            console.error('Error parsing bot_settings JSON:', e);
+            botSettings = null;
+          }
+        }
       } else {
         // Vercel KV (different API)
         ragEntries = await kvClient.get('rag_entries');
         autoResponses = await kvClient.get('auto_responses');
+        slashCommands = await kvClient.get('slash_commands');
+        botSettings = await kvClient.get('bot_settings');
       }
       
       // Use stored data if available, otherwise fall back to in-memory
@@ -142,6 +258,8 @@ async function getDataStore(): Promise<DataStore> {
         result = {
           ragEntries: (ragEntries && Array.isArray(ragEntries)) ? ragEntries : [],
           autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : [],
+          slashCommands: (slashCommands && Array.isArray(slashCommands)) ? slashCommands : [],
+          botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : inMemoryStore.botSettings,
         };
         
         if (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) {
@@ -160,6 +278,8 @@ async function getDataStore(): Promise<DataStore> {
         result = {
           ragEntries: (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) ? ragEntries : inMemoryStore.ragEntries,
           autoResponses: (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) ? autoResponses : inMemoryStore.autoResponses,
+          slashCommands: (slashCommands && Array.isArray(slashCommands) && slashCommands.length > 0) ? slashCommands : inMemoryStore.slashCommands,
+          botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : inMemoryStore.botSettings,
         };
         
         console.log(`⚠ Using in-memory fallback data (persistent storage not configured)`);
@@ -185,10 +305,14 @@ async function saveDataStore(data: DataStore): Promise<void> {
         // Direct Redis - store as JSON strings
         const ragJson = JSON.stringify(data.ragEntries);
         const autoJson = JSON.stringify(data.autoResponses);
-        console.log(`💾 Saving to Redis: rag_entries (${data.ragEntries.length} entries, ${ragJson.length} bytes), auto_responses (${data.autoResponses.length} entries, ${autoJson.length} bytes)`);
+        const commandsJson = JSON.stringify(data.slashCommands);
+        const settingsJson = JSON.stringify(data.botSettings);
+        console.log(`💾 Saving to Redis: rag_entries (${data.ragEntries.length}), auto_responses (${data.autoResponses.length}), slash_commands (${data.slashCommands.length}), bot_settings`);
         await kvClient.set('rag_entries', ragJson);
         await kvClient.set('auto_responses', autoJson);
-        console.log(`✓ Saved ${data.ragEntries.length} RAG entries and ${data.autoResponses.length} auto-responses to Redis`);
+        await kvClient.set('slash_commands', commandsJson);
+        await kvClient.set('bot_settings', settingsJson);
+        console.log(`✓ Saved all data including bot settings to Redis`);
         
         // Verify immediately after save
         const verifyRag = await kvClient.get('rag_entries');
@@ -204,10 +328,12 @@ async function saveDataStore(data: DataStore): Promise<void> {
         }
       } else {
         // Vercel KV
-        console.log(`💾 Saving to Vercel KV: rag_entries (${data.ragEntries.length} entries), auto_responses (${data.autoResponses.length} entries)`);
+        console.log(`💾 Saving to Vercel KV: all data including bot settings`);
         await kvClient.set('rag_entries', data.ragEntries);
         await kvClient.set('auto_responses', data.autoResponses);
-        console.log(`✓ Saved ${data.ragEntries.length} RAG entries and ${data.autoResponses.length} auto-responses to Vercel KV`);
+        await kvClient.set('slash_commands', data.slashCommands);
+        await kvClient.set('bot_settings', data.botSettings);
+        console.log(`✓ Saved all data including bot settings to Vercel KV`);
       }
     } catch (error) {
       console.error('Error saving to Redis/KV:', error);
@@ -215,7 +341,7 @@ async function saveDataStore(data: DataStore): Promise<void> {
     }
   } else {
     inMemoryStore = data;
-    console.log(`⚠ Saved to in-memory storage (will be lost on restart): ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses`);
+    console.log(`⚠ Saved to in-memory storage (will be lost on restart): ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses, ${data.slashCommands.length} slash commands, bot settings`);
   }
 }
 
@@ -234,7 +360,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const data = await getDataStore();
       // Log what we're returning for debugging
-      console.log(`📤 GET /api/data returning: ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses`);
+      console.log(`📤 GET /api/data returning: ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses, ${data.slashCommands.length} slash commands`);
       return res.status(200).json(data);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -250,15 +376,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await initKV(); // Ensure KV is initialized before saving
       
       const currentData = await getDataStore();
-      const { ragEntries, autoResponses } = req.body as Partial<DataStore>;
+      const { ragEntries, autoResponses, slashCommands, botSettings } = req.body as Partial<DataStore>;
       
       // Only update fields that are provided and valid
       const updatedData: DataStore = {
         ragEntries: (ragEntries && Array.isArray(ragEntries)) ? ragEntries : currentData.ragEntries,
         autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : currentData.autoResponses,
+        slashCommands: (slashCommands && Array.isArray(slashCommands)) ? slashCommands : currentData.slashCommands,
+        botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : currentData.botSettings,
       };
       
-      console.log(`📝 Saving data: ${updatedData.ragEntries.length} RAG entries, ${updatedData.autoResponses.length} auto-responses`);
+      console.log(`📝 Saving data: ${updatedData.ragEntries.length} RAG entries, ${updatedData.autoResponses.length} auto-responses, ${updatedData.slashCommands.length} slash commands`);
       
       // Check if we have persistent storage before saving
       if (!kvClient) {

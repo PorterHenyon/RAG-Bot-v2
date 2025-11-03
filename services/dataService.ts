@@ -1,5 +1,5 @@
 // Service for syncing data with the API
-import type { RagEntry, AutoResponse } from '../types';
+import type { RagEntry, AutoResponse, SlashCommand, BotSettings } from '../types';
 
 const getApiUrl = (): string => {
   const envUrl = import.meta.env.VITE_API_URL;
@@ -17,7 +17,7 @@ const getApiUrl = (): string => {
 const API_URL = getApiUrl();
 
 export const dataService = {
-  async fetchData(): Promise<{ ragEntries: RagEntry[]; autoResponses: AutoResponse[] }> {
+  async fetchData(): Promise<{ ragEntries: RagEntry[]; autoResponses: AutoResponse[]; slashCommands: SlashCommand[]; botSettings: BotSettings }> {
     try {
       const response = await fetch(API_URL);
       if (!response.ok) {
@@ -30,14 +30,14 @@ export const dataService = {
     }
   },
 
-  async saveData(ragEntries: RagEntry[], autoResponses: AutoResponse[]): Promise<void> {
+  async saveData(ragEntries: RagEntry[], autoResponses: AutoResponse[], slashCommands: SlashCommand[], botSettings: BotSettings): Promise<void> {
     try {
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ragEntries, autoResponses }),
+        body: JSON.stringify({ ragEntries, autoResponses, slashCommands, botSettings }),
       });
       
       if (!response.ok) {

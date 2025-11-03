@@ -11,11 +11,20 @@ const ParameterPill: React.FC<{ param: CommandParameter }> = ({ param }) => (
   </div>
 );
 
-const SlashCommandCard: React.FC<{ command: SlashCommand }> = ({ command }) => (
+const SlashCommandCard: React.FC<{ command: SlashCommand; onDelete: (id: string) => void }> = ({ command, onDelete }) => (
   <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
-    <div className="flex items-center gap-3">
-        <TerminalIcon className="w-6 h-6 text-gray-400" />
-        <h3 className="text-lg font-bold text-primary-400 font-mono">/{command.name}</h3>
+    <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+            <TerminalIcon className="w-6 h-6 text-gray-400" />
+            <h3 className="text-lg font-bold text-primary-400 font-mono">/{command.name}</h3>
+        </div>
+        <button 
+            onClick={() => onDelete(command.id)} 
+            className="text-red-400 hover:text-red-300 transition-colors p-1"
+            title="Delete command"
+        >
+            <XMarkIcon className="w-5 h-5" />
+        </button>
     </div>
     <p className="text-gray-300 mt-2 text-sm flex-grow">{command.description}</p>
     {command.parameters.length > 0 && (
@@ -82,8 +91,26 @@ const SlashCommandsView: React.FC = () => {
         setShowNewCommandForm(false);
     };
 
+    const handleDeleteCommand = (id: string) => {
+        if (confirm('Are you sure you want to delete this slash command documentation?')) {
+            setSlashCommands(prev => prev.filter(cmd => cmd.id !== id));
+        }
+    };
+
     return (
         <div className="space-y-6">
+            <div className="bg-blue-900/30 border border-blue-700/50 rounded-lg p-4 text-sm text-blue-200">
+                <div className="flex items-start gap-3">
+                    <div className="text-blue-400 mt-0.5">ℹ️</div>
+                    <div>
+                        <strong className="text-blue-100">Note:</strong> Discord bot slash commands are defined in the bot's code. 
+                        This dashboard is for <strong>documentation purposes only</strong>. 
+                        Commands you add here will appear in the dashboard but won't automatically be added to the bot. 
+                        To add new bot commands, edit <code className="bg-blue-950/50 px-1.5 py-0.5 rounded text-xs">bot.py</code>.
+                    </div>
+                </div>
+            </div>
+            
             <div className="flex justify-between items-center flex-wrap gap-4">
                 <input
                     type="text"
@@ -93,7 +120,7 @@ const SlashCommandsView: React.FC = () => {
                     className="w-full md:w-1/2 bg-gray-700 text-white placeholder-gray-400 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 />
                 <button onClick={() => setShowNewCommandForm(true)} className="bg-primary-600 hover:bg-primary-500 text-white font-bold py-2 px-4 rounded transition-colors">
-                    Add New Command
+                    Add Command Documentation
                 </button>
             </div>
 
@@ -139,8 +166,15 @@ const SlashCommandsView: React.FC = () => {
             )}
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredCommands.map(cmd => <SlashCommandCard key={cmd.id} command={cmd} />)}
+                {filteredCommands.map(cmd => <SlashCommandCard key={cmd.id} command={cmd} onDelete={handleDeleteCommand} />)}
             </div>
+            
+            {filteredCommands.length === 0 && (
+                <div className="text-center py-12 text-gray-500">
+                    <TerminalIcon className="w-16 h-16 mx-auto mb-4 opacity-50" />
+                    <p>No slash commands found. Add one to get started!</p>
+                </div>
+            )}
         </div>
     );
 };

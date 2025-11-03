@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand } from '../types';
+import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand, BotSettings } from '../types';
 import { dataService } from '../services/dataService';
 
 // RAG entries initial data
@@ -111,14 +111,71 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [],
       createdAt: '2024-10-31T10:05:00Z',
     },
+    {
+      id: 'CMD-SYS-003',
+      name: 'ask',
+      description: 'Ask the bot a question using the RAG knowledge base. Staff can use this to quickly find answers. Requires Admin role.',
+      parameters: [
+        { name: 'question', description: 'The question you want to ask the knowledge base', type: 'string', required: true },
+      ],
+      createdAt: '2024-11-03T10:00:00Z',
+    },
+    {
+      id: 'CMD-SYS-004',
+      name: 'mark_as_solve',
+      description: 'Mark a forum thread as solved. Analyzes the conversation and SAVES it as a RAG entry to the knowledge base. Updates dashboard status. Requires Admin role.',
+      parameters: [],
+      createdAt: '2024-11-03T10:05:00Z',
+    },
 ];
+
+const initialBotSettings: BotSettings = {
+    systemPrompt: `You are the official support bot for Revolution Macro - a professional automation application designed for game macroing and task automation.
+
+KEY FEATURES OF REVOLUTION MACRO:
+- Automated gathering and resource collection
+- Smart pathing and navigation systems
+- Task scheduling and prioritization
+- Auto-deposit and inventory management
+- License key activation and management
+- Custom script support and configuration
+- Anti-AFK and safety features
+- Multi-instance support
+
+COMMON ISSUES USERS FACE:
+- Character resetting during tasks (usually auto-deposit conflicts)
+- Initialization errors (corrupt config files)
+- License activation limits (HWID management)
+- Antivirus false positives (requires exceptions)
+- Pathing stuck/navigation issues (navmesh recalculation needed)
+- Settings not saving (file permissions)
+- Game window detection (must use windowed mode)
+
+YOUR ROLE:
+1. Provide clear, step-by-step solutions
+2. Use the knowledge base context when available
+3. Be friendly but professional
+4. If uncertain, acknowledge it honestly
+5. Encourage users to ask follow-up questions
+6. Never make up features that don't exist
+
+RESPONSE GUIDELINES:
+- Keep answers concise (2-4 paragraphs max)
+- Use numbered steps for troubleshooting
+- Reference specific settings/tabs when relevant
+- Acknowledge if the question is complex and may need human support
+- Always be encouraging and supportive`,
+    updatedAt: new Date().toISOString(),
+};
 
 export const useMockData = () => {
     // Start with empty arrays - API will populate, prevents flashing
     const [forumPosts, setForumPosts] = useState<ForumPost[]>([]);
     const [ragEntries, setRagEntries] = useState<RagEntry[]>([]);
     const [autoResponses, setAutoResponses] = useState<AutoResponse[]>([]);
+    // Initialize with default commands immediately so they show up
     const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(initialSlashCommands);
+    const [botSettings, setBotSettings] = useState<BotSettings>(initialBotSettings);
     
     // Track if we've loaded from API to prevent sync during initial load
     const [isLoading, setIsLoading] = useState(true);
@@ -150,6 +207,21 @@ export const useMockData = () => {
                             console.log(`✓ API returned empty auto-responses (database is empty)`);
                         }
                     }
+                    // Load slash commands from API if they exist
+                    if (data.slashCommands && Array.isArray(data.slashCommands) && data.slashCommands.length > 0) {
+                        setSlashCommands(data.slashCommands);
+                        console.log(`✓ Loaded ${data.slashCommands.length} slash commands from API`);
+                    } else {
+                        // Keep initial commands (already set in useState), they'll sync to API automatically
+                        console.log(`✓ Using default slash commands (${initialSlashCommands.length} commands) - will sync to API`);
+                    }
+                    // Load bot settings
+                    if (data.botSettings && typeof data.botSettings === 'object') {
+                        setBotSettings(data.botSettings);
+                        console.log(`✓ Loaded bot settings from API`);
+                    } else {
+                        console.log(`✓ Using default bot settings - will sync to API`);
+                    }
                     hasLoaded = true;
                     setIsLoading(false); // Mark as loaded, now allow sync
                 }
@@ -159,6 +231,8 @@ export const useMockData = () => {
                 if (isMounted) {
                     setRagEntries(initialRagEntries);
                     setAutoResponses(initialAutoResponses);
+                    setSlashCommands(initialSlashCommands);
+                    setBotSettings(initialBotSettings);
                 }
                 hasLoaded = true;
                 setIsLoading(false);
@@ -221,7 +295,7 @@ export const useMockData = () => {
         };
     }, []);
 
-    // Sync data to API whenever RAG entries or auto-responses change (with debounce)
+    // Sync data to API whenever RAG entries, auto-responses, slash commands, or bot settings change (with debounce)
     // IMPORTANT: Only sync after initial load is complete to prevent overwriting API data
     useEffect(() => {
         // Don't sync if we're still loading initial data from API
@@ -233,8 +307,8 @@ export const useMockData = () => {
         const timeoutId = setTimeout(() => {
             const syncData = async () => {
                 try {
-                    console.log(`💾 Syncing to API: ${ragEntries.length} RAG entries, ${autoResponses.length} auto-responses`);
-                    await dataService.saveData(ragEntries, autoResponses);
+                    console.log(`💾 Syncing to API: ${ragEntries.length} RAG entries, ${autoResponses.length} auto-responses, ${slashCommands.length} slash commands, bot settings`);
+                    await dataService.saveData(ragEntries, autoResponses, slashCommands, botSettings);
                     console.log(`✓ Successfully synced to API`);
                 } catch (error) {
                     console.error('Failed to sync data to API:', error);
@@ -244,7 +318,7 @@ export const useMockData = () => {
         }, 1000); // 1 second debounce
         
         return () => clearTimeout(timeoutId);
-    }, [ragEntries, autoResponses, isLoading]);
+    }, [ragEntries, autoResponses, slashCommands, botSettings, isLoading]);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -270,5 +344,5 @@ export const useMockData = () => {
         return () => clearInterval(interval);
     }, []);
 
-    return { forumPosts, setForumPosts, ragEntries, setRagEntries, autoResponses, setAutoResponses, slashCommands, setSlashCommands };
+    return { forumPosts, setForumPosts, ragEntries, setRagEntries, autoResponses, setAutoResponses, slashCommands, setSlashCommands, botSettings, setBotSettings };
 };

@@ -70,3 +70,8 @@ export interface SlashCommand {
   parameters: CommandParameter[];
   createdAt: string;
 }
+
+export interface BotSettings {
+  systemPrompt: string;
+  updatedAt: string;
+}

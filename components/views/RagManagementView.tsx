@@ -3,13 +3,20 @@ import { useMockData } from '../../hooks/useMockData';
 import { RagEntry, AutoResponse } from '../../types';
 import { SparklesIcon, DatabaseIcon, TrashIcon } from '../icons';
 
-const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; }> = ({ entry, onDelete }) => (
+const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; onEdit: () => void; }> = ({ entry, onDelete, onEdit }) => (
   <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
     <div className="flex justify-between items-start">
         <h3 className="text-lg font-bold text-primary-400 pr-2 flex-1">{entry.title}</h3>
-        <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors flex-shrink-0">
-            <TrashIcon className="w-5 h-5" />
-        </button>
+        <div className="flex gap-2">
+            <button onClick={onEdit} className="p-1 rounded-full hover:bg-blue-500/20 text-gray-500 hover:text-blue-400 transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+            </button>
+            <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors">
+                <TrashIcon className="w-5 h-5" />
+            </button>
+        </div>
     </div>
     <p className="text-gray-300 mt-2 text-sm flex-grow">{entry.content}</p>
     <div className="mt-4">
@@ -25,13 +32,20 @@ const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; }> = ({ en
   </div>
 );
 
-const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void; }> = ({ response, onDelete }) => (
+const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void; onEdit: () => void; }> = ({ response, onDelete, onEdit }) => (
     <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
          <div className="flex justify-between items-start">
             <h3 className="text-lg font-bold text-primary-400 pr-2 flex-1">{response.name}</h3>
-            <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors flex-shrink-0">
-                <TrashIcon className="w-5 h-5" />
-            </button>
+            <div className="flex gap-2">
+                <button onClick={onEdit} className="p-1 rounded-full hover:bg-blue-500/20 text-gray-500 hover:text-blue-400 transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                </button>
+                <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors">
+                    <TrashIcon className="w-5 h-5" />
+                </button>
+            </div>
         </div>
         <p className="text-gray-300 mt-2 text-sm italic flex-grow">"{response.responseText}"</p>
         <div className="mt-4">
@@ -56,6 +70,9 @@ const RagManagementView: React.FC = () => {
 
     const [showNewRagForm, setShowNewRagForm] = useState(false);
     const [newRagEntry, setNewRagEntry] = useState({ title: '', content: '', keywords: '' });
+    
+    const [editingRag, setEditingRag] = useState<RagEntry | null>(null);
+    const [editingAuto, setEditingAuto] = useState<AutoResponse | null>(null);
 
 
     const filteredRagEntries = ragEntries.filter(entry => 
@@ -111,6 +128,34 @@ const RagManagementView: React.FC = () => {
         }
     };
 
+    const handleEditRag = (entry: RagEntry) => {
+        setEditingRag(entry);
+    };
+
+    const handleSaveEditRag = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (editingRag) {
+            setRagEntries(prev => prev.map(entry => 
+                entry.id === editingRag.id ? editingRag : entry
+            ));
+            setEditingRag(null);
+        }
+    };
+
+    const handleEditAuto = (response: AutoResponse) => {
+        setEditingAuto(response);
+    };
+
+    const handleSaveEditAuto = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (editingAuto) {
+            setAutoResponses(prev => prev.map(resp => 
+                resp.id === editingAuto.id ? editingAuto : resp
+            ));
+            setEditingAuto(null);
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center flex-wrap gap-4">
@@ -137,7 +182,20 @@ const RagManagementView: React.FC = () => {
                 </button>
             </div>
             
-            {showNewAutoForm && activeTab === 'Auto' && (
+            {editingAuto && activeTab === 'Auto' && (
+                <form onSubmit={handleSaveEditAuto} className="bg-gray-800 p-4 rounded-lg shadow-md border border-blue-600 space-y-4 animate-fade-in">
+                    <h3 className="text-lg font-bold text-blue-400">Edit Auto-Response</h3>
+                    <input type="text" placeholder="Response Name" value={editingAuto.name} onChange={e => setEditingAuto({...editingAuto, name: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <textarea placeholder="Bot's response text..." value={editingAuto.responseText} onChange={e => setEditingAuto({...editingAuto, responseText: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" rows={3}/>
+                    <input type="text" placeholder="Trigger keywords (comma separated)" value={editingAuto.triggerKeywords.join(', ')} onChange={e => setEditingAuto({...editingAuto, triggerKeywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setEditingAuto(null)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded">Update Response</button>
+                    </div>
+                </form>
+            )}
+
+            {showNewAutoForm && activeTab === 'Auto' && !editingAuto && (
                 <form onSubmit={handleSaveNewAutoResponse} className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 space-y-4 animate-fade-in">
                     <h3 className="text-lg font-bold text-white">New Auto-Response</h3>
                     <input type="text" placeholder="Response Name (e.g., 'Password Reset')" value={newAutoResponse.name} onChange={e => setNewAutoResponse({...newAutoResponse, name: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" />
@@ -150,7 +208,20 @@ const RagManagementView: React.FC = () => {
                 </form>
             )}
 
-            {showNewRagForm && activeTab === 'RAG' && (
+            {editingRag && activeTab === 'RAG' && (
+                <form onSubmit={handleSaveEditRag} className="bg-gray-800 p-4 rounded-lg shadow-md border border-blue-600 space-y-4 animate-fade-in">
+                    <h3 className="text-lg font-bold text-blue-400">Edit Knowledge Base Entry</h3>
+                    <input type="text" placeholder="Entry Title" value={editingRag.title} onChange={e => setEditingRag({...editingRag, title: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <textarea placeholder="Detailed content / solution..." value={editingRag.content} onChange={e => setEditingRag({...editingRag, content: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" rows={5}/>
+                    <input type="text" placeholder="Keywords (comma separated)" value={editingRag.keywords.join(', ')} onChange={e => setEditingRag({...editingRag, keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <div className="flex justify-end gap-2">
+                        <button type="button" onClick={() => setEditingRag(null)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                        <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded">Update Entry</button>
+                    </div>
+                </form>
+            )}
+
+            {showNewRagForm && activeTab === 'RAG' && !editingRag && (
                  <form onSubmit={handleSaveNewRagEntry} className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 space-y-4 animate-fade-in">
                     <h3 className="text-lg font-bold text-white">New Knowledge Base Entry</h3>
                     <input type="text" placeholder="Entry Title (e.g., Fix for 'Failed to Initialize')" value={newRagEntry.title} onChange={e => setNewRagEntry({...newRagEntry, title: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" />
@@ -165,11 +236,11 @@ const RagManagementView: React.FC = () => {
 
             {activeTab === 'RAG' ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} />)}
+                    {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} onEdit={() => handleEditRag(entry)} />)}
                 </div>
             ) : (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredAutoResponses.map(resp => <AutoResponseCard key={resp.id} response={resp} onDelete={() => handleDeleteAutoResponse(resp.id)} />)}
+                    {filteredAutoResponses.map(resp => <AutoResponseCard key={resp.id} response={resp} onDelete={() => handleDeleteAutoResponse(resp.id)} onEdit={() => handleEditAuto(resp)} />)}
                 </div>
             )}
         </div>
