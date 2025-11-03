@@ -264,13 +264,21 @@ export const useMockData = () => {
                             console.log(`✓ API returned empty auto-responses (database is empty)`);
                         }
                     }
-                    // Load slash commands from API if they exist
-                    if (data.slashCommands && Array.isArray(data.slashCommands) && data.slashCommands.length > 0) {
+                    // Load slash commands - always use latest from initial if we have more defined
+                    if (data.slashCommands && Array.isArray(data.slashCommands) && data.slashCommands.length >= initialSlashCommands.length) {
                         setSlashCommands(data.slashCommands);
                         console.log(`✓ Loaded ${data.slashCommands.length} slash commands from API`);
                     } else {
-                        // Keep initial commands (already set in useState), they'll sync to API automatically
-                        console.log(`✓ Using default slash commands (${initialSlashCommands.length} commands) - will sync to API`);
+                        // Use initial commands if API has fewer (means we added new commands)
+                        setSlashCommands(initialSlashCommands);
+                        console.log(`✓ Using updated slash commands (${initialSlashCommands.length} commands) - API has ${data.slashCommands?.length || 0}, will sync latest`);
+                        // Force sync the new commands to API immediately
+                        try {
+                            await dataService.saveData(data.ragEntries || [], data.autoResponses || [], initialSlashCommands, data.botSettings || initialBotSettings);
+                            console.log(`✓ Synced ${initialSlashCommands.length} slash commands to API`);
+                        } catch (err) {
+                            console.error('Failed to sync new slash commands:', err);
+                        }
                     }
                     // Load bot settings
                     if (data.botSettings && typeof data.botSettings === 'object') {
