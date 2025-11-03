@@ -282,7 +282,7 @@ export const useMockData = () => {
                         console.log(`✓ Using updated slash commands (${initialSlashCommands.length} commands) - API has ${data.slashCommands?.length || 0}, will sync latest`);
                         // Force sync the new commands to API immediately
                         try {
-                            await dataService.saveData(data.ragEntries || [], data.autoResponses || [], initialSlashCommands, data.botSettings || initialBotSettings);
+                            await dataService.saveData(data.ragEntries || [], data.autoResponses || [], initialSlashCommands, data.botSettings || initialBotSettings, data.pendingRagEntries || []);
                             console.log(`✓ Synced ${initialSlashCommands.length} slash commands to API`);
                         } catch (err) {
                             console.error('Failed to sync new slash commands:', err);

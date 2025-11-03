@@ -259,6 +259,7 @@ async function getDataStore(): Promise<DataStore> {
       let autoResponses: any;
       let slashCommands: any;
       let botSettings: any;
+      let pendingRagEntries: any;
       
       if (typeof kvClient.get === 'function') {
         // Direct Redis (ioredis)
@@ -266,7 +267,7 @@ async function getDataStore(): Promise<DataStore> {
         autoResponses = await kvClient.get('auto_responses');
         slashCommands = await kvClient.get('slash_commands');
         botSettings = await kvClient.get('bot_settings');
-        let pendingRagEntries = await kvClient.get('pending_rag_entries');
+        pendingRagEntries = await kvClient.get('pending_rag_entries');
         console.log('🔍 Raw pendingRagEntries from Redis:', pendingRagEntries);
         
         // Parse JSON if stored as strings
@@ -325,7 +326,7 @@ async function getDataStore(): Promise<DataStore> {
         autoResponses = await kvClient.get('auto_responses');
         slashCommands = await kvClient.get('slash_commands');
         botSettings = await kvClient.get('bot_settings');
-        let pendingRagEntries = await kvClient.get('pending_rag_entries');
+        pendingRagEntries = await kvClient.get('pending_rag_entries');
         console.log('🔍 Raw pendingRagEntries from Vercel KV:', pendingRagEntries);
       }
       
