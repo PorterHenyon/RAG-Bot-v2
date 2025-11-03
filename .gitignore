@@ -36,3 +36,7 @@ ENV/
 
 # TypeScript
 *.tsbuildinfo
+
+# Bot local storage
+bot_settings.json
+localrag/

@@ -60,6 +60,13 @@ RAG_DATABASE = []
 AUTO_RESPONSES = []
 SYSTEM_PROMPT_TEXT = ""  # Fetched from API, fallback to default if not available
 
+# --- BOT SETTINGS (Local File Storage) ---
+BOT_SETTINGS_FILE = Path("bot_settings.json")
+BOT_SETTINGS = {
+    'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
+    'last_updated': datetime.now().isoformat()
+}
+
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
 satisfaction_timers = {}  # {thread_id: asyncio.Task}
@@ -69,6 +76,36 @@ processed_threads = set()  # {thread_id}
 # --- Local RAG Storage ---
 LOCALRAG_DIR = Path("localrag")
 LOCALRAG_DIR.mkdir(exist_ok=True)
+
+# --- BOT SETTINGS FUNCTIONS ---
+def load_bot_settings():
+    """Load bot settings from local file"""
+    global BOT_SETTINGS, SUPPORT_FORUM_CHANNEL_ID
+    try:
+        if BOT_SETTINGS_FILE.exists():
+            with open(BOT_SETTINGS_FILE, 'r') as f:
+                loaded_settings = json.load(f)
+                BOT_SETTINGS.update(loaded_settings)
+                # Update the forum channel ID if it's in settings
+                if 'support_forum_channel_id' in loaded_settings:
+                    SUPPORT_FORUM_CHANNEL_ID = int(loaded_settings['support_forum_channel_id'])
+                    print(f"✓ Loaded forum channel ID from settings: {SUPPORT_FORUM_CHANNEL_ID}")
+                return True
+    except Exception as e:
+        print(f"⚠ Error loading bot settings: {e}")
+    return False
+
+def save_bot_settings():
+    """Save bot settings to local file"""
+    try:
+        BOT_SETTINGS['last_updated'] = datetime.now().isoformat()
+        with open(BOT_SETTINGS_FILE, 'w') as f:
+            json.dump(BOT_SETTINGS, f, indent=2)
+        print(f"✓ Saved bot settings to {BOT_SETTINGS_FILE}")
+        return True
+    except Exception as e:
+        print(f"⚠ Error saving bot settings: {e}")
+        return False
 
 # --- DATA SYNC FUNCTIONS ---
 async def fetch_data_from_api():
@@ -516,12 +553,17 @@ async def before_sync_task():
 async def on_ready():
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
     print('-------------------')
+    
+    # Load bot settings from file
+    load_bot_settings()
+    
     print(f'📡 API Configuration:')
     if 'your-vercel-app' in DATA_API_URL:
         print(f'   ⚠ DATA_API_URL not configured (using placeholder)')
         print(f'   ℹ Set DATA_API_URL in .env file to connect to dashboard')
     else:
         print(f'   ✓ DATA_API_URL: {DATA_API_URL}')
+    print(f'📺 Forum Channel ID: {SUPPORT_FORUM_CHANNEL_ID}')
     print('-------------------')
     
     # Initial data sync
@@ -1467,6 +1509,63 @@ async def reload(interaction: discord.Interaction):
     else:
         await interaction.followup.send("⚠ Failed to reload data. Using cached data.", ephemeral=True)
     print(f"Reload command issued by {interaction.user}.")
+
+@bot.tree.command(name="set_forums_id", description="Set the support forum channel ID for the bot to monitor (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_forums_id(interaction: discord.Interaction, channel_id: str):
+    """Set the forum channel ID and save to settings file"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        # Validate channel ID
+        try:
+            new_channel_id = int(channel_id)
+        except ValueError:
+            await interaction.followup.send("❌ Invalid channel ID. Must be a number.", ephemeral=True)
+            return
+        
+        # Try to get the channel
+        channel = bot.get_channel(new_channel_id)
+        if not channel:
+            await interaction.followup.send(
+                f"⚠️ Warning: Channel with ID {new_channel_id} not found.\n"
+                f"Make sure:\n"
+                f"1. The ID is correct\n"
+                f"2. Bot has access to this channel\n"
+                f"3. Bot is in the same server\n\n"
+                f"I'll save it anyway, but the bot may not work until these are fixed.",
+                ephemeral=True
+            )
+        else:
+            channel_type = type(channel).__name__
+            await interaction.followup.send(
+                f"✅ Forum channel updated!\n\n"
+                f"**Channel:** {channel.name}\n"
+                f"**ID:** {new_channel_id}\n"
+                f"**Type:** {channel_type}\n\n"
+                f"Bot will now monitor this channel for new forum posts.",
+                ephemeral=True
+            )
+        
+        # Update global variable
+        global SUPPORT_FORUM_CHANNEL_ID, BOT_SETTINGS
+        SUPPORT_FORUM_CHANNEL_ID = new_channel_id
+        BOT_SETTINGS['support_forum_channel_id'] = new_channel_id
+        
+        # Save to file
+        if save_bot_settings():
+            print(f"✓ Updated forum channel ID to {new_channel_id}")
+        else:
+            await interaction.followup.send(
+                "⚠️ Channel ID updated in memory but failed to save to file.",
+                ephemeral=True
+            )
+            
+    except Exception as e:
+        print(f"Error in set_forums_id command: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 @app_commands.default_permissions(administrator=True)

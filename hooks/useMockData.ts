@@ -127,6 +127,15 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [],
       createdAt: '2024-11-03T10:05:00Z',
     },
+    {
+      id: 'CMD-SYS-005',
+      name: 'set_forums_id',
+      description: 'Set the support forum channel ID that the bot monitors for new posts. Saves to bot_settings.json file. Requires Admin role.',
+      parameters: [
+        { name: 'channel_id', description: 'The Discord channel ID (right-click channel → Copy ID)', type: 'string', required: true },
+      ],
+      createdAt: '2024-11-03T11:00:00Z',
+    },
 ];
 
 const initialBotSettings: BotSettings = {
