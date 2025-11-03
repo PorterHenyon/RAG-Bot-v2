@@ -1511,9 +1511,14 @@ async def on_message(message):
 @bot.tree.command(name="stop", description="Stops the bot gracefully (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def stop(interaction: discord.Interaction):
-    await interaction.response.send_message("Shutting down...", ephemeral=True)
-    print(f"Stop command issued by {interaction.user}. Shutting down.")
+    await interaction.response.send_message("🛑 Shutting down Revolution Macro bot...", ephemeral=True)
+    print(f"Stop command issued by {interaction.user}. Shutting down in 2 seconds...")
+    
+    # Give time for response to send, then close
+    await asyncio.sleep(2)
+    print("Closing bot connection...")
     await bot.close()
+    print("Bot stopped successfully.")
 
 @bot.tree.command(name="reload", description="Reloads data from dashboard (Admin only).")
 @app_commands.default_permissions(administrator=True)
