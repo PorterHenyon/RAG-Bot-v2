@@ -64,6 +64,9 @@ SYSTEM_PROMPT_TEXT = ""  # Fetched from API, fallback to default if not availabl
 BOT_SETTINGS_FILE = Path("bot_settings.json")
 BOT_SETTINGS = {
     'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
+    'satisfaction_delay': 15,  # Seconds to wait before analyzing satisfaction
+    'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
+    'ai_max_tokens': 2048,  # Max tokens for AI responses
     'last_updated': datetime.now().isoformat()
 }
 
@@ -90,6 +93,9 @@ def load_bot_settings():
                 if 'support_forum_channel_id' in loaded_settings:
                     SUPPORT_FORUM_CHANNEL_ID = int(loaded_settings['support_forum_channel_id'])
                     print(f"✓ Loaded forum channel ID from settings: {SUPPORT_FORUM_CHANNEL_ID}")
+                print(f"✓ Loaded bot settings: satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
+                      f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
+                      f"max_tokens={BOT_SETTINGS.get('ai_max_tokens', 2048)}")
                 return True
     except Exception as e:
         print(f"⚠ Error loading bot settings: {e}")
@@ -416,20 +422,29 @@ async def generate_ai_response(query, context_entries):
         # Use API system prompt if available, otherwise use default
         system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
         
+        # Get AI settings from bot settings
+        temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
+        max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
+        
         model = genai.GenerativeModel(
             'gemini-2.5-flash',
             system_instruction=system_instruction
         )
         
+        # Configure generation settings
+        generation_config = genai.types.GenerationConfig(
+            temperature=temperature,
+            max_output_tokens=max_tokens
+        )
+        
         # User context separated
         user_context = build_user_context(query, context_entries)
         
-        # Generate response
+        # Generate response with custom settings
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            model.generate_content,
-            user_context
+            lambda: model.generate_content(user_context, generation_config=generation_config)
         )
         return response.text
     except Exception as e:
@@ -1190,10 +1205,11 @@ async def on_message(message):
                                 satisfaction_timers[thread_id].cancel()
                                 print(f"⏰ Cancelled previous satisfaction timer for thread {thread_id}")
                             
-                            # Create delayed analysis task (15 seconds)
+                            # Create delayed analysis task (configurable delay)
                             async def delayed_satisfaction_check():
                                 try:
-                                    await asyncio.sleep(15)  # Wait 15 seconds for user to finish typing
+                                    delay = BOT_SETTINGS.get('satisfaction_delay', 15)
+                                    await asyncio.sleep(delay)  # Wait for user to finish typing
                                     
                                     # Get the thread channel
                                     thread_channel = bot.get_channel(thread_id)
@@ -1440,7 +1456,8 @@ async def on_message(message):
                             
                             # Store the task
                             satisfaction_timers[thread_id] = asyncio.create_task(delayed_satisfaction_check())
-                            print(f"⏰ Started 15-second satisfaction timer for thread {thread_id}")
+                            delay = BOT_SETTINGS.get('satisfaction_delay', 15)
+                            print(f"⏰ Started {delay}-second satisfaction timer for thread {thread_id}")
                         
                         post_update = {
                             'action': 'update',
@@ -1566,6 +1583,233 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int):
+    """Set the satisfaction analysis delay"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if seconds < 5 or seconds > 300:
+            await interaction.followup.send("❌ Delay must be between 5 and 300 seconds.", ephemeral=True)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['satisfaction_delay'] = seconds
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Satisfaction delay updated to **{seconds} seconds**!\n\n"
+                f"The bot will now wait {seconds} seconds after a user's last message before analyzing their satisfaction.",
+                ephemeral=True
+            )
+            print(f"✓ Satisfaction delay updated to {seconds} seconds by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_satisfaction_delay: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_temperature", description="Set the AI temperature (0.0-2.0) for response generation (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_temperature(interaction: discord.Interaction, temperature: float):
+    """Set the AI temperature"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if temperature < 0.0 or temperature > 2.0:
+            await interaction.followup.send("❌ Temperature must be between 0.0 and 2.0.", ephemeral=True)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['ai_temperature'] = temperature
+        
+        if save_bot_settings():
+            temp_desc = "more focused/deterministic" if temperature < 0.7 else "more creative/varied" if temperature > 1.3 else "balanced"
+            await interaction.followup.send(
+                f"✅ AI temperature updated to **{temperature}**!\n\n"
+                f"Responses will be **{temp_desc}**.\n"
+                f"Lower = more consistent, Higher = more creative",
+                ephemeral=True
+            )
+            print(f"✓ AI temperature updated to {temperature} by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_temperature: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_max_tokens", description="Set the maximum tokens for AI responses (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
+    """Set the maximum tokens for AI responses"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if max_tokens < 100 or max_tokens > 8192:
+            await interaction.followup.send("❌ Max tokens must be between 100 and 8192.", ephemeral=True)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['ai_max_tokens'] = max_tokens
+        
+        if save_bot_settings():
+            length_desc = "shorter" if max_tokens < 1024 else "longer" if max_tokens > 3072 else "medium"
+            await interaction.followup.send(
+                f"✅ Max tokens updated to **{max_tokens}**!\n\n"
+                f"Responses will be **{length_desc}** (approximately {max_tokens // 4} words max).",
+                ephemeral=True
+            )
+            print(f"✓ Max tokens updated to {max_tokens} by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_max_tokens: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def status(interaction: discord.Interaction):
+    """Show bot status and configuration"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        # Get channel info
+        channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+        channel_info = f"{channel.name} (ID: {SUPPORT_FORUM_CHANNEL_ID})" if channel else f"Not found (ID: {SUPPORT_FORUM_CHANNEL_ID})"
+        
+        # Count active timers
+        active_timers = len(satisfaction_timers)
+        
+        # Check API status
+        api_status = "✅ Connected" if 'your-vercel-app' not in DATA_API_URL else "⚠️ Not configured"
+        
+        status_embed = discord.Embed(
+            title="🤖 Revolution Macro Bot Status",
+            color=0x2ECC71
+        )
+        
+        status_embed.add_field(
+            name="📊 Data Loaded",
+            value=f"**RAG Entries:** {len(RAG_DATABASE)}\n**Auto-Responses:** {len(AUTO_RESPONSES)}",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="⚙️ AI Settings",
+            value=f"**Temperature:** {BOT_SETTINGS.get('ai_temperature', 1.0)}\n**Max Tokens:** {BOT_SETTINGS.get('ai_max_tokens', 2048)}",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="⏱️ Timers",
+            value=f"**Satisfaction Delay:** {BOT_SETTINGS.get('satisfaction_delay', 15)}s\n**Active Timers:** {active_timers}",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="📺 Forum Channel",
+            value=channel_info,
+            inline=False
+        )
+        
+        status_embed.add_field(
+            name="📡 API Connection",
+            value=f"{api_status}\n{DATA_API_URL if 'your-vercel-app' not in DATA_API_URL else 'Not configured'}",
+            inline=False
+        )
+        
+        status_embed.add_field(
+            name="🧠 System Prompt",
+            value=f"Using {'custom' if SYSTEM_PROMPT_TEXT else 'default'} prompt ({len(SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)} characters)",
+            inline=False
+        )
+        
+        status_embed.set_footer(text=f"Last updated: {BOT_SETTINGS.get('last_updated', 'Never')}")
+        
+        await interaction.followup.send(embed=status_embed, ephemeral=True)
+        print(f"Status command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in status command: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="check_rag_entries", description="List all loaded RAG knowledge base entries (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def check_rag_entries(interaction: discord.Interaction):
+    """Show all RAG entries"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if not RAG_DATABASE:
+            await interaction.followup.send("⚠️ No RAG entries loaded. Add some in the dashboard or run /reload.", ephemeral=True)
+            return
+        
+        rag_embed = discord.Embed(
+            title="📚 Knowledge Base Entries",
+            description=f"Currently loaded: **{len(RAG_DATABASE)} entries**",
+            color=0x3498DB
+        )
+        
+        # Show first 10 entries
+        entries_to_show = RAG_DATABASE[:10]
+        for i, entry in enumerate(entries_to_show, 1):
+            title = entry.get('title', 'Unknown')
+            keywords = ', '.join(entry.get('keywords', [])[:5])
+            rag_embed.add_field(
+                name=f"{i}. {title}",
+                value=f"Keywords: {keywords}\nID: {entry.get('id', 'N/A')}",
+                inline=False
+            )
+        
+        if len(RAG_DATABASE) > 10:
+            rag_embed.set_footer(text=f"Showing 10 of {len(RAG_DATABASE)} entries")
+        
+        await interaction.followup.send(embed=rag_embed, ephemeral=True)
+        print(f"check_rag_entries command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in check_rag_entries: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="check_auto_entries", description="List all loaded auto-responses (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def check_auto_entries(interaction: discord.Interaction):
+    """Show all auto-responses"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        if not AUTO_RESPONSES:
+            await interaction.followup.send("⚠️ No auto-responses loaded. Add some in the dashboard or run /reload.", ephemeral=True)
+            return
+        
+        auto_embed = discord.Embed(
+            title="⚡ Auto-Responses",
+            description=f"Currently loaded: **{len(AUTO_RESPONSES)} responses**",
+            color=0x5865F2
+        )
+        
+        # Show all auto-responses (usually not too many)
+        for i, auto in enumerate(AUTO_RESPONSES, 1):
+            name = auto.get('name', 'Unknown')
+            triggers = ', '.join(auto.get('triggerKeywords', []))
+            response_preview = auto.get('responseText', '')[:100]
+            if len(auto.get('responseText', '')) > 100:
+                response_preview += '...'
+            
+            auto_embed.add_field(
+                name=f"{i}. {name}",
+                value=f"Triggers: {triggers}\nResponse: {response_preview}\nID: {auto.get('id', 'N/A')}",
+                inline=False
+            )
+        
+        await interaction.followup.send(embed=auto_embed, ephemeral=True)
+        print(f"check_auto_entries command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in check_auto_entries: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 @app_commands.default_permissions(administrator=True)

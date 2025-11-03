@@ -136,6 +136,54 @@ const initialSlashCommands: SlashCommand[] = [
       ],
       createdAt: '2024-11-03T11:00:00Z',
     },
+    {
+      id: 'CMD-SYS-006',
+      name: 'set_satisfaction_delay',
+      description: 'Set the delay (in seconds) before bot analyzes user satisfaction. Default: 15s. Range: 5-300s. Requires Admin role.',
+      parameters: [
+        { name: 'seconds', description: 'Delay in seconds (5-300)', type: 'number', required: true },
+      ],
+      createdAt: '2024-11-03T11:05:00Z',
+    },
+    {
+      id: 'CMD-SYS-007',
+      name: 'set_temperature',
+      description: 'Set AI response temperature (0.0-2.0). Lower = consistent, Higher = creative. Default: 1.0. Requires Admin role.',
+      parameters: [
+        { name: 'temperature', description: 'Temperature value (0.0-2.0)', type: 'number', required: true },
+      ],
+      createdAt: '2024-11-03T11:10:00Z',
+    },
+    {
+      id: 'CMD-SYS-008',
+      name: 'set_max_tokens',
+      description: 'Set maximum tokens for AI responses (100-8192). Controls response length. Default: 2048. Requires Admin role.',
+      parameters: [
+        { name: 'max_tokens', description: 'Max tokens (100-8192)', type: 'number', required: true },
+      ],
+      createdAt: '2024-11-03T11:15:00Z',
+    },
+    {
+      id: 'CMD-SYS-009',
+      name: 'status',
+      description: 'Check bot status including loaded data, AI settings, active timers, and configuration. Requires Admin role.',
+      parameters: [],
+      createdAt: '2024-11-03T11:20:00Z',
+    },
+    {
+      id: 'CMD-SYS-010',
+      name: 'check_rag_entries',
+      description: 'List all loaded RAG knowledge base entries with titles and keywords. Useful for debugging. Requires Admin role.',
+      parameters: [],
+      createdAt: '2024-11-03T11:25:00Z',
+    },
+    {
+      id: 'CMD-SYS-011',
+      name: 'check_auto_entries',
+      description: 'List all loaded auto-responses with triggers and previews. Useful for debugging. Requires Admin role.',
+      parameters: [],
+      createdAt: '2024-11-03T11:30:00Z',
+    },
 ];
 
 const initialBotSettings: BotSettings = {
