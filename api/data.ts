@@ -267,6 +267,7 @@ async function getDataStore(): Promise<DataStore> {
         slashCommands = await kvClient.get('slash_commands');
         botSettings = await kvClient.get('bot_settings');
         let pendingRagEntries = await kvClient.get('pending_rag_entries');
+        console.log('🔍 Raw pendingRagEntries from Redis:', pendingRagEntries);
         
         // Parse JSON if stored as strings
         if (typeof ragEntries === 'string') {
@@ -325,6 +326,7 @@ async function getDataStore(): Promise<DataStore> {
         slashCommands = await kvClient.get('slash_commands');
         botSettings = await kvClient.get('bot_settings');
         let pendingRagEntries = await kvClient.get('pending_rag_entries');
+        console.log('🔍 Raw pendingRagEntries from Vercel KV:', pendingRagEntries);
       }
       
       // Use stored data if available, otherwise fall back to in-memory
@@ -343,6 +345,11 @@ async function getDataStore(): Promise<DataStore> {
           botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : inMemoryStore.botSettings,
           pendingRagEntries: (pendingRagEntries && Array.isArray(pendingRagEntries)) ? pendingRagEntries : [],
         };
+        
+        console.log(`📊 Returning to frontend: ${result.ragEntries.length} RAG, ${result.autoResponses.length} auto, ${result.pendingRagEntries.length} pending`);
+        if (result.pendingRagEntries.length > 0) {
+          console.log('📋 Pending RAG entries being sent:', result.pendingRagEntries);
+        }
         
         if (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) {
           console.log(`✓ Loaded ${ragEntries.length} RAG entries from persistent storage`);

@@ -296,11 +296,18 @@ export const useMockData = () => {
                         console.log(`✓ Using default bot settings - will sync to API`);
                     }
                     // Load pending RAG entries
+                    console.log('🔍 Checking for pending RAG entries...', data.pendingRagEntries);
                     if (data.pendingRagEntries && Array.isArray(data.pendingRagEntries)) {
                         setPendingRagEntries(data.pendingRagEntries);
                         if (data.pendingRagEntries.length > 0) {
                             console.log(`✓ Loaded ${data.pendingRagEntries.length} pending RAG entries awaiting review`);
+                            console.log('📋 Pending entries:', data.pendingRagEntries);
+                        } else {
+                            console.log(`ℹ No pending RAG entries in API response`);
                         }
+                    } else {
+                        console.warn('⚠ pendingRagEntries missing or not an array in API response:', data.pendingRagEntries);
+                        setPendingRagEntries([]);
                     }
                     hasLoaded = true;
                     setIsLoading(false); // Mark as loaded, now allow sync
