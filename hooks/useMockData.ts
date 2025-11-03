@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand, BotSettings } from '../types';
+import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand, BotSettings, PendingRagEntry } from '../types';
 import { dataService } from '../services/dataService';
 
 // RAG entries initial data
@@ -240,6 +240,7 @@ export const useMockData = () => {
     // Initialize with default commands immediately so they show up
     const [slashCommands, setSlashCommands] = useState<SlashCommand[]>(initialSlashCommands);
     const [botSettings, setBotSettings] = useState<BotSettings>(initialBotSettings);
+    const [pendingRagEntries, setPendingRagEntries] = useState<PendingRagEntry[]>([]);
     
     // Track if we've loaded from API to prevent sync during initial load
     const [isLoading, setIsLoading] = useState(true);
@@ -294,6 +295,13 @@ export const useMockData = () => {
                     } else {
                         console.log(`✓ Using default bot settings - will sync to API`);
                     }
+                    // Load pending RAG entries
+                    if (data.pendingRagEntries && Array.isArray(data.pendingRagEntries)) {
+                        setPendingRagEntries(data.pendingRagEntries);
+                        if (data.pendingRagEntries.length > 0) {
+                            console.log(`✓ Loaded ${data.pendingRagEntries.length} pending RAG entries awaiting review`);
+                        }
+                    }
                     hasLoaded = true;
                     setIsLoading(false); // Mark as loaded, now allow sync
                 }
@@ -305,6 +313,7 @@ export const useMockData = () => {
                     setAutoResponses(initialAutoResponses);
                     setSlashCommands(initialSlashCommands);
                     setBotSettings(initialBotSettings);
+                    setPendingRagEntries([]);
                 }
                 hasLoaded = true;
                 setIsLoading(false);
@@ -379,8 +388,8 @@ export const useMockData = () => {
         const timeoutId = setTimeout(() => {
             const syncData = async () => {
                 try {
-                    console.log(`💾 Syncing to API: ${ragEntries.length} RAG entries, ${autoResponses.length} auto-responses, ${slashCommands.length} slash commands, bot settings`);
-                    await dataService.saveData(ragEntries, autoResponses, slashCommands, botSettings);
+                    console.log(`💾 Syncing to API: ${ragEntries.length} RAG entries, ${autoResponses.length} auto-responses, ${slashCommands.length} slash commands, ${pendingRagEntries.length} pending RAG, bot settings`);
+                    await dataService.saveData(ragEntries, autoResponses, slashCommands, botSettings, pendingRagEntries);
                     console.log(`✓ Successfully synced to API`);
                 } catch (error) {
                     console.error('Failed to sync data to API:', error);
@@ -390,7 +399,7 @@ export const useMockData = () => {
         }, 1000); // 1 second debounce
         
         return () => clearTimeout(timeoutId);
-    }, [ragEntries, autoResponses, slashCommands, botSettings, isLoading]);
+    }, [ragEntries, autoResponses, slashCommands, botSettings, pendingRagEntries, isLoading]);
 
     useEffect(() => {
         const interval = setInterval(() => {
@@ -416,5 +425,5 @@ export const useMockData = () => {
         return () => clearInterval(interval);
     }, []);
 
-    return { forumPosts, setForumPosts, ragEntries, setRagEntries, autoResponses, setAutoResponses, slashCommands, setSlashCommands, botSettings, setBotSettings };
+    return { forumPosts, setForumPosts, ragEntries, setRagEntries, autoResponses, setAutoResponses, slashCommands, setSlashCommands, botSettings, setBotSettings, pendingRagEntries, setPendingRagEntries };
 };

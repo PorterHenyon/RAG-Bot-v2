@@ -10,6 +10,17 @@ interface RagEntry {
   createdBy: string;
 }
 
+interface PendingRagEntry {
+  id: string;
+  title: string;
+  content: string;
+  keywords: string[];
+  createdAt: string;
+  source: string;
+  threadId: string;
+  conversationPreview: string;
+}
+
 interface AutoResponse {
   id: string;
   name: string;
@@ -43,6 +54,7 @@ interface DataStore {
   autoResponses: AutoResponse[];
   slashCommands: SlashCommand[];
   botSettings: BotSettings;
+  pendingRagEntries: PendingRagEntry[];
 }
 
 // Persistent storage using Vercel KV (Redis)
@@ -157,6 +169,7 @@ let inMemoryStore: DataStore = {
       createdAt: new Date().toISOString(),
     },
   ],
+  pendingRagEntries: [],
   botSettings: {
     systemPrompt: `You are the official support bot for Revolution Macro - a professional automation application designed for game macroing and task automation.
 
@@ -253,6 +266,7 @@ async function getDataStore(): Promise<DataStore> {
         autoResponses = await kvClient.get('auto_responses');
         slashCommands = await kvClient.get('slash_commands');
         botSettings = await kvClient.get('bot_settings');
+        let pendingRagEntries = await kvClient.get('pending_rag_entries');
         
         // Parse JSON if stored as strings
         if (typeof ragEntries === 'string') {
@@ -295,12 +309,22 @@ async function getDataStore(): Promise<DataStore> {
             botSettings = null;
           }
         }
+        
+        if (typeof pendingRagEntries === 'string') {
+          try {
+            pendingRagEntries = JSON.parse(pendingRagEntries);
+          } catch (e) {
+            console.error('Error parsing pending_rag_entries JSON:', e);
+            pendingRagEntries = null;
+          }
+        }
       } else {
         // Vercel KV (different API)
         ragEntries = await kvClient.get('rag_entries');
         autoResponses = await kvClient.get('auto_responses');
         slashCommands = await kvClient.get('slash_commands');
         botSettings = await kvClient.get('bot_settings');
+        let pendingRagEntries = await kvClient.get('pending_rag_entries');
       }
       
       // Use stored data if available, otherwise fall back to in-memory
@@ -317,6 +341,7 @@ async function getDataStore(): Promise<DataStore> {
           autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : [],
           slashCommands: (slashCommands && Array.isArray(slashCommands)) ? slashCommands : [],
           botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : inMemoryStore.botSettings,
+          pendingRagEntries: (pendingRagEntries && Array.isArray(pendingRagEntries)) ? pendingRagEntries : [],
         };
         
         if (ragEntries && Array.isArray(ragEntries) && ragEntries.length > 0) {
@@ -337,6 +362,7 @@ async function getDataStore(): Promise<DataStore> {
           autoResponses: (autoResponses && Array.isArray(autoResponses) && autoResponses.length > 0) ? autoResponses : inMemoryStore.autoResponses,
           slashCommands: (slashCommands && Array.isArray(slashCommands) && slashCommands.length > 0) ? slashCommands : inMemoryStore.slashCommands,
           botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : inMemoryStore.botSettings,
+          pendingRagEntries: (pendingRagEntries && Array.isArray(pendingRagEntries) && pendingRagEntries.length > 0) ? pendingRagEntries : [],
         };
         
         console.log(`⚠ Using in-memory fallback data (persistent storage not configured)`);
@@ -364,12 +390,14 @@ async function saveDataStore(data: DataStore): Promise<void> {
         const autoJson = JSON.stringify(data.autoResponses);
         const commandsJson = JSON.stringify(data.slashCommands);
         const settingsJson = JSON.stringify(data.botSettings);
-        console.log(`💾 Saving to Redis: rag_entries (${data.ragEntries.length}), auto_responses (${data.autoResponses.length}), slash_commands (${data.slashCommands.length}), bot_settings`);
+        const pendingJson = JSON.stringify(data.pendingRagEntries);
+        console.log(`💾 Saving to Redis: rag_entries (${data.ragEntries.length}), auto_responses (${data.autoResponses.length}), slash_commands (${data.slashCommands.length}), pending_rag (${data.pendingRagEntries.length}), bot_settings`);
         await kvClient.set('rag_entries', ragJson);
         await kvClient.set('auto_responses', autoJson);
         await kvClient.set('slash_commands', commandsJson);
         await kvClient.set('bot_settings', settingsJson);
-        console.log(`✓ Saved all data including bot settings to Redis`);
+        await kvClient.set('pending_rag_entries', pendingJson);
+        console.log(`✓ Saved all data including ${data.pendingRagEntries.length} pending RAG entries to Redis`);
         
         // Verify immediately after save
         const verifyRag = await kvClient.get('rag_entries');
@@ -385,12 +413,13 @@ async function saveDataStore(data: DataStore): Promise<void> {
         }
       } else {
         // Vercel KV
-        console.log(`💾 Saving to Vercel KV: all data including bot settings`);
+        console.log(`💾 Saving to Vercel KV: all data including bot settings and pending RAG entries`);
         await kvClient.set('rag_entries', data.ragEntries);
         await kvClient.set('auto_responses', data.autoResponses);
         await kvClient.set('slash_commands', data.slashCommands);
         await kvClient.set('bot_settings', data.botSettings);
-        console.log(`✓ Saved all data including bot settings to Vercel KV`);
+        await kvClient.set('pending_rag_entries', data.pendingRagEntries);
+        console.log(`✓ Saved all data including ${data.pendingRagEntries.length} pending RAG entries to Vercel KV`);
       }
     } catch (error) {
       console.error('Error saving to Redis/KV:', error);
@@ -398,7 +427,7 @@ async function saveDataStore(data: DataStore): Promise<void> {
     }
   } else {
     inMemoryStore = data;
-    console.log(`⚠ Saved to in-memory storage (will be lost on restart): ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses, ${data.slashCommands.length} slash commands, bot settings`);
+    console.log(`⚠ Saved to in-memory storage (will be lost on restart): ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses, ${data.slashCommands.length} slash commands, ${data.pendingRagEntries.length} pending RAG, bot settings`);
   }
 }
 
@@ -433,7 +462,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       await initKV(); // Ensure KV is initialized before saving
       
       const currentData = await getDataStore();
-      const { ragEntries, autoResponses, slashCommands, botSettings } = req.body as Partial<DataStore>;
+      const { ragEntries, autoResponses, slashCommands, botSettings, pendingRagEntries } = req.body as Partial<DataStore>;
       
       // Only update fields that are provided and valid
       const updatedData: DataStore = {
@@ -441,6 +470,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         autoResponses: (autoResponses && Array.isArray(autoResponses)) ? autoResponses : currentData.autoResponses,
         slashCommands: (slashCommands && Array.isArray(slashCommands)) ? slashCommands : currentData.slashCommands,
         botSettings: (botSettings && typeof botSettings === 'object') ? botSettings : currentData.botSettings,
+        pendingRagEntries: (pendingRagEntries && Array.isArray(pendingRagEntries)) ? pendingRagEntries : currentData.pendingRagEntries,
       };
       
       console.log(`📝 Saving data: ${updatedData.ragEntries.length} RAG entries, ${updatedData.autoResponses.length} auto-responses, ${updatedData.slashCommands.length} slash commands`);

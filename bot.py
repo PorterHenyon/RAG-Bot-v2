@@ -1332,73 +1332,77 @@ async def on_message(message):
                                             rag_entry = await analyze_conversation(conversation_text)
                                             
                                             if rag_entry and 'your-vercel-app' not in DATA_API_URL:
-                                                # Save to knowledge base
+                                                # Create pending RAG entry (requires approval)
                                                 data_api_url_rag = DATA_API_URL
                                                 
                                                 async with aiohttp.ClientSession() as rag_session:
                                                     async with rag_session.get(data_api_url_rag) as get_data_response:
-                                                        current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': []}
+                                                        current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': [], 'pendingRagEntries': []}
                                                         if get_data_response.status == 200:
                                                             current_data = await get_data_response.json()
                                                         
-                                                        # Create new RAG entry
-                                                        new_rag_entry = {
-                                                            'id': f'RAG-{datetime.now().strftime("%Y%m%d%H%M%S")}',
+                                                        # Create conversation preview for review
+                                                        conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
+                                                        
+                                                        # Create new PENDING RAG entry
+                                                        new_pending_entry = {
+                                                            'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
                                                             'title': rag_entry.get('title', 'Auto-generated from solved thread'),
                                                             'content': rag_entry.get('content', ''),
                                                             'keywords': rag_entry.get('keywords', []),
                                                             'createdAt': datetime.now().isoformat(),
-                                                            'createdBy': 'Auto-created by bot (user satisfied)'
+                                                            'source': 'Auto-satisfaction',
+                                                            'threadId': str(thread_id),
+                                                            'conversationPreview': conversation_preview
                                                         }
                                                         
-                                                        rag_entries = current_data.get('ragEntries', [])
-                                                        rag_entries.append(new_rag_entry)
+                                                        pending_entries = current_data.get('pendingRagEntries', [])
+                                                        pending_entries.append(new_pending_entry)
                                                         
                                                         # Save to API (must include ALL fields)
                                                         save_data = {
-                                                            'ragEntries': rag_entries,
+                                                            'ragEntries': current_data.get('ragEntries', []),
                                                             'autoResponses': current_data.get('autoResponses', []),
                                                             'slashCommands': current_data.get('slashCommands', []),
-                                                            'botSettings': current_data.get('botSettings', {})
+                                                            'botSettings': current_data.get('botSettings', {}),
+                                                            'pendingRagEntries': pending_entries
                                                         }
                                                         
-                                                        print(f"💾 Saving RAG entry to API...")
-                                                        print(f"   Total entries to save: {len(rag_entries)}")
-                                                        print(f"   New entry: '{new_rag_entry['title']}'")
+                                                        print(f"💾 Saving pending RAG entry to API for review...")
+                                                        print(f"   Total pending entries: {len(pending_entries)}")
+                                                        print(f"   New pending entry: '{new_pending_entry['title']}'")
                                                         
                                                         headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
                                                         async with rag_session.post(data_api_url_rag, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
                                                             response_text = await save_response.text()
                                                             if save_response.status == 200:
-                                                                print(f"✅ Auto-created RAG entry: '{new_rag_entry['title']}'")
+                                                                print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
                                                                 print(f"   API response: {response_text[:200]}")
-                                                                
-                                                                # Update local RAG database
-                                                                global RAG_DATABASE
-                                                                RAG_DATABASE.append(new_rag_entry)
-                                                                
-                                                                # Download to local RAG
-                                                                await download_rag_to_local()
                                                                 
                                                                 # Send notification in thread
                                                                 rag_notification = discord.Embed(
-                                                                    title="📚 Knowledge Base Enhanced!",
-                                                                    description="Your conversation has been automatically added to our knowledge base! This means future users with similar questions will get help even faster. Thank you for helping improve Revolution Macro support!",
-                                                                    color=0x9B59B6
+                                                                    title="📋 Knowledge Entry Submitted for Review",
+                                                                    description="Your conversation has been analyzed and a knowledge base entry has been created! It's currently pending review by our support team to ensure quality before being added to the knowledge base.",
+                                                                    color=0xF39C12
                                                                 )
                                                                 rag_notification.add_field(
-                                                                    name="✨ New Documentation Entry",
-                                                                    value=f"**{new_rag_entry['title']}**\n\nThis will now help other users facing similar issues!",
+                                                                    name="📝 Submitted Entry",
+                                                                    value=f"**{new_pending_entry['title']}**\n\nOnce approved, this will help other users facing similar issues!",
                                                                     inline=False
                                                                 )
-                                                                rag_notification.set_footer(text="Revolution Macro Learning System • Automatically generated")
+                                                                rag_notification.add_field(
+                                                                    name="👀 What's Next?",
+                                                                    value="Our team will review this entry in the dashboard. If approved, it will be added to the knowledge base automatically!",
+                                                                    inline=False
+                                                                )
+                                                                rag_notification.set_footer(text="Revolution Macro Quality Control • Awaiting approval")
                                                                 await thread_channel.send(embed=rag_notification)
                                                             else:
-                                                                print(f"❌ Failed to auto-create RAG entry!")
+                                                                print(f"❌ Failed to create pending RAG entry!")
                                                                 print(f"   Status: {save_response.status}")
                                                                 print(f"   Response: {response_text[:300]}")
                                                                 print(f"   URL: {data_api_url_rag}")
-                                                                print(f"   Payload: {len(rag_entries)} RAG entries")
+                                                                print(f"   Payload: {len(pending_entries)} pending entries")
                                             else:
                                                 print(f"ℹ Skipping RAG entry creation (no entry generated or API not configured)")
                                         except Exception as rag_error:
@@ -2066,61 +2070,62 @@ async def mark_as_solve(interaction: discord.Interaction):
                                         text = await post_response.text()
                                         print(f"⚠ Failed to update forum post status: Status {post_response.status}, Response: {text[:100]}")
                         
-                        # Save RAG entry to knowledge base
+                        # Create pending RAG entry for review
                         async with session.get(data_api_url) as get_data_response:
-                            current_data = {'ragEntries': [], 'autoResponses': []}
+                            current_data = {'ragEntries': [], 'autoResponses': [], 'pendingRagEntries': []}
                             if get_data_response.status == 200:
                                 current_data = await get_data_response.json()
                             
-                            # Add new RAG entry
-                            new_rag_entry = {
-                                'id': f'RAG-{datetime.now().strftime("%Y%m%d%H%M%S")}',
+                            # Create conversation preview for review
+                            conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
+                            
+                            # Add new PENDING RAG entry
+                            new_pending_entry = {
+                                'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
                                 'title': rag_entry.get('title', 'Unknown'),
                                 'content': rag_entry.get('content', ''),
                                 'keywords': rag_entry.get('keywords', []),
                                 'createdAt': datetime.now().isoformat(),
-                                'createdBy': f'{interaction.user.name} (via /mark_as_solve)'
+                                'source': f'Staff ({interaction.user.name}) via /mark_as_solve',
+                                'threadId': str(thread.id),
+                                'conversationPreview': conversation_preview
                             }
                             
-                            rag_entries = current_data.get('ragEntries', [])
-                            rag_entries.append(new_rag_entry)
+                            pending_entries = current_data.get('pendingRagEntries', [])
+                            pending_entries.append(new_pending_entry)
                             
                             # Save back to API (include ALL fields to avoid overwriting)
                             save_data = {
-                                'ragEntries': rag_entries,
+                                'ragEntries': current_data.get('ragEntries', []),
                                 'autoResponses': current_data.get('autoResponses', []),
-                                'slashCommands': current_data.get('slashCommands', [])
+                                'slashCommands': current_data.get('slashCommands', []),
+                                'botSettings': current_data.get('botSettings', {}),
+                                'pendingRagEntries': pending_entries
                             }
                             
-                            print(f"💾 Attempting to save RAG entry: '{new_rag_entry['title']}'")
-                            print(f"   Total RAG entries after save: {len(rag_entries)}")
+                            print(f"💾 Attempting to save pending RAG entry: '{new_pending_entry['title']}'")
+                            print(f"   Total pending RAG entries after save: {len(pending_entries)}")
                             
                             async with session.post(data_api_url, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
                                 if save_response.status == 200:
                                     result = await save_response.json()
-                                    print(f"✓ Saved new RAG entry to knowledge base: '{new_rag_entry['title']}'")
+                                    print(f"✓ Created pending RAG entry for review: '{new_pending_entry['title']}'")
                                     print(f"✓ API response: {result}")
-                                    
-                                    # Update local RAG database
-                                    global RAG_DATABASE
-                                    RAG_DATABASE.append(new_rag_entry)
-                                    
-                                    # Download to local RAG
-                                    await download_rag_to_local()
                                     
                                     # Send success message to user
                                     await interaction.followup.send(
-                                        f"✅ Thread marked as solved and RAG entry saved!\n\n"
-                                        f"**Title:** {new_rag_entry['title']}\n"
-                                        f"**ID:** {new_rag_entry['id']}\n\n"
-                                        f"You can view it in the **RAG Management** tab on the dashboard.",
+                                        f"✅ Thread marked as solved and RAG entry submitted for review!\n\n"
+                                        f"**Title:** {new_pending_entry['title']}\n"
+                                        f"**ID:** {new_pending_entry['id']}\n\n"
+                                        f"📋 The entry is now **pending review** in the **RAG Management** tab.\n"
+                                        f"You can approve or reject it from the dashboard.",
                                         ephemeral=True
                                     )
                                 else:
                                     text = await save_response.text()
-                                    print(f"⚠ Failed to save RAG entry: Status {save_response.status}, Response: {text[:100]}")
+                                    print(f"⚠ Failed to save pending RAG entry: Status {save_response.status}, Response: {text[:100]}")
                                     await interaction.followup.send(
-                                        f"❌ Failed to save RAG entry to API.\n"
+                                        f"❌ Failed to save pending RAG entry to API.\n"
                                         f"Status: {save_response.status}\n"
                                         f"Response: {text[:200]}",
                                         ephemeral=True

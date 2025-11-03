@@ -1,7 +1,56 @@
 import React, { useState } from 'react';
 import { useMockData } from '../../hooks/useMockData';
-import { RagEntry, AutoResponse } from '../../types';
+import { RagEntry, AutoResponse, PendingRagEntry } from '../../types';
 import { SparklesIcon, DatabaseIcon, TrashIcon } from '../icons';
+
+const PendingRagCard: React.FC<{ entry: PendingRagEntry; onApprove: () => void; onReject: () => void; }> = ({ entry, onApprove, onReject }) => (
+  <div className="bg-yellow-900/20 p-4 rounded-lg shadow-md border-2 border-yellow-500/50 flex flex-col">
+    <div className="flex justify-between items-start">
+        <div className="flex-1">
+            <div className="flex items-center gap-2">
+                <h3 className="text-lg font-bold text-yellow-400">{entry.title}</h3>
+                <span className="text-xs bg-yellow-500/20 text-yellow-300 px-2 py-1 rounded">Pending Review</span>
+            </div>
+            <p className="text-xs text-gray-400 mt-1">{entry.source} • Thread ID: {entry.threadId}</p>
+        </div>
+    </div>
+    <p className="text-gray-300 mt-3 text-sm flex-grow">{entry.content}</p>
+    <div className="mt-3">
+      {entry.keywords.map(kw => (
+        <span key={kw} className="inline-block bg-gray-700 rounded-full px-3 py-1 text-xs font-semibold text-yellow-300 mr-2 mb-2">
+          {kw}
+        </span>
+      ))}
+    </div>
+    <div className="text-xs text-gray-400 mt-3 p-2 bg-gray-800/50 rounded border border-gray-700">
+      <div className="font-semibold mb-1">Conversation Preview:</div>
+      <div className="max-h-20 overflow-y-auto">{entry.conversationPreview}</div>
+    </div>
+    <div className="flex gap-3 mt-4 pt-3 border-t border-gray-700">
+        <button
+            onClick={onApprove}
+            className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+        >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+            Approve & Add to KB
+        </button>
+        <button
+            onClick={onReject}
+            className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+        >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            Reject
+        </button>
+    </div>
+    <div className="text-xs text-gray-500 mt-2">
+      <span>Created on {new Date(entry.createdAt).toLocaleDateString()}</span>
+    </div>
+  </div>
+);
 
 const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; onEdit: () => void; }> = ({ entry, onDelete, onEdit }) => (
   <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
@@ -61,7 +110,7 @@ const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void;
 
 
 const RagManagementView: React.FC = () => {
-    const { ragEntries, setRagEntries, autoResponses, setAutoResponses } = useMockData();
+    const { ragEntries, setRagEntries, autoResponses, setAutoResponses, pendingRagEntries, setPendingRagEntries } = useMockData();
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState<'RAG' | 'Auto'>('RAG');
     
@@ -156,6 +205,28 @@ const RagManagementView: React.FC = () => {
         }
     };
 
+    const handleApprovePendingRag = (pendingEntry: PendingRagEntry) => {
+        // Convert pending entry to approved RAG entry
+        const newEntry: RagEntry = {
+            id: `RAG-${Date.now()}`,
+            title: pendingEntry.title,
+            content: pendingEntry.content,
+            keywords: pendingEntry.keywords,
+            createdAt: new Date().toISOString(),
+            createdBy: 'Auto-generated',
+        };
+        // Add to RAG entries
+        setRagEntries(prev => [newEntry, ...prev]);
+        // Remove from pending
+        setPendingRagEntries(prev => prev.filter(p => p.id !== pendingEntry.id));
+    };
+
+    const handleRejectPendingRag = (id: string) => {
+        if (window.confirm('Are you sure you want to reject this pending entry? It will be permanently deleted.')) {
+            setPendingRagEntries(prev => prev.filter(p => p.id !== id));
+        }
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex justify-between items-center flex-wrap gap-4">
@@ -235,9 +306,45 @@ const RagManagementView: React.FC = () => {
             )}
 
             {activeTab === 'RAG' ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} onEdit={() => handleEditRag(entry)} />)}
-                </div>
+                <>
+                    {pendingRagEntries.length > 0 && (
+                        <div className="space-y-4">
+                            <div className="flex items-center gap-3">
+                                <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                                <h2 className="text-xl font-bold text-yellow-400">
+                                    Pending Review ({pendingRagEntries.length})
+                                </h2>
+                                <span className="text-sm text-gray-400">
+                                    Auto-generated entries awaiting approval
+                                </span>
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                {pendingRagEntries.map(entry => (
+                                    <PendingRagCard
+                                        key={entry.id}
+                                        entry={entry}
+                                        onApprove={() => handleApprovePendingRag(entry)}
+                                        onReject={() => handleRejectPendingRag(entry.id)}
+                                    />
+                                ))}
+                            </div>
+                            <div className="border-t border-gray-700 my-6"></div>
+                        </div>
+                    )}
+                    <div className="space-y-4">
+                        {pendingRagEntries.length > 0 && (
+                            <h2 className="text-xl font-bold text-primary-400 flex items-center gap-2">
+                                <DatabaseIcon className="w-6 h-6" />
+                                Approved Knowledge Base ({filteredRagEntries.length})
+                            </h2>
+                        )}
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                            {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} onEdit={() => handleEditRag(entry)} />)}
+                        </div>
+                    </div>
+                </>
             ) : (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredAutoResponses.map(resp => <AutoResponseCard key={resp.id} response={resp} onDelete={() => handleDeleteAutoResponse(resp.id)} onEdit={() => handleEditAuto(resp)} />)}

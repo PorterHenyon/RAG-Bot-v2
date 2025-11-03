@@ -47,6 +47,17 @@ export interface RagEntry {
   createdBy: string;
 }
 
+export interface PendingRagEntry {
+  id: string;
+  title: string;
+  content: string;
+  keywords: string[];
+  createdAt: string;
+  source: string; // "Auto-satisfaction" or "Staff via /mark_as_solve"
+  threadId: string;
+  conversationPreview: string;
+}
+
 export interface AutoResponse {
   id: string;
   name: string;
