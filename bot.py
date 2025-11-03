@@ -75,6 +75,10 @@ BOT_SETTINGS = {
 satisfaction_timers = {}  # {thread_id: asyncio.Task}
 # Track processed threads to avoid duplicate processing
 processed_threads = set()  # {thread_id}
+# Track threads escalated to human support (bot stops responding)
+escalated_threads = set()  # {thread_id}
+# Track what type of response was given per thread (for satisfaction flow)
+thread_response_type = {}  # {thread_id: 'auto' | 'ai' | None}
 
 # --- Local RAG Storage ---
 LOCALRAG_DIR = Path("localrag")
@@ -369,41 +373,31 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE):
     return [item['entry'] for item in scored_entries]
 
 SYSTEM_PROMPT = (
-    "You are the official support bot for Revolution Macro - a professional automation application designed for game macroing and task automation.\n\n"
+    "You are Revolution Macro support bot. Help users with simple, SHORT answers.\n\n"
     
-    "KEY FEATURES OF REVOLUTION MACRO:\n"
-    "- Automated gathering and resource collection\n"
-    "- Smart pathing and navigation systems\n"
-    "- Task scheduling and prioritization\n"
-    "- Auto-deposit and inventory management\n"
-    "- License key activation and management\n"
-    "- Custom script support and configuration\n"
-    "- Anti-AFK and safety features\n"
-    "- Multi-instance support\n\n"
+    "FEATURES:\n"
+    "- Auto farming\n"
+    "- Smart navigation\n"
+    "- Auto-deposit\n"
+    "- License system\n\n"
     
-    "COMMON ISSUES USERS FACE:\n"
-    "- Character resetting during tasks (usually auto-deposit conflicts)\n"
-    "- Initialization errors (corrupt config files)\n"
-    "- License activation limits (HWID management)\n"
-    "- Antivirus false positives (requires exceptions)\n"
-    "- Pathing stuck/navigation issues (navmesh recalculation needed)\n"
-    "- Settings not saving (file permissions)\n"
-    "- Game window detection (must use windowed mode)\n\n"
+    "HOW TO ANSWER:\n"
+    "1. Use SIMPLE words\n"
+    "2. Keep it SHORT (2-3 sentences MAX)\n"
+    "3. Use numbered steps (1. 2. 3.)\n"
+    "4. One solution at a time\n"
+    "5. NO long paragraphs\n\n"
     
-    "YOUR ROLE:\n"
-    "1. Provide clear, step-by-step solutions\n"
-    "2. Use the knowledge base context when available\n"
-    "3. Be friendly but professional\n"
-    "4. If uncertain, acknowledge it honestly\n"
-    "5. Encourage users to ask follow-up questions\n"
-    "6. Never make up features that don't exist\n\n"
+    "EXAMPLE GOOD ANSWER:\n"
+    "Try these steps:\n"
+    "1. Restart the macro\n"
+    "2. Check your license is active\n"
+    "3. Make sure the game is in windowed mode\n\n"
     
-    "RESPONSE GUIDELINES:\n"
-    "- Keep answers concise (2-4 paragraphs max)\n"
-    "- Use numbered steps for troubleshooting\n"
-    "- Reference specific settings/tabs when relevant\n"
-    "- Acknowledge if the question is complex and may need human support\n"
-    "- Always be encouraging and supportive"
+    "EXAMPLE BAD ANSWER:\n"
+    "Well, this could be caused by several things. First, you'll need to understand that Revolution Macro uses... [TOO LONG]\n\n"
+    
+    "Remember: SHORT and SIMPLE. Users don't read long answers."
 )
 
 def build_user_context(query, context_entries):
@@ -864,6 +858,9 @@ async def on_thread_create(thread):
     await send_forum_post_to_api(thread, owner_name, owner_id or thread.id, owner_avatar_url, initial_message)
 
     # --- LOGIC FLOW ---
+    # Track which response type we used for satisfaction analysis
+    thread_id = thread.id
+    
     # Check auto-responses first
     auto_response = get_auto_response(user_question)
     bot_response_text = None
@@ -876,13 +873,14 @@ async def on_thread_create(thread):
             color=0x5865F2  # Discord blurple for instant responses
         )
         auto_embed.add_field(
-            name="💡 Helpful?",
-            value="If you need more assistance, feel free to ask!",
+            name="💡 Did this help?",
+            value="Let me know if you need more help!",
             inline=False
         )
-        auto_embed.set_footer(text="Revolution Macro • Instant Answer", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+        auto_embed.set_footer(text="Revolution Macro • Instant Answer")
         await thread.send(embed=auto_embed)
         bot_response_text = auto_response
+        thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
         print(f"⚡ Responded to '{thread.name}' with instant auto-response.")
     else:
         relevant_docs = find_relevant_rag_entries(user_question)
@@ -994,51 +992,43 @@ async def on_thread_create(thread):
                 model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=base_instruction)
                 
                 general_prompt = (
-                    "You are the official Revolution Macro support bot. Revolution Macro is a professional game automation and macroing application.\n\n"
+                    "Revolution Macro is a game automation tool.\n\n"
                     
-                    "REVOLUTION MACRO FEATURES:\n"
-                    "- Automated gathering/farming for various games\n"
-                    "- Smart navigation and pathing\n"
-                    "- Task scheduling and queue management\n"
-                    "- Auto-deposit to storage/hives\n"
-                    "- License key system with HWID protection\n"
-                    "- Customizable scripts and settings\n"
-                    "- Anti-detection and safety features\n\n"
-                    
-                    "COMMON SOLUTIONS:\n"
-                    f"{context_info}\n\n"
+                    "FEATURES:\n"
+                    "- Auto farming/gathering\n"
+                    "- Smart navigation\n"
+                    "- Auto-deposit\n"
+                    "- License system\n\n"
                     
                     f"USER'S QUESTION:\n{user_question}\n\n"
                     
-                    "INSTRUCTIONS:\n"
-                    "1. Provide helpful, specific advice related to Revolution Macro\n"
-                    "2. Use step-by-step format for troubleshooting\n"
-                    "3. Reference actual Revolution Macro features and settings\n"
-                    "4. If the question is very specific or technical, acknowledge that a support agent can provide detailed assistance\n"
-                    "5. Be professional, friendly, and encouraging\n"
-                    "6. Keep response to 2-4 paragraphs max\n"
-                    "7. NEVER make up features - only reference real Revolution Macro capabilities\n\n"
+                    "ANSWER RULES:\n"
+                    "1. Use SIMPLE words\n"
+                    "2. Keep it SHORT (3 sentences MAXIMUM)\n"
+                    "3. Use numbered steps if needed\n"
+                    "4. NO long explanations\n\n"
                     
-                    "If you're not confident in your answer, be honest and suggest they ask for more details or request human support."
+                    "If you're not sure, keep it simple and suggest they wait for support team."
                 )
                 
                 loop = asyncio.get_event_loop()
                 ai_response = await loop.run_in_executor(None, model.generate_content, general_prompt)
                 bot_response_text = ai_response.text
                 
-                # Send general AI response with a professional style
+                # Send general AI response (SHORTER, SIMPLER)
                 general_ai_embed = discord.Embed(
-                    title="💡 Revolution Macro Support",
+                    title="💡 Here's What I Found",
                     description=bot_response_text,
-                    color=0x5865F2  # Discord blurple for brand consistency
+                    color=0x5865F2
                 )
                 general_ai_embed.add_field(
-                    name="📝 Did this help?",
-                    value="If this resolves your issue, great! If you need more specific help, just let me know and I'll connect you with our support team.",
+                    name="💬 Did this help?",
+                    value="Let me know if you need more help!",
                     inline=False
                 )
-                general_ai_embed.set_footer(text="Revolution Macro AI Assistant • Powered by Gemini", icon_url="https://discord.com/assets/f9bb9c4af2b9c32a2c5ee0014661546d.png")
+                general_ai_embed.set_footer(text="Revolution Macro AI")
                 await thread.send(embed=general_ai_embed)
+                thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
                 print(f"💡 Responded to '{thread.name}' with Revolution Macro AI assistance (no specific RAG match).")
                 
             except Exception as e:
