@@ -1051,13 +1051,14 @@ async def on_thread_create(thread):
                 description=bot_response_text,
                 color=0x2ECC71
             )
-                ai_embed.add_field(
+            ai_embed.add_field(
                 name="💬 Did this help?",
                 value="Let me know if you need more help!",
-                    inline=False
-                )
+                inline=False
+            )
             ai_embed.set_footer(text="Revolution Macro AI")
             await thread.send(embed=ai_embed)
+            thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
             print(f"✅ Responded to '{thread.name}' with RAG-based answer ({len(confident_docs)} documentation {'match' if len(confident_docs) == 1 else 'matches'}).")
         else:
             # No confident match - generate AI response using general Revolution Macro knowledge
@@ -1110,8 +1111,8 @@ async def on_thread_create(thread):
                 general_ai_embed.add_field(
                     name="💬 Did this help?",
                     value="Let me know if you need more help!",
-                inline=False
-            )
+                    inline=False
+                )
                 general_ai_embed.set_footer(text="Revolution Macro AI")
                 await thread.send(embed=general_ai_embed)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
@@ -1297,10 +1298,10 @@ async def on_message(message):
                         if thread_id in escalated_threads:
                             print(f"🔇 Thread {thread_id} escalated to human support - bot will not respond")
                             # Just update the conversation, don't trigger any bot responses
-                        post_update = {
-                            'action': 'update',
-                            'post': {
-                                **matching_post,
+                            post_update = {
+                                'action': 'update',
+                                'post': {
+                                    **matching_post,
                                     'conversation': conversation,
                                     'status': matching_post.get('status', 'Human Support')  # Keep as Human Support
                                 }
@@ -1626,16 +1627,16 @@ async def on_message(message):
                             delay = BOT_SETTINGS.get('satisfaction_delay', 15)
                             print(f"⏰ Started {delay}-second satisfaction timer for thread {thread_id}")
                         
-                        # Only update if not already handled by escalation check
-                        if thread_id not in escalated_threads or 'post_update' not in locals():
+                        else:
+                            # Normal flow - update conversation
                             post_update = {
                                 'action': 'update',
                                 'post': {
                                     **matching_post,
                                     'conversation': conversation,
                                     'status': new_status
+                                }
                             }
-                        }
                     else:
                         # Create new post if it doesn't exist
                         thread_name = thread.name if hasattr(thread, 'name') else 'New Thread'
