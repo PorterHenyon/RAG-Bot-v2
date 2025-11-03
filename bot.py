@@ -1181,9 +1181,27 @@ async def on_message(message):
                             break
                     
                     # Build updated conversation
+                    # Extract embed content for bot messages
+                    message_content = message.content
+                    if is_bot_message and not message_content and message.embeds:
+                        # Extract text from embed
+                        embed = message.embeds[0]
+                        embed_parts = []
+                        if embed.title:
+                            embed_parts.append(f"**{embed.title}**")
+                        if embed.description:
+                            embed_parts.append(embed.description)
+                        # Add fields if any
+                        for field in embed.fields[:2]:  # Limit to first 2 fields to keep it concise
+                            if field.name and field.value:
+                                embed_parts.append(f"{field.name}: {field.value}")
+                        message_content = "\n".join(embed_parts) if embed_parts else '[Embed message]'
+                    elif not message_content:
+                        message_content = '[Embed message]'
+                    
                     new_message = {
                         'author': 'Bot' if is_bot_message else 'User',
-                        'content': message.content if message.content else '[Embed message]',
+                        'content': message_content,
                         'timestamp': message.created_at.isoformat() if hasattr(message.created_at, 'isoformat') else datetime.now().isoformat()
                     }
                     
