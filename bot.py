@@ -1278,11 +1278,24 @@ async def on_message(message):
                                         # Lock/archive the thread
                                         try:
                                             await thread_channel.edit(archived=True, locked=True)
-                                            print(f"🔒 Thread {thread_id} locked and archived")
-                                        except discord.errors.Forbidden:
-                                            print(f"⚠ Bot lacks permissions to lock thread {thread_id}")
+                                            print(f"🔒 Thread {thread_id} locked and archived successfully")
+                                        except discord.errors.Forbidden as perm_error:
+                                            print(f"❌ Bot lacks 'Manage Threads' permission to lock thread {thread_id}")
+                                            print(f"   Error: {perm_error}")
+                                            # Send notification that thread couldn't be locked
+                                            try:
+                                                lock_fail_embed = discord.Embed(
+                                                    title="⚠️ Thread Not Locked",
+                                                    description="This thread has been marked as Solved, but I don't have permission to lock it. Please give me the **Manage Threads** permission.",
+                                                    color=0xF39C12
+                                                )
+                                                await thread_channel.send(embed=lock_fail_embed)
+                                            except:
+                                                pass
                                         except Exception as lock_error:
-                                            print(f"⚠ Error locking thread {thread_id}: {lock_error}")
+                                            print(f"❌ Error locking thread {thread_id}: {lock_error}")
+                                            import traceback
+                                            traceback.print_exc()
                                         
                                         # Automatically create RAG entry from this solved conversation
                                         try:
@@ -2065,14 +2078,22 @@ async def mark_as_solve(interaction: discord.Interaction):
                 thread = interaction.channel
                 await thread.edit(archived=True, locked=True)
                 print(f"🔒 Thread {thread.id} locked and archived (manual /mark_as_solve)")
-            except discord.errors.Forbidden:
-                print(f"⚠ Bot lacks permissions to lock thread {thread.id}")
+            except discord.errors.Forbidden as perm_error:
+                print(f"❌ Bot lacks 'Manage Threads' permission to lock thread {thread.id}")
+                print(f"   Error: {perm_error}")
                 await interaction.followup.send(
-                    "⚠️ Thread marked as solved but I don't have permission to lock it. Please check bot permissions.",
+                    "⚠️ Thread marked as solved and RAG entry created, but I don't have permission to lock the thread.\n\n"
+                    "**Fix:** Give the bot the **Manage Threads** permission in Server Settings → Roles.",
                     ephemeral=True
                 )
             except Exception as lock_error:
-                print(f"⚠ Error locking thread: {lock_error}")
+                print(f"❌ Error locking thread: {lock_error}")
+                import traceback
+                traceback.print_exc()
+                await interaction.followup.send(
+                    f"⚠️ Thread marked as solved but encountered an error locking it: {str(lock_error)}",
+                    ephemeral=True
+                )
         else:
             await interaction.followup.send("⚠ Failed to analyze conversation. No RAG entry generated.", ephemeral=True)
             print(f"⚠ Failed to generate RAG entry from conversation in thread {interaction.channel.id}")
