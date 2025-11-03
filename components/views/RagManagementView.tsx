@@ -114,6 +114,11 @@ const RagManagementView: React.FC = () => {
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState<'RAG' | 'Auto'>('RAG');
     
+    // Debug: Log pending entries whenever they change
+    React.useEffect(() => {
+        console.log('🔍 RagManagementView - pendingRagEntries updated:', pendingRagEntries.length, pendingRagEntries);
+    }, [pendingRagEntries]);
+    
     const [showNewAutoForm, setShowNewAutoForm] = useState(false);
     const [newAutoResponse, setNewAutoResponse] = useState({ name: '', responseText: '', triggerKeywords: '' });
 
@@ -306,21 +311,24 @@ const RagManagementView: React.FC = () => {
             )}
 
             {activeTab === 'RAG' ? (
-                <>
-                    {pendingRagEntries.length > 0 && (
-                        <div className="space-y-4">
+                <div className="space-y-6">
+                    {/* PENDING SECTION - Discord Bot Entries Awaiting Approval */}
+                    {pendingRagEntries && pendingRagEntries.length > 0 ? (
+                        <div className="space-y-4 bg-yellow-900/10 p-6 rounded-lg border-2 border-yellow-500/30">
                             <div className="flex items-center gap-3">
-                                <svg className="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <svg className="w-7 h-7 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                                 </svg>
-                                <h2 className="text-xl font-bold text-yellow-400">
-                                    Pending Review ({pendingRagEntries.length})
-                                </h2>
-                                <span className="text-sm text-gray-400">
-                                    Auto-generated entries awaiting approval
-                                </span>
+                                <div>
+                                    <h2 className="text-2xl font-bold text-yellow-400">
+                                        📋 Pending Review ({pendingRagEntries.length})
+                                    </h2>
+                                    <p className="text-sm text-gray-400">
+                                        Auto-generated from Discord bot • Approve or reject below
+                                    </p>
+                                </div>
                             </div>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                                 {pendingRagEntries.map(entry => (
                                     <PendingRagCard
                                         key={entry.id}
@@ -330,21 +338,39 @@ const RagManagementView: React.FC = () => {
                                     />
                                 ))}
                             </div>
-                            <div className="border-t border-gray-700 my-6"></div>
+                        </div>
+                    ) : (
+                        <div className="bg-gray-800/50 p-6 rounded-lg border border-gray-700 text-center">
+                            <svg className="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <p className="text-gray-400 text-lg font-medium">No Pending Entries</p>
+                            <p className="text-gray-500 text-sm mt-2">Auto-generated entries from Discord will appear here for review</p>
                         </div>
                     )}
+
+                    {/* APPROVED KNOWLEDGE BASE SECTION - Manual & Approved Entries */}
                     <div className="space-y-4">
-                        {pendingRagEntries.length > 0 && (
-                            <h2 className="text-xl font-bold text-primary-400 flex items-center gap-2">
-                                <DatabaseIcon className="w-6 h-6" />
-                                Approved Knowledge Base ({filteredRagEntries.length})
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-2xl font-bold text-primary-400 flex items-center gap-2">
+                                <DatabaseIcon className="w-7 h-7" />
+                                Knowledge Base ({filteredRagEntries.length})
                             </h2>
-                        )}
+                            <span className="text-sm text-gray-500">Manual entries & approved bot entries</span>
+                        </div>
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                            {filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} onEdit={() => handleEditRag(entry)} />)}
+                            {filteredRagEntries.length > 0 ? (
+                                filteredRagEntries.map(entry => <RagEntryCard key={entry.id} entry={entry} onDelete={() => handleDeleteRagEntry(entry.id)} onEdit={() => handleEditRag(entry)} />)
+                            ) : (
+                                <div className="col-span-full bg-gray-800/50 p-8 rounded-lg border border-gray-700 text-center">
+                                    <DatabaseIcon className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+                                    <p className="text-gray-400 text-lg">No knowledge base entries yet</p>
+                                    <p className="text-gray-500 text-sm mt-2">Click "Add New Entry" above to create one</p>
+                                </div>
+                            )}
                         </div>
                     </div>
-                </>
+                </div>
             ) : (
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {filteredAutoResponses.map(resp => <AutoResponseCard key={resp.id} response={resp} onDelete={() => handleDeleteAutoResponse(resp.id)} onEdit={() => handleEditAuto(resp)} />)}

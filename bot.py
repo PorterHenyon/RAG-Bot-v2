@@ -1051,11 +1051,11 @@ async def on_thread_create(thread):
                 description=bot_response_text,
                 color=0x2ECC71
             )
-            ai_embed.add_field(
+                ai_embed.add_field(
                 name="💬 Did this help?",
                 value="Let me know if you need more help!",
-                inline=False
-            )
+                    inline=False
+                )
             ai_embed.set_footer(text="Revolution Macro AI")
             await thread.send(embed=ai_embed)
             print(f"✅ Responded to '{thread.name}' with RAG-based answer ({len(confident_docs)} documentation {'match' if len(confident_docs) == 1 else 'matches'}).")
@@ -1110,8 +1110,8 @@ async def on_thread_create(thread):
                 general_ai_embed.add_field(
                     name="💬 Did this help?",
                     value="Let me know if you need more help!",
-                    inline=False
-                )
+                inline=False
+            )
                 general_ai_embed.set_footer(text="Revolution Macro AI")
                 await thread.send(embed=general_ai_embed)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
@@ -1297,10 +1297,10 @@ async def on_message(message):
                         if thread_id in escalated_threads:
                             print(f"🔇 Thread {thread_id} escalated to human support - bot will not respond")
                             # Just update the conversation, don't trigger any bot responses
-                            post_update = {
-                                'action': 'update',
-                                'post': {
-                                    **matching_post,
+                        post_update = {
+                            'action': 'update',
+                            'post': {
+                                **matching_post,
                                     'conversation': conversation,
                                     'status': matching_post.get('status', 'Human Support')  # Keep as Human Support
                                 }
@@ -1634,8 +1634,8 @@ async def on_message(message):
                                     **matching_post,
                                     'conversation': conversation,
                                     'status': new_status
-                                }
                             }
+                        }
                     else:
                         # Create new post if it doesn't exist
                         thread_name = thread.name if hasattr(thread, 'name') else 'New Thread'
@@ -2203,7 +2203,7 @@ async def mark_as_solve(interaction: discord.Interaction):
                                     else:
                                         text = await post_response.text()
                                         print(f"⚠ Failed to update forum post status: Status {post_response.status}, Response: {text[:100]}")
-                        
+            
                         # Create pending RAG entry for review
                         async with session.get(data_api_url) as get_data_response:
                             current_data = {'ragEntries': [], 'autoResponses': [], 'pendingRagEntries': []}
@@ -2245,7 +2245,7 @@ async def mark_as_solve(interaction: discord.Interaction):
                                     result = await save_response.json()
                                     print(f"✓ Created pending RAG entry for review: '{new_pending_entry['title']}'")
                                     print(f"✓ API response: {result}")
-                                    
+            
                                     # Send success message to user
                                     await interaction.followup.send(
                                         f"✅ Thread marked as solved and RAG entry submitted for review!\n\n"
@@ -2276,16 +2276,16 @@ async def mark_as_solve(interaction: discord.Interaction):
                     )
             else:
                 # API not configured - show preview but can't save
-                entry_preview = f"**Title:** {rag_entry.get('title', 'N/A')}\n"
-                entry_preview += f"**Content:** {rag_entry.get('content', 'N/A')[:200]}...\n"
-                entry_preview += f"**Keywords:** {', '.join(rag_entry.get('keywords', []))}"
-                
-                await interaction.followup.send(
+            entry_preview = f"**Title:** {rag_entry.get('title', 'N/A')}\n"
+            entry_preview += f"**Content:** {rag_entry.get('content', 'N/A')[:200]}...\n"
+            entry_preview += f"**Keywords:** {', '.join(rag_entry.get('keywords', []))}"
+            
+            await interaction.followup.send(
                     f"⚠️ API not configured - cannot save RAG entry.\n\n"
                     f"**Generated RAG Entry (preview only):**\n{entry_preview}\n\n"
                     f"Configure DATA_API_URL in .env to enable saving.",
-                    ephemeral=True
-                )
+                ephemeral=True
+            )
                 print(f"✓ Marked thread {thread.id} as solved but could not save RAG entry (API not configured)")
             
             # Lock and archive the thread since it's marked as solved

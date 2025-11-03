@@ -295,18 +295,20 @@ export const useMockData = () => {
                     } else {
                         console.log(`✓ Using default bot settings - will sync to API`);
                     }
-                    // Load pending RAG entries
+                    // Load pending RAG entries - with detailed logging
+                    console.log('🔍 API Response Keys:', Object.keys(data));
                     console.log('🔍 Checking for pending RAG entries...', data.pendingRagEntries);
                     if (data.pendingRagEntries && Array.isArray(data.pendingRagEntries)) {
                         setPendingRagEntries(data.pendingRagEntries);
+                        console.log(`✅ SET pending RAG entries in state: ${data.pendingRagEntries.length} entries`);
                         if (data.pendingRagEntries.length > 0) {
-                            console.log(`✓ Loaded ${data.pendingRagEntries.length} pending RAG entries awaiting review`);
-                            console.log('📋 Pending entries:', data.pendingRagEntries);
+                            console.log(`📋 Pending entries details:`, JSON.stringify(data.pendingRagEntries, null, 2));
                         } else {
-                            console.log(`ℹ No pending RAG entries in API response`);
+                            console.log(`ℹ API has pendingRagEntries array but it's empty []`);
                         }
                     } else {
-                        console.warn('⚠ pendingRagEntries missing or not an array in API response:', data.pendingRagEntries);
+                        console.error('❌ pendingRagEntries missing or not an array in API response!');
+                        console.error('   Received:', typeof data.pendingRagEntries, data.pendingRagEntries);
                         setPendingRagEntries([]);
                     }
                     hasLoaded = true;
