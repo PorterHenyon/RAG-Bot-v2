@@ -126,7 +126,10 @@ const RagManagementView: React.FC = () => {
     const [newRagEntry, setNewRagEntry] = useState({ title: '', content: '', keywords: '' });
     
     const [editingRag, setEditingRag] = useState<RagEntry | null>(null);
+    const [editingRagKeywords, setEditingRagKeywords] = useState('');
+    
     const [editingAuto, setEditingAuto] = useState<AutoResponse | null>(null);
+    const [editingAutoTriggers, setEditingAutoTriggers] = useState('');
 
 
     const filteredRagEntries = ragEntries.filter(entry => 
@@ -184,29 +187,41 @@ const RagManagementView: React.FC = () => {
 
     const handleEditRag = (entry: RagEntry) => {
         setEditingRag(entry);
+        setEditingRagKeywords(entry.keywords.join(', '));
     };
 
     const handleSaveEditRag = (e: React.FormEvent) => {
         e.preventDefault();
         if (editingRag) {
+            const updatedEntry = {
+                ...editingRag,
+                keywords: editingRagKeywords.split(',').map(k => k.trim()).filter(Boolean)
+            };
             setRagEntries(prev => prev.map(entry => 
-                entry.id === editingRag.id ? editingRag : entry
+                entry.id === editingRag.id ? updatedEntry : entry
             ));
             setEditingRag(null);
+            setEditingRagKeywords('');
         }
     };
 
     const handleEditAuto = (response: AutoResponse) => {
         setEditingAuto(response);
+        setEditingAutoTriggers(response.triggerKeywords.join(', '));
     };
 
     const handleSaveEditAuto = (e: React.FormEvent) => {
         e.preventDefault();
         if (editingAuto) {
+            const updatedResponse = {
+                ...editingAuto,
+                triggerKeywords: editingAutoTriggers.split(',').map(k => k.trim()).filter(Boolean)
+            };
             setAutoResponses(prev => prev.map(resp => 
-                resp.id === editingAuto.id ? editingAuto : resp
+                resp.id === editingAuto.id ? updatedResponse : resp
             ));
             setEditingAuto(null);
+            setEditingAutoTriggers('');
         }
     };
 
@@ -261,11 +276,33 @@ const RagManagementView: React.FC = () => {
             {editingAuto && activeTab === 'Auto' && (
                 <form onSubmit={handleSaveEditAuto} className="bg-gray-800 p-4 rounded-lg shadow-md border border-blue-600 space-y-4 animate-fade-in">
                     <h3 className="text-lg font-bold text-blue-400">Edit Auto-Response</h3>
-                    <input type="text" placeholder="Response Name" value={editingAuto.name} onChange={e => setEditingAuto({...editingAuto, name: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    <textarea placeholder="Bot's response text..." value={editingAuto.responseText} onChange={e => setEditingAuto({...editingAuto, responseText: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" rows={3}/>
-                    <input type="text" placeholder="Trigger keywords (comma separated)" value={editingAuto.triggerKeywords.join(', ')} onChange={e => setEditingAuto({...editingAuto, triggerKeywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Response Name" 
+                        value={editingAuto.name} 
+                        onChange={e => setEditingAuto({...editingAuto, name: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
+                    <textarea 
+                        placeholder="Bot's response text..." 
+                        value={editingAuto.responseText} 
+                        onChange={e => setEditingAuto({...editingAuto, responseText: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        rows={3}
+                    />
+                    <input 
+                        type="text" 
+                        placeholder="Trigger keywords (comma separated, e.g., help, support, info)" 
+                        value={editingAutoTriggers} 
+                        onChange={e => setEditingAutoTriggers(e.target.value)} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                    />
                     <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => setEditingAuto(null)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                        <button type="button" onClick={() => { setEditingAuto(null); setEditingAutoTriggers(''); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
                         <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded">Update Response</button>
                     </div>
                 </form>
@@ -274,9 +311,31 @@ const RagManagementView: React.FC = () => {
             {showNewAutoForm && activeTab === 'Auto' && !editingAuto && (
                 <form onSubmit={handleSaveNewAutoResponse} className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 space-y-4 animate-fade-in">
                     <h3 className="text-lg font-bold text-white">New Auto-Response</h3>
-                    <input type="text" placeholder="Response Name (e.g., 'Password Reset')" value={newAutoResponse.name} onChange={e => setNewAutoResponse({...newAutoResponse, name: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                    <textarea placeholder="Bot's response text..." value={newAutoResponse.responseText} onChange={e => setNewAutoResponse({...newAutoResponse, responseText: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" rows={3}/>
-                    <input type="text" placeholder="Trigger keywords, comma, separated" value={newAutoResponse.triggerKeywords} onChange={e => setNewAutoResponse({...newAutoResponse, triggerKeywords: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Response Name (e.g., 'Password Reset')" 
+                        value={newAutoResponse.name} 
+                        onChange={e => setNewAutoResponse({...newAutoResponse, name: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" 
+                    />
+                    <textarea 
+                        placeholder="Bot's response text..." 
+                        value={newAutoResponse.responseText} 
+                        onChange={e => setNewAutoResponse({...newAutoResponse, responseText: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" 
+                        rows={3}
+                    />
+                    <input 
+                        type="text" 
+                        placeholder="Trigger keywords (comma separated, e.g., reset password, forgot password)" 
+                        value={newAutoResponse.triggerKeywords} 
+                        onChange={e => setNewAutoResponse({...newAutoResponse, triggerKeywords: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        autoComplete="off"
+                    />
                     <div className="flex justify-end gap-2">
                         <button type="button" onClick={() => setShowNewAutoForm(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
                         <button type="submit" className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save</button>
@@ -287,11 +346,33 @@ const RagManagementView: React.FC = () => {
             {editingRag && activeTab === 'RAG' && (
                 <form onSubmit={handleSaveEditRag} className="bg-gray-800 p-4 rounded-lg shadow-md border border-blue-600 space-y-4 animate-fade-in">
                     <h3 className="text-lg font-bold text-blue-400">Edit Knowledge Base Entry</h3>
-                    <input type="text" placeholder="Entry Title" value={editingRag.title} onChange={e => setEditingRag({...editingRag, title: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-                    <textarea placeholder="Detailed content / solution..." value={editingRag.content} onChange={e => setEditingRag({...editingRag, content: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" rows={5}/>
-                    <input type="text" placeholder="Keywords (comma separated)" value={editingRag.keywords.join(', ')} onChange={e => setEditingRag({...editingRag, keywords: e.target.value.split(',').map(k => k.trim()).filter(Boolean)})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Entry Title" 
+                        value={editingRag.title} 
+                        onChange={e => setEditingRag({...editingRag, title: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                    />
+                    <textarea 
+                        placeholder="Detailed content / solution..." 
+                        value={editingRag.content} 
+                        onChange={e => setEditingRag({...editingRag, content: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                        rows={5}
+                    />
+                    <input 
+                        type="text" 
+                        placeholder="Keywords (comma separated, e.g., error, fix, tutorial)" 
+                        value={editingRagKeywords} 
+                        onChange={e => setEditingRagKeywords(e.target.value)} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        autoComplete="off"
+                    />
                     <div className="flex justify-end gap-2">
-                        <button type="button" onClick={() => setEditingRag(null)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
+                        <button type="button" onClick={() => { setEditingRag(null); setEditingRagKeywords(''); }} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
                         <button type="submit" className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-4 rounded">Update Entry</button>
                     </div>
                 </form>
@@ -300,9 +381,31 @@ const RagManagementView: React.FC = () => {
             {showNewRagForm && activeTab === 'RAG' && !editingRag && (
                  <form onSubmit={handleSaveNewRagEntry} className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 space-y-4 animate-fade-in">
                     <h3 className="text-lg font-bold text-white">New Knowledge Base Entry</h3>
-                    <input type="text" placeholder="Entry Title (e.g., Fix for 'Failed to Initialize')" value={newRagEntry.title} onChange={e => setNewRagEntry({...newRagEntry, title: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" />
-                    <textarea placeholder="Detailed content / solution..." value={newRagEntry.content} onChange={e => setNewRagEntry({...newRagEntry, content: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" rows={5}/>
-                    <input type="text" placeholder="Relevant keywords, comma, separated" value={newRagEntry.keywords} onChange={e => setNewRagEntry({...newRagEntry, keywords: e.target.value})} required className="w-full bg-gray-700 rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" />
+                    <input 
+                        type="text" 
+                        placeholder="Entry Title (e.g., Fix for 'Failed to Initialize')" 
+                        value={newRagEntry.title} 
+                        onChange={e => setNewRagEntry({...newRagEntry, title: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" 
+                    />
+                    <textarea 
+                        placeholder="Detailed content / solution..." 
+                        value={newRagEntry.content} 
+                        onChange={e => setNewRagEntry({...newRagEntry, content: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500" 
+                        rows={5}
+                    />
+                    <input 
+                        type="text" 
+                        placeholder="Relevant keywords (comma separated, e.g., error, crash, fix)" 
+                        value={newRagEntry.keywords} 
+                        onChange={e => setNewRagEntry({...newRagEntry, keywords: e.target.value})} 
+                        required 
+                        className="w-full bg-gray-700 text-white rounded p-2 border border-gray-600 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        autoComplete="off"
+                    />
                     <div className="flex justify-end gap-2">
                         <button type="button" onClick={() => setShowNewRagForm(false)} className="bg-gray-600 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded">Cancel</button>
                         <button type="submit" className="bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded">Save Entry</button>

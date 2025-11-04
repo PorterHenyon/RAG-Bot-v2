@@ -1,6 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
+import Login from './components/Login';
+import OAuthCallback from './components/OAuthCallback';
 import DashboardView from './components/views/DashboardView';
 import ForumPostsView from './components/views/ForumPostsView';
 import RagManagementView from './components/views/RagManagementView';
@@ -8,9 +10,20 @@ import SlashCommandsView from './components/views/SlashCommandsView';
 import PlaygroundView from './components/views/PlaygroundView';
 import SettingsView from './components/views/SettingsView';
 import { AppView } from './types';
+import { useAuth } from './contexts/AuthContext';
 
 const App: React.FC = () => {
+  const { isAuthenticated, isLoading } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>(AppView.Dashboard);
+  const [isCallback, setIsCallback] = useState(false);
+
+  useEffect(() => {
+    // Check if this is an OAuth callback
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('code') || params.get('error')) {
+      setIsCallback(true);
+    }
+  }, []);
 
   const renderView = () => {
     switch (currentView) {
@@ -30,6 +43,28 @@ const App: React.FC = () => {
         return <DashboardView />;
     }
   };
+
+  // Show loading state while checking authentication
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <div className="inline-block w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show OAuth callback screen
+  if (isCallback) {
+    return <OAuthCallback />;
+  }
+
+  // Show login screen if not authenticated
+  if (!isAuthenticated) {
+    return <Login />;
+  }
 
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100">
