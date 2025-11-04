@@ -12,6 +12,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'No authorization code provided' });
     }
 
+    // If environment variables aren't set, allow access (development mode)
+    if (!DISCORD_CLIENT_SECRET || !DISCORD_CLIENT_ID) {
+        console.warn('⚠️ DISCORD_CLIENT_SECRET not configured - running in development mode');
+        console.warn('⚠️ Add environment variables for production security');
+        
+        // Return a mock successful response for development
+        return res.status(200).json({
+            user: {
+                id: 'dev-user',
+                username: 'DevUser',
+                discriminator: '0000',
+                avatar: null,
+            },
+        });
+    }
+
     try {
         // Exchange code for access token
         const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
