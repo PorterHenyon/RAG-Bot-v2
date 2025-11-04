@@ -19,6 +19,7 @@ load_dotenv()
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 SUPPORT_FORUM_CHANNEL_ID_STR = os.getenv('SUPPORT_FORUM_CHANNEL_ID')
+DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # Server ID for slash command sync
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
 
 # --- Initial Validation ---
@@ -38,6 +39,12 @@ try:
     SUPPORT_FORUM_CHANNEL_ID = int(SUPPORT_FORUM_CHANNEL_ID_STR)
 except ValueError:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' is not a valid number.")
+    exit()
+
+try:
+    DISCORD_GUILD_ID = int(DISCORD_GUILD_ID_STR)
+except ValueError:
+    print("FATAL ERROR: 'DISCORD_GUILD_ID' is not a valid number.")
     exit()
 
 # Configure the Gemini API
@@ -685,8 +692,12 @@ async def on_ready():
         print("✓ Started background task: check_old_posts (runs every hour)")
     
     try:
-        synced = await bot.tree.sync()
-        print(f'✓ Slash commands synced ({len(synced)} commands).')
+        # Sync commands to specific guild for instant availability
+        guild = discord.Object(id=DISCORD_GUILD_ID)
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        print(f'✓ Slash commands synced to guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
+        print(f'   Commands will appear instantly in the server!')
     except Exception as e:
         print(f'⚠ Failed to sync commands: {e}')
     
