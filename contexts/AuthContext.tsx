@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { isUserAllowed, getAccessDeniedMessage } from '../config/accessControl';
 
 interface DiscordUser {
     id: string;
