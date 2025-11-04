@@ -10,9 +10,8 @@
 // 2. Right-click a username → Copy User ID
 
 export const ALLOWED_USER_IDS: string[] = [
-    // Example: '123456789012345678',
-    // Add Discord user IDs here (one per line):
-    
+    // Discord user IDs with dashboard access:
+    '614865086804394012',  // Added user
 ];
 
 // ============================================
