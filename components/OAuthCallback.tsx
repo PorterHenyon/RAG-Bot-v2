@@ -29,10 +29,8 @@ const OAuthCallback: React.FC = () => {
                 const success = await handleDiscordCallback(code);
                 if (success) {
                     setStatus('success');
-                    // Redirect to home after a brief delay
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 1500);
+                    // Redirect immediately on success
+                    window.location.href = '/';
                 } else {
                     setStatus('error');
                     setError('Failed to authenticate with Discord');
