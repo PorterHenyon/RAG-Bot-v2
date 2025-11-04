@@ -67,29 +67,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const response = await fetch(`/api/auth-callback?code=${code}`);
             
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}));
-                console.error('Backend auth validation failed:', errorData);
-                
-                // If backend validation fails but we have a code, create a temporary user
-                // This allows testing before environment variables are set
-                // In production, this should return false and show error
-                console.warn('⚠️ Backend validation unavailable - allowing temporary access');
-                console.warn('⚠️ Add DISCORD_CLIENT_SECRET and DISCORD_SERVER_ID to Vercel for proper validation');
-                
-                // Create temporary user from code (not secure, but allows testing)
-                const tempUser: DiscordUser = {
-                    id: 'temp-' + Date.now(),
-                    username: 'User',
-                    discriminator: '0000',
-                    avatar: null,
-                };
-
-                setIsAuthenticated(true);
-                setUser(tempUser);
-                sessionStorage.setItem('isAuthenticated', 'true');
-                sessionStorage.setItem('discordUser', JSON.stringify(tempUser));
-                
-                return true;
+                const errorData = await response.json().catch(() => ({ message: 'Authentication failed' }));
+                console.error('Auth failed:', errorData);
+                alert(errorData.message || 'Access denied. You must have the Staff role to access this dashboard.');
+                return false;
             }
 
             const data = await response.json();
@@ -103,7 +84,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return true;
         } catch (error) {
             console.error('Discord OAuth callback failed:', error);
-            // Don't alert - just log to console and fail silently
+            alert('Authentication failed. Please contact an administrator.');
             return false;
         }
     };
