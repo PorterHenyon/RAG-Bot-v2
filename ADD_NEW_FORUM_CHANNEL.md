@@ -2,7 +2,7 @@
 
 ## Quick Instructions
 
-To make your bot monitor the new forum channel `1411119542456811722`:
+To make your bot monitor the new forum channel `1435245345448656916`:
 
 ### Update Your `.env` File:
 
@@ -15,7 +15,7 @@ SUPPORT_FORUM_CHANNEL_ID=old_channel_id_here
 To:
 
 ```env
-SUPPORT_FORUM_CHANNEL_ID=1411119542456811722
+SUPPORT_FORUM_CHANNEL_ID=1435245345448656916
 ```
 
 ### Then Restart the Bot:
@@ -33,7 +33,7 @@ The bot will now monitor the new forum channel!
 
 When the bot starts, you should see:
 ```
-✓ Monitoring channel: YourChannelName (ID: 1411119542456811722)
+✓ Monitoring channel: YourChannelName (ID: 1435245345448656916)
 ```
 
 That's it! The bot will now respond to posts in this forum channel.
