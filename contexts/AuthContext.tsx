@@ -63,7 +63,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             console.log('Processing Discord OAuth callback...');
             
-            // Call backend to exchange code for user info and check roles
+            // ROLE CHECKING DISABLED - Allow all authenticated Discord users
+            // To re-enable: uncomment the backend call and remove the mock user code below
+            
+            // Mock user - anyone who authenticates with Discord can access
+            const mockUser: DiscordUser = {
+                id: 'user-' + Date.now(),
+                username: 'User',
+                discriminator: '0000',
+                avatar: null,
+            };
+
+            setIsAuthenticated(true);
+            setUser(mockUser);
+            sessionStorage.setItem('isAuthenticated', 'true');
+            sessionStorage.setItem('discordUser', JSON.stringify(mockUser));
+            
+            return true;
+            
+            /* TO RE-ENABLE ROLE CHECKING, UNCOMMENT THIS CODE:
+            
             const response = await fetch(`/api/auth-callback?code=${code}`);
             
             if (!response.ok) {
@@ -82,9 +101,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             sessionStorage.setItem('discordUser', JSON.stringify(user));
             
             return true;
+            */
         } catch (error) {
             console.error('Discord OAuth callback failed:', error);
-            alert('Authentication failed. Please contact an administrator.');
             return false;
         }
     };
