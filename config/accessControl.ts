@@ -23,7 +23,11 @@ export const ALLOWED_USER_IDS: string[] = [
 // 1. Enable Developer Mode in Discord
 // 2. Right-click your server icon → Copy Server ID
 
-export const DISCORD_SERVER_ID = 'your_server_id_here';
+export const DISCORD_SERVER_ID = 'your_server_id_here';  // You'll need to provide this
+
+// Note: Role checking requires a backend implementation
+// For now, this is just client-side (can be bypassed)
+// See HOW_TO_RESTRICT_ACCESS.md for backend implementation
 
 // Set to true to require users to be members of your Discord server
 export const REQUIRE_SERVER_MEMBERSHIP = true;
@@ -35,9 +39,7 @@ export const REQUIRE_SERVER_MEMBERSHIP = true;
 // Note: This requires backend implementation to work securely
 
 export const ALLOWED_ROLE_IDS: string[] = [
-    // Example: '111222333444555666',
-    // Add role IDs here:
-    
+    '1422106035337826315',  // Staff role - REQUIRED for dashboard access
 ];
 
 // Role names (for reference only, backend should check by ID)
