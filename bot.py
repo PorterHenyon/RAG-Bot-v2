@@ -1493,9 +1493,10 @@ async def on_message(message):
                                         
                                     elif not satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
                                         # User is unsatisfied - check what we gave them before
+                                        # IMPORTANT: After auto-response gets poor satisfaction, bot sends ONE AI follow-up
                                         if response_type == 'auto':
-                                            # They got auto-response and were unsatisfied - try AI now
-                                            print(f"🔄 User unsatisfied with auto-response - trying AI...")
+                                            # They got auto-response and were unsatisfied - try AI now with quick turnaround
+                                            print(f"🔄 User unsatisfied with auto-response - trying AI follow-up...")
                                             
                                             # Get the user's question from conversation
                                             user_messages = [msg.get('content', '') for msg in conversation if msg.get('author') == 'User']

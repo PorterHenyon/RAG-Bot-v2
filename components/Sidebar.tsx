@@ -83,8 +83,7 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, isOpen, 
         </nav>
       </div>
       <div className="text-center text-xs text-gray-500">
-        <p>&copy; 2024 Support Bot Inc.</p>
-        <p>Version 1.1.0</p>
+        <p>Made by Yukon 2025</p>
       </div>
     </aside>
     </>
