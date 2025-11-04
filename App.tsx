@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const { isAuthenticated, isLoading } = useAuth();
   const [currentView, setCurrentView] = useState<AppView>(AppView.Dashboard);
   const [isCallback, setIsCallback] = useState(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
     // Check if this is an OAuth callback
@@ -68,9 +69,17 @@ const App: React.FC = () => {
 
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100">
-      <Sidebar currentView={currentView} setCurrentView={setCurrentView} />
+      <Sidebar 
+        currentView={currentView} 
+        setCurrentView={setCurrentView}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+      />
       <div className="flex-1 flex flex-col overflow-hidden">
-        <Header currentView={currentView} />
+        <Header 
+          currentView={currentView}
+          onMenuClick={() => setIsSidebarOpen(!isSidebarOpen)}
+        />
         <main className="flex-1 overflow-x-hidden overflow-y-auto bg-gray-900 p-4 sm:p-6 lg:p-8">
           {renderView()}
         </main>

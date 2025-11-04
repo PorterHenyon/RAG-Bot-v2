@@ -54,44 +54,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
         }
 
-        const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=identify%20email`;
+        // Request guilds and guilds.members.read scopes to check roles
+        const scopes = 'identify email guilds guilds.members.read';
+        const discordAuthUrl = `https://discord.com/api/oauth2/authorize?client_id=${DISCORD_CLIENT_ID}&redirect_uri=${encodeURIComponent(DISCORD_REDIRECT_URI)}&response_type=code&scope=${encodeURIComponent(scopes)}`;
         window.location.href = discordAuthUrl;
     };
 
     const handleDiscordCallback = async (code: string): Promise<boolean> => {
         try {
-            // In a real application, this should be done on the backend to keep the client secret secure
-            // For now, we'll exchange the code for user info directly
+            console.log('Processing Discord OAuth callback...');
             
-            // This is a simplified version - in production, you need a backend endpoint
-            // that exchanges the code for an access token using your client secret
-            console.log('Received Discord code:', code);
+            // Call backend to exchange code for user info and check roles
+            const response = await fetch(`/api/auth-callback?code=${code}`);
             
-            // For demonstration, we'll create a mock user
-            // In production, replace this with actual Discord API calls through your backend
-            const mockUser: DiscordUser = {
-                id: 'demo-' + Date.now(),
-                username: 'DiscordUser',
-                discriminator: '0000',
-                avatar: null,
-                email: 'user@discord.com'
-            };
-
-            // Check if user is allowed to access the dashboard
-            if (!isUserAllowed(mockUser.id)) {
-                alert(getAccessDeniedMessage());
-                console.warn('Access denied for user:', mockUser.id);
+            if (!response.ok) {
+                const errorData = await response.json();
+                alert(errorData.message || 'Authentication failed');
+                console.error('Auth failed:', errorData);
                 return false;
             }
 
+            const data = await response.json();
+            const user: DiscordUser = data.user;
+
             setIsAuthenticated(true);
-            setUser(mockUser);
+            setUser(user);
             sessionStorage.setItem('isAuthenticated', 'true');
-            sessionStorage.setItem('discordUser', JSON.stringify(mockUser));
+            sessionStorage.setItem('discordUser', JSON.stringify(user));
             
             return true;
         } catch (error) {
             console.error('Discord OAuth callback failed:', error);
+            alert('Authentication failed. Please try again.');
             return false;
         }
     };
