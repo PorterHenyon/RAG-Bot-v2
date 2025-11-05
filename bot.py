@@ -1575,44 +1575,33 @@ async def on_message(message):
                                                 
                                                 # Try to find RAG entries
                                                 relevant_docs = find_relevant_rag_entries(user_question)
+                                                
+                                                # Generate AI response (with or without RAG entries)
+                                                # If no RAG entries, AI will use system prompt and conversation context
                                                 if relevant_docs:
-                                                    # Generate AI response
+                                                    print(f"📚 Found {len(relevant_docs)} RAG entries for AI response")
                                                     ai_response = await generate_ai_response(user_question, relevant_docs[:2])
-                                                    
-                                                    ai_embed = discord.Embed(
-                                                        title="💡 Let Me Try Again",
-                                                        description=ai_response,
-                                                        color=0x5865F2
-                                                    )
-                                                    ai_embed.add_field(
-                                                        name="💬 Better?",
-                                                        value="Let me know if this helps!",
-                                                        inline=False
-                                                    )
-                                                    ai_embed.set_footer(text="Revolution Macro AI")
-                                                    await thread_channel.send(embed=ai_embed)
-                                                    thread_response_type[thread_id] = 'ai'  # Now we've given AI response
-                                                    print(f"🔄 Sent AI response after unsatisfactory auto-response")
-                                                    # Don't escalate yet - give AI a chance
-                                                    updated_status = 'AI Response'
                                                 else:
-                                                    # No RAG entries - escalate directly
-                                                    updated_status = 'Human Support'
-                                                    escalated_threads.add(thread_id)
-                                                    
-                                                    escalate_embed = discord.Embed(
-                                                        title="👨‍💼 Support Team Notified",
-                                                        description="I need more expertise for this. Our team has been notified!",
-                                                        color=0xE67E22
-                                                    )
-                                                    escalate_embed.add_field(
-                                                        name="⏰ Response Time",
-                                                        value="Usually under 24 hours",
-                                                        inline=False
-                                                    )
-                                                    escalate_embed.set_footer(text="Revolution Macro Support Team")
-                                                    await thread_channel.send(embed=escalate_embed)
-                                                    print(f"⚠ Escalating to human support (no RAG available)")
+                                                    print(f"💭 No RAG entries found - AI will respond using general knowledge")
+                                                    # Generate response without RAG context
+                                                    ai_response = await generate_ai_response(user_question, [])
+                                                
+                                                ai_embed = discord.Embed(
+                                                    title="💡 Let Me Try Again",
+                                                    description=ai_response,
+                                                    color=0x5865F2
+                                                )
+                                                ai_embed.add_field(
+                                                    name="💬 Better?",
+                                                    value="Let me know if this helps!",
+                                                    inline=False
+                                                )
+                                                ai_embed.set_footer(text="Revolution Macro AI")
+                                                await thread_channel.send(embed=ai_embed)
+                                                thread_response_type[thread_id] = 'ai'  # Now we've given AI response
+                                                print(f"🔄 Sent AI response after unsatisfactory auto-response")
+                                                # Don't escalate yet - give AI a chance
+                                                updated_status = 'AI Response'
                                         
                                         # STEP 3: They got AI response and are still unsatisfied - escalate to human
                                         elif response_type == 'ai':
