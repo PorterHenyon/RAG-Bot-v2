@@ -552,6 +552,28 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
         # Default to needing human support if analysis fails
         return {"satisfied": False, "reason": "Analysis failed", "confidence": 0, "wants_human": False}
 
+async def get_resolved_tag(forum_channel):
+    """
+    Find the 'Resolved' tag in a forum channel.
+    Returns the tag object if found, None otherwise.
+    """
+    try:
+        if not hasattr(forum_channel, 'available_tags'):
+            return None
+        
+        # Look for a tag with "resolved" or "solved" in the name (case-insensitive)
+        for tag in forum_channel.available_tags:
+            tag_name_lower = tag.name.lower()
+            if 'resolved' in tag_name_lower or 'solved' in tag_name_lower:
+                print(f"✓ Found resolved tag: '{tag.name}' (ID: {tag.id})")
+                return tag
+        
+        print(f"⚠ No 'Resolved' or 'Solved' tag found in forum channel")
+        return None
+    except Exception as e:
+        print(f"⚠ Error getting resolved tag: {e}")
+        return None
+
 # --- PERIODIC DATA SYNC ---
 @tasks.loop(hours=1)  # Sync every hour
 async def sync_data_task():
@@ -698,8 +720,11 @@ async def on_ready():
         synced = await bot.tree.sync(guild=guild)
         print(f'✓ Slash commands synced to guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
         print(f'   Commands will appear instantly in the server!')
+        print(f'   ⚠ NOTE: If you don\'t see commands, re-invite bot with "applications.commands" scope!')
     except Exception as e:
         print(f'⚠ Failed to sync commands: {e}')
+        print(f'   This usually means the bot lacks "applications.commands" permission.')
+        print(f'   Re-invite the bot using the OAuth2 URL Generator with both "bot" and "applications.commands" scopes.')
     
     # Verify bot is watching the correct channel and list all forum channels
     try:
@@ -1351,32 +1376,12 @@ async def on_message(message):
                                     updated_status = matching_post.get('status', 'Unsolved')
                                     response_type = thread_response_type.get(thread_id)  # Get what type of response we gave
                                     
-                                    if satisfaction.get('wants_human'):
-                                        # User explicitly wants human support OR is unsatisfied after AI
-                                        updated_status = 'Human Support'
-                                        escalated_threads.add(thread_id)  # Mark thread as escalated - bot stops talking
-                                        
-                                        # Send shorter human support embed
-                                        human_embed = discord.Embed(
-                                            title="👨‍💼 Support Team Notified",
-                                            description="Got it! I've notified our support team. They'll help you soon.",
-                                            color=0x3498DB
-                                        )
-                                        human_embed.add_field(
-                                            name="⏰ Response Time",
-                                            value="Usually under 24 hours",
-                                            inline=True
-                                        )
-                                        human_embed.add_field(
-                                            name="📸 Tip",
-                                            value="Send screenshots if you have any!",
-                                            inline=True
-                                        )
-                                        human_embed.set_footer(text="Revolution Macro Support Team")
-                                        await thread_channel.send(embed=human_embed)
-                                        print(f"👥 User requested human support - thread {thread_id} escalated (bot will stop responding)")
-                                        
-                                    elif satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
+                                    # ESCALATION LOGIC:
+                                    # 1. Auto-response → if unsatisfied → AI response
+                                    # 2. AI response → if unsatisfied → Human support
+                                    # 3. Explicit human request → Human support immediately
+                                    
+                                    if satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
                                         # User is satisfied - mark as solved
                                         updated_status = 'Solved'
                                         
@@ -1394,6 +1399,21 @@ async def on_message(message):
                                         confirm_embed.set_footer(text="Revolution Macro Support")
                                         await thread_channel.send(embed=confirm_embed)
                                         print(f"✅ User satisfaction detected - marking thread {thread_id} as Solved")
+                                        
+                                        # Apply "Resolved" tag if it exists
+                                        try:
+                                            forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+                                            if forum_channel:
+                                                resolved_tag = await get_resolved_tag(forum_channel)
+                                                if resolved_tag:
+                                                    # Get current tags and add resolved tag
+                                                    current_tags = list(thread_channel.applied_tags)
+                                                    if resolved_tag not in current_tags:
+                                                        current_tags.append(resolved_tag)
+                                                        await thread_channel.edit(applied_tags=current_tags)
+                                                        print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+                                        except Exception as tag_error:
+                                            print(f"⚠ Could not apply resolved tag: {tag_error}")
                                         
                                         # Lock/archive the thread
                                         try:
@@ -1503,9 +1523,35 @@ async def on_message(message):
                                             traceback.print_exc()
                                         
                                     elif not satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
-                                        # User is unsatisfied - check what we gave them before
-                                        # IMPORTANT: After auto-response gets poor satisfaction, bot sends ONE AI follow-up
-                                        if response_type == 'auto':
+                                        # User is unsatisfied - check escalation path
+                                        
+                                        # STEP 1: Check if they EXPLICITLY asked for human (e.g., "I want to talk to a person")
+                                        if satisfaction.get('wants_human') and response_type == 'ai':
+                                            # They got AI and explicitly want human - escalate
+                                            updated_status = 'Human Support'
+                                            escalated_threads.add(thread_id)
+                                            
+                                            human_embed = discord.Embed(
+                                                title="👨‍💼 Support Team Notified",
+                                                description="Got it! I've notified our support team. They'll help you soon.",
+                                                color=0x3498DB
+                                            )
+                                            human_embed.add_field(
+                                                name="⏰ Response Time",
+                                                value="Usually under 24 hours",
+                                                inline=True
+                                            )
+                                            human_embed.add_field(
+                                                name="📸 Tip",
+                                                value="Send screenshots if you have any!",
+                                                inline=True
+                                            )
+                                            human_embed.set_footer(text="Revolution Macro Support Team")
+                                            await thread_channel.send(embed=human_embed)
+                                            print(f"👥 User explicitly requested human support after AI - thread {thread_id} escalated")
+                                        
+                                        # STEP 2: They got auto-response and are unsatisfied - try AI
+                                        elif response_type == 'auto':
                                             # They got auto-response and were unsatisfied - try AI now with quick turnaround
                                             print(f"🔄 User unsatisfied with auto-response - trying AI follow-up...")
                                             
@@ -1554,7 +1600,9 @@ async def on_message(message):
                                                     escalate_embed.set_footer(text="Revolution Macro Support Team")
                                                     await thread_channel.send(embed=escalate_embed)
                                                     print(f"⚠ Escalating to human support (no RAG available)")
-                                        else:
+                                        
+                                        # STEP 3: They got AI response and are still unsatisfied - escalate to human
+                                        elif response_type == 'ai':
                                             # They got AI response and were still unsatisfied - escalate to human
                                             updated_status = 'Human Support'
                                             escalated_threads.add(thread_id)  # Mark thread - bot stops talking
@@ -1578,6 +1626,12 @@ async def on_message(message):
                                             escalate_embed.set_footer(text="Revolution Macro Support Team")
                                             await thread_channel.send(embed=escalate_embed)
                                             print(f"⚠ User unsatisfied after AI - escalating thread {thread_id} to Human Support (bot stops)")
+                                        
+                                        # STEP 4: No response type tracked - default behavior
+                                        else:
+                                            print(f"⚠ No response type tracked for thread {thread_id}, defaulting to human escalation")
+                                            updated_status = 'Human Support'
+                                            escalated_threads.add(thread_id)
                                     
                                     # Update forum post status in dashboard
                                     if updated_status != matching_post.get('status'):
@@ -2300,6 +2354,22 @@ async def mark_as_solve(interaction: discord.Interaction):
                     ephemeral=True
                 )
                 print(f"✓ Marked thread {thread.id} as solved but could not save RAG entry (API not configured)")
+            
+            # Apply "Resolved" tag if it exists
+            try:
+                thread = interaction.channel
+                forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+                if forum_channel:
+                    resolved_tag = await get_resolved_tag(forum_channel)
+                    if resolved_tag:
+                        # Get current tags and add resolved tag
+                        current_tags = list(thread.applied_tags)
+                        if resolved_tag not in current_tags:
+                            current_tags.append(resolved_tag)
+                            await thread.edit(applied_tags=current_tags)
+                            print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread.id}")
+            except Exception as tag_error:
+                print(f"⚠ Could not apply resolved tag: {tag_error}")
             
             # Lock and archive the thread since it's marked as solved
             try:
