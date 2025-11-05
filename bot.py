@@ -721,8 +721,12 @@ async def on_ready():
         print("✓ Started background task: check_old_posts (runs every hour)")
     
     try:
-        # Sync commands to specific guild for instant availability
+        # Clear old commands first to prevent duplicates
         guild = discord.Object(id=DISCORD_GUILD_ID)
+        bot.tree.clear_commands(guild=guild)
+        print(f'🧹 Cleared old commands from guild {DISCORD_GUILD_ID}')
+        
+        # Sync commands to specific guild for instant availability
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f'✓ Slash commands synced to guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
