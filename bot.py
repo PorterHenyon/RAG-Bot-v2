@@ -1354,6 +1354,16 @@ async def on_message(message):
                                 satisfaction_timers[thread_id].cancel()
                                 print(f"⏰ Cancelled previous satisfaction timer for thread {thread_id}")
                             
+                            # IMPORTANT: Update the conversation with user's reply BEFORE starting timer
+                            post_update = {
+                                'action': 'update',
+                                'post': {
+                                    **matching_post,
+                                    'conversation': conversation,
+                                    'status': new_status
+                                }
+                            }
+                            
                             # Create delayed analysis task (configurable delay)
                             async def delayed_satisfaction_check():
                                 try:
