@@ -38,7 +38,8 @@ export const REQUIRE_SERVER_MEMBERSHIP = true;
 // Note: This requires backend implementation to work securely
 
 export const ALLOWED_ROLE_IDS: string[] = [
-    '1422106035337826315',  // Staff role - REQUIRED for dashboard access
+    '1422106035337826315',  // Staff role
+    '1405246916760961125',  // Additional authorized role
 ];
 
 // Role names (for reference only, backend should check by ID)

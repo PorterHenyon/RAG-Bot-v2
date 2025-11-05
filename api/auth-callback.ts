@@ -3,7 +3,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 const DISCORD_CLIENT_ID = process.env.VITE_DISCORD_CLIENT_ID;
 const DISCORD_CLIENT_SECRET = process.env.DISCORD_CLIENT_SECRET;
 const DISCORD_REDIRECT_URI = process.env.VITE_DISCORD_REDIRECT_URI;
-const REQUIRED_ROLE_ID = '1422106035337826315'; // Staff role
+
+// Allowed role IDs - users with ANY of these roles can access the dashboard
+const ALLOWED_ROLE_IDS = [
+    '1422106035337826315', // Staff role
+    '1405246916760961125', // Additional authorized role
+];
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
     const { code } = req.query;
@@ -78,13 +83,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (memberResponse.ok) {
                 const member = await memberResponse.json();
                 
-                // Check if user has required role
-                const hasRequiredRole = member.roles.includes(REQUIRED_ROLE_ID);
+                // Check if user has ANY of the allowed roles
+                const hasAllowedRole = member.roles.some((roleId: string) => 
+                    ALLOWED_ROLE_IDS.includes(roleId)
+                );
                 
-                if (!hasRequiredRole) {
+                if (!hasAllowedRole) {
                     return res.status(403).json({
                         error: 'Access denied',
-                        message: 'You must have the Staff role to access this dashboard.',
+                        message: 'You must have the Staff role or an authorized role to access this dashboard.',
                     });
                 }
             } else {
