@@ -207,6 +207,15 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [],
       createdAt: '2024-11-03T11:35:00Z',
     },
+    {
+      id: 'CMD-SYS-013',
+      name: 'set_post_inactivity_time',
+      description: 'Set the hours before old unsolved posts are escalated to High Priority. Default: 12 hours. Range: 1-168 hours (7 days). Requires Admin role.',
+      parameters: [
+        { name: 'hours', description: 'Hours of inactivity before escalation (1-168)', type: 'number', required: true },
+      ],
+      createdAt: '2024-11-03T11:40:00Z',
+    },
 ];
 
 const initialBotSettings: BotSettings = {

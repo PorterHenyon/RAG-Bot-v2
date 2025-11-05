@@ -75,6 +75,7 @@ BOT_SETTINGS = {
     'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
     'ai_max_tokens': 2048,  # Max tokens for AI responses
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
+    'post_inactivity_hours': 12,  # Hours before escalating old posts to High Priority
     'last_updated': datetime.now().isoformat()
 }
 
@@ -87,6 +88,8 @@ processed_threads = set()  # {thread_id}
 escalated_threads = set()  # {thread_id}
 # Track what type of response was given per thread (for satisfaction flow)
 thread_response_type = {}  # {thread_id: 'auto' | 'ai' | None}
+# Track threads manually closed with no_review (don't create RAG entries)
+no_review_threads = set()  # {thread_id}
 
 # --- Local RAG Storage ---
 LOCALRAG_DIR = Path("localrag")
@@ -107,7 +110,8 @@ def load_bot_settings():
                     print(f"✓ Loaded forum channel ID from settings: {SUPPORT_FORUM_CHANNEL_ID}")
                 print(f"✓ Loaded bot settings: satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
                       f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
-                      f"max_tokens={BOT_SETTINGS.get('ai_max_tokens', 2048)}")
+                      f"max_tokens={BOT_SETTINGS.get('ai_max_tokens', 2048)}, "
+                      f"post_inactivity_hours={BOT_SETTINGS.get('post_inactivity_hours', 12)}h")
                 return True
     except Exception as e:
         print(f"⚠ Error loading bot settings: {e}")
@@ -601,7 +605,8 @@ async def check_old_posts():
         if 'your-vercel-app' in DATA_API_URL:
             return  # Skip if API not configured
         
-        print(f"\n🔍 Checking for old unsolved posts (>12 hours)...")
+        inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
+        print(f"\n🔍 Checking for old unsolved posts (>{inactivity_threshold} hours)...")
         
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
@@ -636,12 +641,15 @@ async def check_old_posts():
                         
                         age_hours = (now - created_at).total_seconds() / 3600
                         
-                        if age_hours > 12:
-                            # Post is older than 12 hours and not solved
+                        # Get inactivity threshold from settings (default: 12 hours)
+                        inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
+                        
+                        if age_hours > inactivity_threshold:
+                            # Post is older than threshold and not solved
                             thread_id = post.get('postId')
                             post_title = post.get('postTitle', 'Unknown')
                             
-                            print(f"⚠ Found old post: '{post_title}' ({age_hours:.1f} hours old)")
+                            print(f"⚠ Found old post: '{post_title}' ({age_hours:.1f} hours old, threshold: {inactivity_threshold}h)")
                             
                             # Update status to High Priority
                             post['status'] = 'High Priority'
@@ -1481,7 +1489,10 @@ async def on_message(message):
                                             # Analyze conversation to create RAG entry
                                             rag_entry = await analyze_conversation(conversation_text)
                                             
-                                            if rag_entry and 'your-vercel-app' not in DATA_API_URL:
+                                            # Check if thread was manually closed with no_review (don't create RAG)
+                                            if thread_id in no_review_threads:
+                                                print(f"🚫 Thread {thread_id} marked as no_review - skipping auto-RAG creation")
+                                            elif rag_entry and 'your-vercel-app' not in DATA_API_URL:
                                                 # Create pending RAG entry (requires approval)
                                                 data_api_url_rag = DATA_API_URL
                                                 
@@ -2030,6 +2041,34 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
         print(f"Error in set_max_tokens: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="set_post_inactivity_time", description="Set hours before old posts escalate to High Priority (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_post_inactivity_time(interaction: discord.Interaction, hours: int):
+    """Set the post inactivity threshold for auto-escalation"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        if hours < 1 or hours > 168:  # 1 hour to 7 days
+            await interaction.followup.send("❌ Hours must be between 1 and 168 (7 days).", ephemeral=False)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['post_inactivity_hours'] = hours
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Post inactivity threshold updated to **{hours} hours**!\n\n"
+                f"Posts older than {hours} hours will be escalated to **High Priority**.\n"
+                f"The background task runs every hour to check for old posts.",
+                ephemeral=False
+            )
+            print(f"✓ Post inactivity threshold updated to {hours} hours by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_post_inactivity_time: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def status(interaction: discord.Interaction):
@@ -2066,7 +2105,7 @@ async def status(interaction: discord.Interaction):
         
         status_embed.add_field(
             name="⏱️ Timers",
-            value=f"**Satisfaction Delay:** {BOT_SETTINGS.get('satisfaction_delay', 15)}s\n**Active Timers:** {active_timers}",
+            value=f"**Satisfaction Delay:** {BOT_SETTINGS.get('satisfaction_delay', 15)}s\n**Active Timers:** {active_timers}\n**Post Inactivity:** {BOT_SETTINGS.get('post_inactivity_hours', 12)}h",
             inline=True
         )
         
@@ -2303,6 +2342,17 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
         
         thread = interaction.channel
         thread_id = thread.id
+        
+        # Mark this thread as manually closed with no review (prevents auto-RAG creation)
+        global no_review_threads
+        no_review_threads.add(thread_id)
+        print(f"🚫 Thread {thread_id} marked as no_review - will not create RAG entry")
+        
+        # Cancel any pending satisfaction timer for this thread
+        if thread_id in satisfaction_timers:
+            satisfaction_timers[thread_id].cancel()
+            del satisfaction_timers[thread_id]
+            print(f"⏰ Cancelled satisfaction timer for no_review thread {thread_id}")
         
         # Apply "Resolved" tag if it exists
         try:

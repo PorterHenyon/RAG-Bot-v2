@@ -184,6 +184,15 @@ let inMemoryStore: DataStore = {
       parameters: [],
       createdAt: new Date().toISOString(),
     },
+    {
+      id: 'CMD-SYS-012',
+      name: 'set_post_inactivity_time',
+      description: 'Set the hours before old unsolved posts are escalated to High Priority. Default: 12 hours. Range: 1-168 hours (7 days). Requires Admin role.',
+      parameters: [
+        { name: 'hours', description: 'Hours of inactivity before escalation (1-168)', type: 'number', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
   ],
   pendingRagEntries: [],
   botSettings: {
