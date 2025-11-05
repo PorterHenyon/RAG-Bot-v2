@@ -1565,27 +1565,29 @@ async def on_message(message):
                                         
                                         # STEP 2: They got auto-response and are unsatisfied - try AI
                                         elif response_type == 'auto':
-                                            # They got auto-response and were unsatisfied - try AI now with quick turnaround
                                             print(f"🔄 ESCALATION PATH: Auto → AI (user unsatisfied with auto-response, trying AI follow-up...)")
                                             
-                                            # Get the user's question from conversation
-                                            user_messages = [msg.get('content', '') for msg in conversation if msg.get('author') == 'User']
-                                            if user_messages:
-                                                user_question = ' '.join(user_messages[:2])  # First 2 messages
+                                            try:
+                                                # Get the user's question from conversation
+                                                user_messages = [msg.get('content', '') for msg in conversation if msg.get('author') == 'User']
+                                                user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
+                                                
+                                                print(f"📝 Generating AI response for: {user_question[:50]}...")
                                                 
                                                 # Try to find RAG entries
                                                 relevant_docs = find_relevant_rag_entries(user_question)
                                                 
-                                                # Generate AI response (with or without RAG entries)
-                                                # If no RAG entries, AI will use system prompt and conversation context
+                                                # Generate AI response (ALWAYS, with or without RAG)
                                                 if relevant_docs:
                                                     print(f"📚 Found {len(relevant_docs)} RAG entries for AI response")
                                                     ai_response = await generate_ai_response(user_question, relevant_docs[:2])
                                                 else:
-                                                    print(f"💭 No RAG entries found - AI will respond using general knowledge")
-                                                    # Generate response without RAG context
+                                                    print(f"💭 No RAG entries - AI using general knowledge")
                                                     ai_response = await generate_ai_response(user_question, [])
                                                 
+                                                print(f"✅ AI response generated ({len(ai_response)} chars)")
+                                                
+                                                # Send the AI response
                                                 ai_embed = discord.Embed(
                                                     title="💡 Let Me Try Again",
                                                     description=ai_response,
@@ -1597,11 +1599,28 @@ async def on_message(message):
                                                     inline=False
                                                 )
                                                 ai_embed.set_footer(text="Revolution Macro AI")
+                                                
                                                 await thread_channel.send(embed=ai_embed)
-                                                thread_response_type[thread_id] = 'ai'  # Now we've given AI response
-                                                print(f"🔄 Sent AI response after unsatisfactory auto-response")
-                                                # Don't escalate yet - give AI a chance
+                                                thread_response_type[thread_id] = 'ai'
                                                 updated_status = 'AI Response'
+                                                print(f"✅ SENT AI FOLLOW-UP RESPONSE to thread {thread_id}")
+                                                
+                                            except Exception as ai_error:
+                                                print(f"❌ ERROR generating AI follow-up: {ai_error}")
+                                                import traceback
+                                                traceback.print_exc()
+                                                # Even if AI fails, send something
+                                                try:
+                                                    fallback_embed = discord.Embed(
+                                                        title="💡 Let Me Try Again",
+                                                        description="I'm having trouble generating a detailed response. Let me get a human to help you with this!",
+                                                        color=0xF39C12
+                                                    )
+                                                    await thread_channel.send(embed=fallback_embed)
+                                                    updated_status = 'Human Support'
+                                                    escalated_threads.add(thread_id)
+                                                except:
+                                                    pass
                                         
                                         # STEP 3: They got AI response and are still unsatisfied - escalate to human
                                         elif response_type == 'ai':
