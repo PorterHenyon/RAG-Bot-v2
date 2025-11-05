@@ -7,6 +7,8 @@ const OAuthCallback: React.FC = () => {
     const [error, setError] = useState<string>('');
 
     useEffect(() => {
+        let isMounted = true;
+        
         const processCallback = async () => {
             // Get the code from URL parameters
             const params = new URLSearchParams(window.location.search);
@@ -14,30 +16,35 @@ const OAuthCallback: React.FC = () => {
             const errorParam = params.get('error');
 
             if (errorParam) {
-                setStatus('error');
-                setError('Authorization was denied or cancelled');
+                if (isMounted) {
+                    setStatus('error');
+                    setError('Authorization was denied or cancelled');
+                }
                 return;
             }
 
             if (!code) {
-                setStatus('error');
-                setError('No authorization code received');
+                if (isMounted) {
+                    setStatus('error');
+                    setError('No authorization code received');
+                }
                 return;
             }
 
             try {
                 const success = await handleDiscordCallback(code);
+                if (!isMounted) return;
+                
                 if (success) {
                     setStatus('success');
-                    // Wait a moment then redirect
-                    setTimeout(() => {
-                        window.location.href = '/';
-                    }, 1000);
+                    // Immediate redirect - no delay
+                    window.location.replace('/');
                 } else {
                     setStatus('error');
                     setError('Access denied. You must have the Staff role or an authorized role to access this dashboard.');
                 }
             } catch (err) {
+                if (!isMounted) return;
                 setStatus('error');
                 setError('An unexpected error occurred during authentication');
                 console.error('OAuth callback error:', err);
@@ -45,6 +52,10 @@ const OAuthCallback: React.FC = () => {
         };
 
         processCallback();
+        
+        return () => {
+            isMounted = false;
+        };
     }, [handleDiscordCallback]);
 
     return (
