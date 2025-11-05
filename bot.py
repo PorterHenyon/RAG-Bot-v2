@@ -529,9 +529,15 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
             "- They ask follow-up questions\n"
             "- They express confusion or frustration\n"
             "- They say it didn't work or need more help\n\n"
-            "Set wants_human to true if:\n"
-            "- They explicitly ask for human support, staff, or a real person\n"
-            "- They seem frustrated and want to escalate"
+            "IMPORTANT: Set wants_human to true ONLY if:\n"
+            "- They EXPLICITLY ask for: human support, staff, real person, agent, representative, etc.\n"
+            "- They use phrases like: 'talk to someone', 'speak to a person', 'need human help'\n"
+            "\n"
+            "DO NOT set wants_human to true just because:\n"
+            "- They're unsatisfied or frustrated\n"
+            "- They say 'that didn't work' or 'still not working'\n"
+            "- They ask follow-up questions\n"
+            "- They need more help (bot can provide another solution first)"
         )
         
         loop = asyncio.get_event_loop()
@@ -1376,6 +1382,13 @@ async def on_message(message):
                                     updated_status = matching_post.get('status', 'Unsolved')
                                     response_type = thread_response_type.get(thread_id)  # Get what type of response we gave
                                     
+                                    # DEBUG: Log escalation decision factors
+                                    print(f"🔍 Escalation Decision Factors:")
+                                    print(f"   Response type: {response_type}")
+                                    print(f"   Satisfied: {satisfaction.get('satisfied')}")
+                                    print(f"   Wants human: {satisfaction.get('wants_human')}")
+                                    print(f"   Confidence: {satisfaction.get('confidence')}")
+                                    
                                     # ESCALATION LOGIC:
                                     # 1. Auto-response → if unsatisfied → AI response
                                     # 2. AI response → if unsatisfied → Human support
@@ -1553,7 +1566,7 @@ async def on_message(message):
                                         # STEP 2: They got auto-response and are unsatisfied - try AI
                                         elif response_type == 'auto':
                                             # They got auto-response and were unsatisfied - try AI now with quick turnaround
-                                            print(f"🔄 User unsatisfied with auto-response - trying AI follow-up...")
+                                            print(f"🔄 ESCALATION PATH: Auto → AI (user unsatisfied with auto-response, trying AI follow-up...)")
                                             
                                             # Get the user's question from conversation
                                             user_messages = [msg.get('content', '') for msg in conversation if msg.get('author') == 'User']
@@ -1604,6 +1617,7 @@ async def on_message(message):
                                         # STEP 3: They got AI response and are still unsatisfied - escalate to human
                                         elif response_type == 'ai':
                                             # They got AI response and were still unsatisfied - escalate to human
+                                            print(f"⚠ ESCALATION PATH: AI → Human (user still unsatisfied after AI response)")
                                             updated_status = 'Human Support'
                                             escalated_threads.add(thread_id)  # Mark thread - bot stops talking
                                             
