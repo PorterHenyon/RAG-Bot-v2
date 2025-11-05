@@ -29,7 +29,10 @@ const OAuthCallback: React.FC = () => {
                 const success = await handleDiscordCallback(code);
                 if (success) {
                     setStatus('success');
-                    // Don't auto-redirect - let user click "Close"
+                    // Wait a moment then redirect
+                    setTimeout(() => {
+                        window.location.href = '/';
+                    }, 1000);
                 } else {
                     setStatus('error');
                     setError('Access denied. You must have the Staff role or an authorized role to access this dashboard.');
@@ -68,14 +71,8 @@ const OAuthCallback: React.FC = () => {
                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                                 </svg>
                             </div>
-                            <h2 className="text-2xl font-bold text-white mb-2">Authenticated Successfully!</h2>
-                            <p className="text-gray-400 mb-4">Click close to continue</p>
-                            <button
-                                onClick={() => window.location.href = '/'}
-                                className="bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-6 rounded-lg transition-colors"
-                            >
-                                Close
-                            </button>
+                            <h2 className="text-2xl font-bold text-white mb-2">Success!</h2>
+                            <p className="text-gray-400">Redirecting to dashboard...</p>
                         </>
                     )}
 
