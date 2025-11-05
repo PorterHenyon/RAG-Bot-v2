@@ -1,6 +1,6 @@
 # Update Bot to Monitor New Forum Channel
 
-## Channel ID: 1435401534849679421
+## Channel ID: 1435455947551150171
 
 ---
 
@@ -15,10 +15,10 @@ The `.env` file is where your bot runs (same folder as `bot.py`)
 Open your `.env` file and change this line:
 
 ```env
-SUPPORT_FORUM_CHANNEL_ID=1435401534849679421
+SUPPORT_FORUM_CHANNEL_ID=1435455947551150171
 ```
 
-Replace the old channel ID with the new one: **1435401534849679421**
+Replace the old channel ID with the new one: **1435455947551150171**
 
 ### Step 3: Restart the Bot
 
@@ -36,7 +36,7 @@ python bot.py
 
 When the bot starts, you should see:
 ```
-✓ Monitoring channel: YourChannelName (ID: 1435401534849679421)
+✓ Monitoring channel: YourChannelName (ID: 1435455947551150171)
 ```
 
 ---
@@ -66,7 +66,7 @@ DISCORD_BOT_TOKEN=your_bot_token_here
 GEMINI_API_KEY=your_gemini_api_key_here
 
 # Forum Channel to Monitor
-SUPPORT_FORUM_CHANNEL_ID=1435401534849679421
+SUPPORT_FORUM_CHANNEL_ID=1435455947551150171
 
 # Data API URL (for dashboard sync)
 DATA_API_URL=https://rag-bot-v2-lcze.vercel.app/api/data
@@ -82,6 +82,6 @@ DATA_API_URL=https://rag-bot-v2-lcze.vercel.app/api/data
 
 ---
 
-**After updating and restarting, your bot will only monitor channel 1435401534849679421!** 🤖
+**After updating and restarting, your bot will only monitor channel 1435455947551150171!** 🤖
 
 

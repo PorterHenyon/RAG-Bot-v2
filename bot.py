@@ -74,6 +74,7 @@ BOT_SETTINGS = {
     'satisfaction_delay': 15,  # Seconds to wait before analyzing satisfaction
     'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
     'ai_max_tokens': 2048,  # Max tokens for AI responses
+    'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
     'last_updated': datetime.now().isoformat()
 }
 
@@ -1902,6 +1903,44 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_ignore_post_id", description="Set a post ID to ignore (like rules post). Bot won't respond to it (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
+    """Add a post ID to the ignore list"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Validate post ID is a number
+        try:
+            post_id_int = int(post_id)
+        except ValueError:
+            await interaction.followup.send("❌ Post ID must be a number.", ephemeral=False)
+            return
+        
+        global BOT_SETTINGS
+        ignored_posts = BOT_SETTINGS.get('ignored_post_ids', [])
+        
+        if post_id in ignored_posts:
+            await interaction.followup.send(f"⚠️ Post ID {post_id} is already in the ignore list.", ephemeral=False)
+            return
+        
+        ignored_posts.append(post_id)
+        BOT_SETTINGS['ignored_post_ids'] = ignored_posts
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Post ID **{post_id}** added to ignore list!\n\n"
+                f"The bot will no longer respond to this post.\n"
+                f"Total ignored posts: {len(ignored_posts)}",
+                ephemeral=False
+            )
+            print(f"✓ Added post ID {post_id} to ignore list by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_ignore_post_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
 @app_commands.default_permissions(administrator=True)
