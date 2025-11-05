@@ -112,11 +112,27 @@ let inMemoryStore: DataStore = {
       createdAt: new Date().toISOString(),
     },
     {
+      id: 'CMD-SYS-004B',
+      name: 'mark_as_solve_no_review',
+      description: 'Mark thread as solved and lock it WITHOUT creating a RAG entry. Just closes the thread. Requires Admin role.',
+      parameters: [],
+      createdAt: new Date().toISOString(),
+    },
+    {
       id: 'CMD-SYS-005',
       name: 'set_forums_id',
       description: 'Set the support forum channel ID that the bot monitors for new posts. Saves to bot_settings.json file. Requires Admin role.',
       parameters: [
         { name: 'channel_id', description: 'The Discord channel ID (right-click channel → Copy ID)', type: 'string', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-005B',
+      name: 'set_ignore_post_id',
+      description: 'Add a post ID to the ignore list (e.g., rules post). Bot will not respond to ignored posts. Requires Admin role.',
+      parameters: [
+        { name: 'post_id', description: 'The post/thread ID to ignore (right-click thread → Copy ID)', type: 'string', required: true },
       ],
       createdAt: new Date().toISOString(),
     },

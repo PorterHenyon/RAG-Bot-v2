@@ -2285,6 +2285,96 @@ async def ask(interaction: discord.Interaction, question: str):
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=False)
 
+@bot.tree.command(name="mark_as_solve_no_review", description="Mark thread as solved and lock it WITHOUT creating a RAG entry (Staff only).")
+@app_commands.default_permissions(administrator=True)
+async def mark_as_solve_no_review(interaction: discord.Interaction):
+    """Mark thread as solved and lock it without creating RAG entry"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Must be used in a thread
+        if not isinstance(interaction.channel, discord.Thread):
+            await interaction.followup.send("⚠ This command must be used inside a forum thread.", ephemeral=True)
+            return
+        
+        thread = interaction.channel
+        thread_id = thread.id
+        
+        # Apply "Resolved" tag if it exists
+        try:
+            forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+            if forum_channel:
+                resolved_tag = await get_resolved_tag(forum_channel)
+                if resolved_tag:
+                    current_tags = list(thread.applied_tags)
+                    if resolved_tag not in current_tags:
+                        current_tags.append(resolved_tag)
+                        await thread.edit(applied_tags=current_tags)
+                        print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+        except Exception as tag_error:
+            print(f"⚠ Could not apply resolved tag: {tag_error}")
+        
+        # Lock and archive the thread
+        try:
+            await thread.edit(archived=True, locked=True)
+            print(f"🔒 Thread {thread_id} locked and archived (manual /mark_as_solve_no_review)")
+        except discord.errors.Forbidden:
+            await interaction.followup.send(
+                "⚠️ I don't have permission to lock the thread.\n\n"
+                "**Fix:** Give the bot the **Manage Threads** permission.",
+                ephemeral=True
+            )
+            return
+        except Exception as lock_error:
+            print(f"❌ Error locking thread: {lock_error}")
+            await interaction.followup.send(
+                f"⚠️ Error locking thread: {str(lock_error)}",
+                ephemeral=True
+            )
+            return
+        
+        # Update forum post status in dashboard
+        if 'your-vercel-app' not in DATA_API_URL:
+            try:
+                forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(forum_api_url) as get_response:
+                        if get_response.status == 200:
+                            all_posts = await get_response.json()
+                            current_post = None
+                            for p in all_posts:
+                                if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
+                                    current_post = p
+                                    break
+                            
+                            if current_post:
+                                current_post['status'] = 'Solved'
+                                update_payload = {
+                                    'action': 'update',
+                                    'post': current_post
+                                }
+                                headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                    if post_response.status == 200:
+                                        print(f"✅ Updated forum post status to Solved (no RAG)")
+            except Exception as e:
+                print(f"⚠ Error updating dashboard: {e}")
+        
+        # Send success message
+        await interaction.followup.send(
+            f"✅ Thread marked as **Solved** and locked!\n\n"
+            f"🔒 Thread is now closed.\n"
+            f"📋 No RAG entry created (as requested).",
+            ephemeral=False
+        )
+        print(f"✓ Thread {thread_id} marked as solved (no RAG) by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in mark_as_solve_no_review: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="mark_as_solve", description="Mark thread as solved and send conversation to analyzer (Staff only).")
 @app_commands.default_permissions(administrator=True)
 async def mark_as_solve(interaction: discord.Interaction):
