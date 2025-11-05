@@ -235,6 +235,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
+      if (action === 'delete') {
+        // Delete a forum post from the dashboard
+        const postId = req.body.postId;
+        if (postId) {
+          const posts = await getForumPosts();
+          const filteredPosts = posts.filter(p => p.id !== postId && p.postId !== postId.replace('POST-', ''));
+          await saveForumPosts(filteredPosts);
+          console.log(`Deleted post ${postId} from dashboard`);
+          return res.status(200).json({ success: true, message: 'Post deleted' });
+        }
+        return res.status(400).json({ error: 'Missing postId' });
+      }
+
       return res.status(400).json({ error: 'Invalid action' });
     } catch (error) {
       return res.status(400).json({ error: 'Invalid request body' });

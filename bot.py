@@ -1759,6 +1759,52 @@ async def stop(interaction: discord.Interaction):
     await bot.close()
     print("Bot stopped successfully.")
 
+@bot.event
+async def on_thread_delete(thread):
+    """Handle forum post deletion - sync to dashboard"""
+    try:
+        # Only process if it's in our support forum channel
+        if thread.parent_id != SUPPORT_FORUM_CHANNEL_ID:
+            return
+        
+        # Skip API call if URL is not configured
+        if 'your-vercel-app' in DATA_API_URL:
+            return
+        
+        thread_id = thread.id
+        print(f"🗑️ Forum post deleted: '{thread.name}' (ID: {thread_id})")
+        
+        # Remove from dashboard
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        delete_data = {
+            'action': 'delete',
+            'postId': f'POST-{thread_id}'
+        }
+        
+        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    print(f"✅ Deleted forum post from dashboard: {thread_id}")
+                else:
+                    print(f"⚠ Failed to delete post from dashboard: {response.status}")
+        
+        # Clean up tracking dictionaries
+        if thread_id in satisfaction_timers:
+            satisfaction_timers[thread_id].cancel()
+            del satisfaction_timers[thread_id]
+        if thread_id in processed_threads:
+            processed_threads.remove(thread_id)
+        if thread_id in escalated_threads:
+            escalated_threads.remove(thread_id)
+        if thread_id in thread_response_type:
+            del thread_response_type[thread_id]
+            
+    except Exception as e:
+        print(f"⚠ Error handling thread deletion: {e}")
+        import traceback
+        traceback.print_exc()
+
 @bot.tree.command(name="reload", description="Reloads data from dashboard (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def reload(interaction: discord.Interaction):
