@@ -76,6 +76,7 @@ BOT_SETTINGS = {
     'ai_max_tokens': 2048,  # Max tokens for AI responses
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
     'post_inactivity_hours': 12,  # Hours before escalating old posts to High Priority
+    'solved_post_retention_days': 30,  # Days to keep solved/closed posts before deletion
     'last_updated': datetime.now().isoformat()
 }
 
@@ -111,7 +112,8 @@ def load_bot_settings():
                 print(f"✓ Loaded bot settings: satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
                       f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
                       f"max_tokens={BOT_SETTINGS.get('ai_max_tokens', 2048)}, "
-                      f"post_inactivity_hours={BOT_SETTINGS.get('post_inactivity_hours', 12)}h")
+                      f"post_inactivity_hours={BOT_SETTINGS.get('post_inactivity_hours', 12)}h, "
+                      f"solved_post_retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d")
                 return True
     except Exception as e:
         print(f"⚠ Error loading bot settings: {e}")
@@ -598,6 +600,84 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
+@tasks.loop(hours=24)  # Run daily
+async def cleanup_old_solved_posts():
+    """Background task to delete old solved/closed posts from dashboard"""
+    try:
+        if 'your-vercel-app' in DATA_API_URL:
+            return  # Skip if API not configured
+        
+        retention_days = BOT_SETTINGS.get('solved_post_retention_days', 30)
+        print(f"\n🧹 Cleaning up solved posts older than {retention_days} days...")
+        
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(forum_api_url) as response:
+                if response.status != 200:
+                    print(f"⚠ Failed to fetch posts for cleanup: {response.status}")
+                    return
+                
+                all_posts = await response.json()
+                now = datetime.now()
+                deleted_count = 0
+                
+                for post in all_posts:
+                    status = post.get('status', '')
+                    
+                    # Only delete Solved or Closed posts
+                    if status not in ['Solved', 'Closed']:
+                        continue
+                    
+                    # Check post age
+                    created_at_str = post.get('createdAt')
+                    if not created_at_str:
+                        continue
+                    
+                    try:
+                        # Parse ISO timestamp
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                        # Remove timezone info for comparison
+                        if created_at.tzinfo:
+                            created_at = created_at.replace(tzinfo=None)
+                        
+                        age_days = (now - created_at).total_seconds() / 86400  # seconds to days
+                        
+                        if age_days > retention_days:
+                            # Post is old enough to delete
+                            post_id = post.get('id') or f"POST-{post.get('postId')}"
+                            post_title = post.get('postTitle', 'Unknown')
+                            
+                            print(f"🗑️ Deleting old post: '{post_title}' ({age_days:.1f} days old)")
+                            
+                            # Delete from dashboard
+                            delete_payload = {
+                                'action': 'delete',
+                                'postId': post_id
+                            }
+                            
+                            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                            async with session.post(forum_api_url, json=delete_payload, headers=headers) as delete_response:
+                                if delete_response.status == 200:
+                                    deleted_count += 1
+                                    print(f"✅ Deleted: '{post_title}'")
+                                else:
+                                    print(f"⚠ Failed to delete '{post_title}': {delete_response.status}")
+                    
+                    except Exception as parse_error:
+                        print(f"⚠ Error parsing post date: {parse_error}")
+                        continue
+                
+                if deleted_count > 0:
+                    print(f"✅ Cleanup complete: Deleted {deleted_count} old post(s)")
+                else:
+                    print(f"✓ No old posts found (retention: {retention_days} days)")
+    
+    except Exception as e:
+        print(f"❌ Error in cleanup_old_solved_posts task: {e}")
+        import traceback
+        traceback.print_exc()
+
 @tasks.loop(hours=1)  # Run every hour
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
@@ -727,6 +807,11 @@ async def on_ready():
     if not check_old_posts.is_running():
         check_old_posts.start()
         print("✓ Started background task: check_old_posts (runs every hour)")
+    
+    # Start cleanup task for old solved posts
+    if not cleanup_old_solved_posts.is_running():
+        cleanup_old_solved_posts.start()
+        print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
     
     try:
         # Clear old commands first to prevent duplicates
@@ -2069,6 +2154,35 @@ async def set_post_inactivity_time(interaction: discord.Interaction, hours: int)
         print(f"Error in set_post_inactivity_time: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="set_solved_post_retention", description="Set days to keep solved posts before auto-deletion (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_solved_post_retention(interaction: discord.Interaction, days: int):
+    """Set how long to keep solved/closed posts before automatic deletion"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        if days < 1 or days > 365:  # 1 day to 1 year
+            await interaction.followup.send("❌ Days must be between 1 and 365.", ephemeral=False)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['solved_post_retention_days'] = days
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Solved post retention updated to **{days} days**!\n\n"
+                f"Posts with status **Solved** or **Closed** older than {days} days will be automatically deleted.\n"
+                f"The cleanup task runs **daily** to check for old posts.\n\n"
+                f"💡 This helps keep your dashboard clean and improves performance.",
+                ephemeral=False
+            )
+            print(f"✓ Solved post retention updated to {days} days by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_solved_post_retention: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def status(interaction: discord.Interaction):
@@ -2104,8 +2218,8 @@ async def status(interaction: discord.Interaction):
         )
         
         status_embed.add_field(
-            name="⏱️ Timers",
-            value=f"**Satisfaction Delay:** {BOT_SETTINGS.get('satisfaction_delay', 15)}s\n**Active Timers:** {active_timers}\n**Post Inactivity:** {BOT_SETTINGS.get('post_inactivity_hours', 12)}h",
+            name="⏱️ Timers & Cleanup",
+            value=f"**Satisfaction Delay:** {BOT_SETTINGS.get('satisfaction_delay', 15)}s\n**Active Timers:** {active_timers}\n**Post Inactivity:** {BOT_SETTINGS.get('post_inactivity_hours', 12)}h\n**Post Retention:** {BOT_SETTINGS.get('solved_post_retention_days', 30)}d",
             inline=True
         )
         

@@ -193,6 +193,15 @@ let inMemoryStore: DataStore = {
       ],
       createdAt: new Date().toISOString(),
     },
+    {
+      id: 'CMD-SYS-013',
+      name: 'set_solved_post_retention',
+      description: 'Set the days to keep solved/closed posts before automatic deletion. Default: 30 days. Range: 1-365 days. Cleanup runs daily. Requires Admin role.',
+      parameters: [
+        { name: 'days', description: 'Days to retain solved posts (1-365)', type: 'number', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
   ],
   pendingRagEntries: [],
   botSettings: {
