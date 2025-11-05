@@ -69,7 +69,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ message: 'Authentication failed' }));
                 console.error('Auth failed:', errorData);
-                alert(errorData.message || 'Access denied. You must have the Staff role to access this dashboard.');
+                // Don't use alert() - let the callback component handle error display
                 return false;
             }
 
@@ -84,7 +84,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return true;
         } catch (error) {
             console.error('Discord OAuth callback failed:', error);
-            alert('Authentication failed. Please contact an administrator.');
+            // Don't use alert() - let the callback component handle error display
             return false;
         }
     };
