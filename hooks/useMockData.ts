@@ -153,6 +153,24 @@ const initialSlashCommands: SlashCommand[] = [
       createdAt: '2025-01-22T11:01:00Z',
     },
     {
+      id: 'CMD-SYS-005C',
+      name: 'set_unsolved_tag_id',
+      description: 'Set the Discord tag ID for "Unsolved" posts. New posts will auto-tag as unsolved. Requires Admin role.',
+      parameters: [
+        { name: 'tag_id', description: 'The Discord tag ID (right-click tag → Copy ID)', type: 'string', required: true },
+      ],
+      createdAt: '2025-01-22T11:02:00Z',
+    },
+    {
+      id: 'CMD-SYS-005D',
+      name: 'set_resolved_tag_id',
+      description: 'Set the Discord tag ID for "Resolved" posts. Solved posts will auto-tag as resolved. Requires Admin role.',
+      parameters: [
+        { name: 'tag_id', description: 'The Discord tag ID (right-click tag → Copy ID)', type: 'string', required: true },
+      ],
+      createdAt: '2025-01-22T11:03:00Z',
+    },
+    {
       id: 'CMD-SYS-006',
       name: 'set_satisfaction_delay',
       description: 'Set the delay (in seconds) before bot analyzes user satisfaction. Default: 15s. Range: 5-300s. Requires Admin role.',

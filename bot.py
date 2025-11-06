@@ -77,6 +77,8 @@ BOT_SETTINGS = {
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
     'post_inactivity_hours': 12,  # Hours before escalating old posts to High Priority
     'solved_post_retention_days': 30,  # Days to keep solved/closed posts before deletion
+    'unsolved_tag_id': None,  # Discord tag ID for "Unsolved" posts
+    'resolved_tag_id': None,  # Discord tag ID for "Resolved" posts
     'last_updated': datetime.now().isoformat()
 }
 
@@ -576,11 +578,19 @@ async def get_resolved_tag(forum_channel):
         if not hasattr(forum_channel, 'available_tags'):
             return None
         
-        # Look for a tag with "resolved" or "solved" in the name (case-insensitive)
+        # First, check if we have a specific tag ID set
+        resolved_tag_id = BOT_SETTINGS.get('resolved_tag_id')
+        if resolved_tag_id:
+            for tag in forum_channel.available_tags:
+                if tag.id == resolved_tag_id:
+                    print(f"✓ Found resolved tag by ID: '{tag.name}' (ID: {tag.id})")
+                    return tag
+        
+        # Fallback: Look for a tag with "resolved" or "solved" in the name (case-insensitive)
         for tag in forum_channel.available_tags:
             tag_name_lower = tag.name.lower()
             if 'resolved' in tag_name_lower or 'solved' in tag_name_lower:
-                print(f"✓ Found resolved tag: '{tag.name}' (ID: {tag.id})")
+                print(f"✓ Found resolved tag by name: '{tag.name}' (ID: {tag.id})")
                 return tag
         
         print(f"⚠ No 'Resolved' or 'Solved' tag found in forum channel")
@@ -598,11 +608,19 @@ async def get_unsolved_tag(forum_channel):
         if not hasattr(forum_channel, 'available_tags'):
             return None
         
-        # Look for a tag with "unsolved" or "open" in the name (case-insensitive)
+        # First, check if we have a specific tag ID set
+        unsolved_tag_id = BOT_SETTINGS.get('unsolved_tag_id')
+        if unsolved_tag_id:
+            for tag in forum_channel.available_tags:
+                if tag.id == unsolved_tag_id:
+                    print(f"✓ Found unsolved tag by ID: '{tag.name}' (ID: {tag.id})")
+                    return tag
+        
+        # Fallback: Look for a tag with "unsolved" or "open" in the name (case-insensitive)
         for tag in forum_channel.available_tags:
             tag_name_lower = tag.name.lower()
             if 'unsolved' in tag_name_lower or 'open' in tag_name_lower:
-                print(f"✓ Found unsolved tag: '{tag.name}' (ID: {tag.id})")
+                print(f"✓ Found unsolved tag by name: '{tag.name}' (ID: {tag.id})")
                 return tag
         
         print(f"⚠ No 'Unsolved' or 'Open' tag found in forum channel")
@@ -2092,6 +2110,66 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
             await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_ignore_post_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_unsolved_tag_id", description="Set the Discord tag ID for 'Unsolved' posts (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the unsolved tag ID"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Validate tag ID is a number
+        try:
+            tag_id_int = int(tag_id)
+        except ValueError:
+            await interaction.followup.send("❌ Tag ID must be a number.", ephemeral=False)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['unsolved_tag_id'] = tag_id_int
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Unsolved tag ID set to **{tag_id}**!\n\n"
+                f"New forum posts will automatically be tagged as 'Unsolved'.",
+                ephemeral=False
+            )
+            print(f"✓ Set unsolved tag ID to {tag_id} by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_unsolved_tag_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_resolved_tag_id", description="Set the Discord tag ID for 'Resolved' posts (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_resolved_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the resolved tag ID"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Validate tag ID is a number
+        try:
+            tag_id_int = int(tag_id)
+        except ValueError:
+            await interaction.followup.send("❌ Tag ID must be a number.", ephemeral=False)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['resolved_tag_id'] = tag_id_int
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Resolved tag ID set to **{tag_id}**!\n\n"
+                f"Solved posts will automatically be tagged as 'Resolved'.",
+                ephemeral=False
+            )
+            print(f"✓ Set resolved tag ID to {tag_id} by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_resolved_tag_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
