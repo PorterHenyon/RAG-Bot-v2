@@ -98,6 +98,259 @@ no_review_threads = set()  # {thread_id}
 LOCALRAG_DIR = Path("localrag")
 LOCALRAG_DIR.mkdir(exist_ok=True)
 
+# --- SATISFACTION BUTTON VIEW ---
+class SatisfactionButtons(discord.ui.View):
+    """Interactive buttons for user feedback on bot responses"""
+    
+    def __init__(self, thread_id, conversation, response_type):
+        super().__init__(timeout=None)  # Buttons never expire
+        self.thread_id = thread_id
+        self.conversation = conversation
+        self.response_type = response_type
+    
+    @discord.ui.button(label="Yes, this solved my issue", style=discord.ButtonStyle.green, emoji="✅")
+    async def solved_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Handle when user confirms issue is solved"""
+        await interaction.response.defer()
+        
+        thread = interaction.channel
+        print(f"✅ User clicked SOLVED button for thread {self.thread_id}")
+        
+        # Disable all buttons
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(view=self)
+        
+        # Send confirmation embed
+        confirm_embed = discord.Embed(
+            title="✅ Great! Issue Solved",
+            description="Glad I could help! This post will now be locked.",
+            color=0x2ECC71
+        )
+        confirm_embed.add_field(
+            name="💬 More Questions?",
+            value="Create a new post anytime!",
+            inline=False
+        )
+        confirm_embed.set_footer(text="Revolution Macro Support")
+        await thread.send(embed=confirm_embed)
+        
+        # Update status to Solved
+        updated_status = 'Solved'
+        
+        # Apply tags
+        try:
+            forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+            if forum_channel:
+                resolved_tag = await get_resolved_tag(forum_channel)
+                unsolved_tag = await get_unsolved_tag(forum_channel)
+                
+                current_tags = list(thread.applied_tags)
+                
+                if unsolved_tag and unsolved_tag in current_tags:
+                    current_tags.remove(unsolved_tag)
+                    print(f"🏷️ Removed '{unsolved_tag.name}' tag from thread {self.thread_id}")
+                
+                if resolved_tag and resolved_tag not in current_tags:
+                    current_tags.append(resolved_tag)
+                    print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {self.thread_id}")
+                
+                await thread.edit(applied_tags=current_tags)
+        except Exception as tag_error:
+            print(f"⚠ Could not update tags: {tag_error}")
+        
+        # Lock thread
+        try:
+            await thread.edit(archived=True, locked=True)
+            print(f"🔒 Thread {self.thread_id} locked and archived successfully")
+        except Exception as lock_error:
+            print(f"❌ Error locking thread {self.thread_id}: {lock_error}")
+        
+        # Create pending RAG entry
+        try:
+            print(f"📝 Attempting to create RAG entry from solved conversation...")
+            
+            formatted_lines = []
+            for msg in self.conversation:
+                author = msg.get('author', 'Unknown')
+                content = msg.get('content', '')
+                formatted_lines.append(f"<@{author}> Said: {content}")
+            
+            conversation_text = "\n".join(formatted_lines)
+            rag_entry = await analyze_conversation(conversation_text)
+            
+            if self.thread_id not in no_review_threads and rag_entry and 'your-vercel-app' not in DATA_API_URL:
+                data_api_url_rag = DATA_API_URL
+                
+                async with aiohttp.ClientSession() as rag_session:
+                    async with rag_session.get(data_api_url_rag) as get_data_response:
+                        current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': [], 'pendingRagEntries': []}
+                        if get_data_response.status == 200:
+                            current_data = await get_data_response.json()
+                        
+                        conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
+                        
+                        new_pending_entry = {
+                            'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
+                            'title': rag_entry.get('title', 'Auto-generated from solved thread'),
+                            'content': rag_entry.get('content', ''),
+                            'keywords': rag_entry.get('keywords', []),
+                            'createdAt': datetime.now().isoformat(),
+                            'source': 'User-confirmed satisfaction',
+                            'threadId': str(self.thread_id),
+                            'conversationPreview': conversation_preview
+                        }
+                        
+                        pending_entries = current_data.get('pendingRagEntries', [])
+                        pending_entries.append(new_pending_entry)
+                        
+                        save_data = {
+                            'ragEntries': current_data.get('ragEntries', []),
+                            'autoResponses': current_data.get('autoResponses', []),
+                            'slashCommands': current_data.get('slashCommands', []),
+                            'botSettings': current_data.get('botSettings', {}),
+                            'pendingRagEntries': pending_entries
+                        }
+                        
+                        print(f"💾 Saving pending RAG entry to API for review...")
+                        
+                        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                        async with rag_session.post(data_api_url_rag, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
+                            if save_response.status == 200:
+                                print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
+                                
+                                rag_notification = discord.Embed(
+                                    title="📋 Entry Saved for Review",
+                                    description=f"**{new_pending_entry['title']}**\n\nThis will be reviewed and added to help future users!",
+                                    color=0xF39C12
+                                )
+                                rag_notification.set_footer(text="Revolution Macro • Pending Approval")
+                                await thread.send(embed=rag_notification)
+        except Exception as rag_error:
+            print(f"⚠ Error auto-creating RAG entry: {rag_error}")
+        
+        # Update dashboard
+        await update_forum_post_status(self.thread_id, updated_status)
+    
+    @discord.ui.button(label="No, my issue isn't resolved", style=discord.ButtonStyle.red, emoji="❌")
+    async def not_solved_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Handle when user says issue is not resolved"""
+        await interaction.response.defer()
+        
+        thread = interaction.channel
+        print(f"❌ User clicked NOT SOLVED button for thread {self.thread_id}")
+        
+        # Disable all buttons
+        for item in self.children:
+            item.disabled = True
+        await interaction.message.edit(view=self)
+        
+        # Check escalation path based on response type
+        if self.response_type == 'auto':
+            # Auto-response didn't help, try AI
+            print(f"🔄 ESCALATION PATH: Auto → AI (user clicked not solved after auto-response)")
+            
+            try:
+                # Get user's question from conversation
+                user_messages = [msg.get('content', '') for msg in self.conversation if msg.get('author') == 'User']
+                user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
+                
+                # Try to find RAG entries
+                relevant_docs = find_relevant_rag_entries(user_question)
+                
+                # Generate AI response
+                if relevant_docs:
+                    ai_response = await generate_ai_response(user_question, relevant_docs[:2])
+                else:
+                    ai_response = await generate_ai_response(user_question, [])
+                
+                # Send AI response with buttons
+                ai_embed = discord.Embed(
+                    title="💡 Let Me Try Again",
+                    description=ai_response,
+                    color=0x5865F2
+                )
+                ai_embed.add_field(
+                    name="💬 Better?",
+                    value="Let me know if this helps!",
+                    inline=False
+                )
+                ai_embed.set_footer(text="Revolution Macro AI")
+                
+                # Add new buttons for AI response
+                new_view = SatisfactionButtons(self.thread_id, self.conversation, 'ai')
+                await thread.send(embed=ai_embed, view=new_view)
+                thread_response_type[self.thread_id] = 'ai'
+                
+                await update_forum_post_status(self.thread_id, 'AI Response')
+                print(f"✅ Sent AI follow-up response to thread {self.thread_id}")
+                
+            except Exception as ai_error:
+                print(f"❌ Error generating AI follow-up: {ai_error}")
+                # Escalate to human on error
+                await self._escalate_to_human(thread)
+        else:
+            # AI response didn't help (or was already AI), escalate to human
+            print(f"⚠ ESCALATION PATH: → Human (user clicked not solved after AI response)")
+            await self._escalate_to_human(thread)
+    
+    async def _escalate_to_human(self, thread):
+        """Escalate thread to human support"""
+        escalated_threads.add(self.thread_id)
+        
+        escalate_embed = discord.Embed(
+            title="👨‍💼 Support Team Notified",
+            description="I wasn't able to fully help. Our support team has been notified and will assist you soon!",
+            color=0xE67E22
+        )
+        escalate_embed.add_field(
+            name="⏰ Response Time",
+            value="Usually under 24 hours",
+            inline=True
+        )
+        escalate_embed.add_field(
+            name="📸 Tip",
+            value="Send screenshots if helpful!",
+            inline=True
+        )
+        escalate_embed.set_footer(text="Revolution Macro Support Team")
+        await thread.send(embed=escalate_embed)
+        
+        await update_forum_post_status(self.thread_id, 'Human Support')
+        print(f"⚠ Thread {self.thread_id} escalated to Human Support")
+
+
+async def update_forum_post_status(thread_id, status):
+    """Helper function to update forum post status in dashboard"""
+    if 'your-vercel-app' in DATA_API_URL:
+        return
+    
+    try:
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(forum_api_url) as get_resp:
+                if get_resp.status == 200:
+                    all_posts = await get_resp.json()
+                    current_post = None
+                    for p in all_posts:
+                        if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
+                            current_post = p
+                            break
+                    
+                    if current_post:
+                        current_post['status'] = status
+                        update_payload = {
+                            'action': 'update',
+                            'post': current_post
+                        }
+                        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                        async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as update_resp:
+                            if update_resp.status == 200:
+                                print(f"✅ Updated forum post status to '{status}' for thread {thread_id}")
+    except Exception as e:
+        print(f"❌ Error updating status: {e}")
+
 # --- BOT SETTINGS FUNCTIONS ---
 def load_bot_settings():
     """Load bot settings from local file"""
@@ -1152,11 +1405,28 @@ async def on_thread_create(thread):
         )
         auto_embed.add_field(
             name="💡 Did this help?",
-            value="Let me know if you need more help!",
+            value="Let me know by clicking a button below!",
             inline=False
         )
         auto_embed.set_footer(text="Revolution Macro • Instant Answer")
-        await thread.send(embed=auto_embed)
+        
+        # Create conversation for button handler
+        conversation = [
+            {
+                'author': 'User',
+                'content': initial_message,
+                'timestamp': datetime.now().isoformat()
+            },
+            {
+                'author': 'Bot',
+                'content': auto_response,
+                'timestamp': datetime.now().isoformat()
+            }
+        ]
+        
+        # Add satisfaction buttons
+        button_view = SatisfactionButtons(thread_id, conversation, 'auto')
+        await thread.send(embed=auto_embed, view=button_view)
         bot_response_text = auto_response
         thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
         print(f"⚡ Responded to '{thread.name}' with instant auto-response.")
@@ -1233,11 +1503,28 @@ async def on_thread_create(thread):
             )
             ai_embed.add_field(
                 name="💬 Did this help?",
-                value="Let me know if you need more help!",
+                value="Let me know by clicking a button below!",
                 inline=False
             )
             ai_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
-            await thread.send(embed=ai_embed)
+            
+            # Create conversation for button handler
+            conversation = [
+                {
+                    'author': 'User',
+                    'content': initial_message,
+                    'timestamp': datetime.now().isoformat()
+                },
+                {
+                    'author': 'Bot',
+                    'content': bot_response_text,
+                    'timestamp': datetime.now().isoformat()
+                }
+            ]
+            
+            # Add satisfaction buttons
+            button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+            await thread.send(embed=ai_embed, view=button_view)
             thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
             
             # Show which entries were used in terminal
@@ -1294,11 +1581,28 @@ async def on_thread_create(thread):
                 )
                 general_ai_embed.add_field(
                     name="💬 Did this help?",
-                    value="Let me know if you need more help!",
+                    value="Let me know by clicking a button below!",
                     inline=False
                 )
                 general_ai_embed.set_footer(text="Revolution Macro AI")
-                await thread.send(embed=general_ai_embed)
+                
+                # Create conversation for button handler
+                conversation = [
+                    {
+                        'author': 'User',
+                        'content': initial_message,
+                        'timestamp': datetime.now().isoformat()
+                    },
+                    {
+                        'author': 'Bot',
+                        'content': bot_response_text,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                ]
+                
+                # Add satisfaction buttons
+                button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+                await thread.send(embed=general_ai_embed, view=button_view)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
                 print(f"💡 Responded to '{thread.name}' with Revolution Macro AI assistance (no specific RAG match).")
                 
@@ -1313,7 +1617,24 @@ async def on_thread_create(thread):
                     color=0xF39C12
                 )
                 fallback_embed.set_footer(text="Revolution Macro")
-                await thread.send(embed=fallback_embed)
+                
+                # Create conversation for button handler
+                conversation = [
+                    {
+                        'author': 'User',
+                        'content': initial_message,
+                        'timestamp': datetime.now().isoformat()
+                    },
+                    {
+                        'author': 'Bot',
+                        'content': bot_response_text,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                ]
+                
+                # Add satisfaction buttons
+                button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+                await thread.send(embed=fallback_embed, view=button_view)
                 thread_response_type[thread_id] = 'ai'  # Track as AI attempt
                 print(f"⚠ Sent fallback response for '{thread.name}' (AI generation failed).")
     
@@ -1779,12 +2100,14 @@ async def on_message(message):
                                                 )
                                                 ai_embed.add_field(
                                                     name="💬 Better?",
-                                                    value="Let me know if this helps!",
+                                                    value="Let me know by clicking a button below!",
                                                     inline=False
                                                 )
                                                 ai_embed.set_footer(text="Revolution Macro AI")
                                                 
-                                                await thread_channel.send(embed=ai_embed)
+                                                # Add satisfaction buttons
+                                                button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+                                                await thread_channel.send(embed=ai_embed, view=button_view)
                                                 thread_response_type[thread_id] = 'ai'
                                                 updated_status = 'AI Response'
                                                 print(f"✅ SENT AI FOLLOW-UP RESPONSE to thread {thread_id}")
