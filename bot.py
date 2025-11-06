@@ -344,9 +344,11 @@ def get_auto_response(query: str) -> str | None:
 
 def find_relevant_rag_entries(query, db=RAG_DATABASE):
     """Find relevant RAG entries with improved scoring algorithm"""
-    # Filter out short words (less than 3 chars) for better matching
+    # Keep ALL words, including short ones (vpn, api, etc.)
     query_words = set(query.lower().split())
-    query_words = {word for word in query_words if len(word) > 2}
+    # Remove ONLY very common/meaningless words
+    stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
+    query_words = {word for word in query_words if word not in stopwords}
     
     scored_entries = []
     for entry in db:
@@ -1121,18 +1123,16 @@ async def on_thread_create(thread):
     else:
         relevant_docs = find_relevant_rag_entries(user_question)
         
-        # Use a score threshold similar to dashboard (score of 5 = title match minimum)
-        # Lower threshold to 3 to catch keyword matches (not just title matches)
-        SCORE_THRESHOLD = 3  # Minimum confidence threshold (allows keyword matches)
+        # Use RAG if we have ANY matches at all (even weak ones)
+        # Only fall back to general AI if literally no matches
+        SCORE_THRESHOLD = 1  # Very low threshold - use RAG whenever possible
         confident_docs = []
         
         # Recalculate scores to filter by threshold
         query_words = set(user_question.lower().split())
-        query_words = {word for word in query_words if len(word) > 2}
-        
-        if not query_words:
-            # If no words > 2 chars, try with all words (might be short keywords like "api")
-            query_words = set(user_question.lower().split())
+        # Remove only common stopwords, keep all actual keywords (including short ones like vpn, api, ip)
+        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
+        query_words = {word for word in query_words if word not in stopwords}
         
         print(f"🔍 Searching for matches with query words: {query_words}")
         
@@ -1155,10 +1155,11 @@ async def on_thread_create(thread):
                 print(f"   ✓ Match found: '{entry.get('title', 'Unknown')}' (score: {score})")
         
         if not confident_docs and relevant_docs:
-            print(f"⚠ No entries met threshold ({SCORE_THRESHOLD}). Top matches:")
+            print(f"⚠ No entries met minimum threshold ({SCORE_THRESHOLD}). Top matches:")
             # Show top 3 scores even if below threshold
             query_words = set(user_question.lower().split())
-            query_words = {word for word in query_words if len(word) > 2} if {word for word in query_words if len(word) > 2} else set(user_question.lower().split())
+            stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
+            query_words = {word for word in query_words if word not in stopwords}
             
             scored_entries = []
             for entry in relevant_docs[:5]:  # Check top 5
