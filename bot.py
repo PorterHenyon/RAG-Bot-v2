@@ -1175,6 +1175,11 @@ async def on_thread_create(thread):
         query_words = {word for word in query_words if word not in stopwords}
         
         print(f"🔍 Searching for matches with query words: {query_words}")
+        print(f"🔍 Total RAG entries available: {len(RAG_DATABASE)}")
+        if RAG_DATABASE:
+            print(f"🔍 RAG entry examples:")
+            for entry in RAG_DATABASE[:3]:
+                print(f"   - '{entry.get('title', 'Unknown')}' | Keywords: {entry.get('keywords', [])}")
         
         for entry in relevant_docs:
             score = 0
