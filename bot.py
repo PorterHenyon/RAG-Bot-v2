@@ -589,6 +589,28 @@ async def get_resolved_tag(forum_channel):
         print(f"⚠ Error getting resolved tag: {e}")
         return None
 
+async def get_unsolved_tag(forum_channel):
+    """
+    Find the 'Unsolved' tag in a forum channel.
+    Returns the tag object if found, None otherwise.
+    """
+    try:
+        if not hasattr(forum_channel, 'available_tags'):
+            return None
+        
+        # Look for a tag with "unsolved" or "open" in the name (case-insensitive)
+        for tag in forum_channel.available_tags:
+            tag_name_lower = tag.name.lower()
+            if 'unsolved' in tag_name_lower or 'open' in tag_name_lower:
+                print(f"✓ Found unsolved tag: '{tag.name}' (ID: {tag.id})")
+                return tag
+        
+        print(f"⚠ No 'Unsolved' or 'Open' tag found in forum channel")
+        return None
+    except Exception as e:
+        print(f"⚠ Error getting unsolved tag: {e}")
+        return None
+
 # --- PERIODIC DATA SYNC ---
 @tasks.loop(hours=1)  # Sync every hour
 async def sync_data_task():
@@ -1332,6 +1354,25 @@ async def on_thread_create(thread):
                 print(f"⚠ Error updating forum post with bot response: {type(e).__name__}: {str(e)}")
                 import traceback
                 traceback.print_exc()
+    
+    # Apply "Unsolved" tag to new forum post
+    try:
+        parent_channel = bot.get_channel(thread.parent_id)
+        if parent_channel and hasattr(parent_channel, 'available_tags'):
+            unsolved_tag = await get_unsolved_tag(parent_channel)
+            if unsolved_tag:
+                # Get current tags and add unsolved tag if not already present
+                current_tags = list(thread.applied_tags) if hasattr(thread, 'applied_tags') else []
+                if unsolved_tag not in current_tags:
+                    current_tags.append(unsolved_tag)
+                    await thread.edit(applied_tags=current_tags)
+                    print(f"🏷️ Applied '{unsolved_tag.name}' tag to new thread {thread.id}")
+                else:
+                    print(f"ℹ️ Thread {thread.id} already has '{unsolved_tag.name}' tag")
+            else:
+                print(f"ℹ️ No 'Unsolved' tag available in forum channel")
+    except Exception as tag_error:
+        print(f"⚠ Could not apply unsolved tag: {tag_error}")
 
 @bot.event
 async def on_message(message):
@@ -1522,20 +1563,30 @@ async def on_message(message):
                                         await thread_channel.send(embed=confirm_embed)
                                         print(f"✅ User satisfaction detected - marking thread {thread_id} as Solved")
                                         
-                                        # Apply "Resolved" tag if it exists
+                                        # Apply "Resolved" tag and remove "Unsolved" tag if it exists
                                         try:
                                             forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
                                             if forum_channel:
                                                 resolved_tag = await get_resolved_tag(forum_channel)
-                                                if resolved_tag:
-                                                    # Get current tags and add resolved tag
-                                                    current_tags = list(thread_channel.applied_tags)
-                                                    if resolved_tag not in current_tags:
-                                                        current_tags.append(resolved_tag)
-                                                        await thread_channel.edit(applied_tags=current_tags)
-                                                        print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+                                                unsolved_tag = await get_unsolved_tag(forum_channel)
+                                                
+                                                # Get current tags
+                                                current_tags = list(thread_channel.applied_tags)
+                                                
+                                                # Remove unsolved tag if present
+                                                if unsolved_tag and unsolved_tag in current_tags:
+                                                    current_tags.remove(unsolved_tag)
+                                                    print(f"🏷️ Removed '{unsolved_tag.name}' tag from thread {thread_id}")
+                                                
+                                                # Add resolved tag if not present
+                                                if resolved_tag and resolved_tag not in current_tags:
+                                                    current_tags.append(resolved_tag)
+                                                    print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+                                                
+                                                # Update tags
+                                                await thread_channel.edit(applied_tags=current_tags)
                                         except Exception as tag_error:
-                                            print(f"⚠ Could not apply resolved tag: {tag_error}")
+                                            print(f"⚠ Could not update tags: {tag_error}")
                                         
                                         # Lock/archive the thread
                                         try:
@@ -2469,19 +2520,29 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
             del satisfaction_timers[thread_id]
             print(f"⏰ Cancelled satisfaction timer for no_review thread {thread_id}")
         
-        # Apply "Resolved" tag if it exists
+        # Apply "Resolved" tag and remove "Unsolved" tag if it exists
         try:
             forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
             if forum_channel:
                 resolved_tag = await get_resolved_tag(forum_channel)
-                if resolved_tag:
-                    current_tags = list(thread.applied_tags)
-                    if resolved_tag not in current_tags:
-                        current_tags.append(resolved_tag)
-                        await thread.edit(applied_tags=current_tags)
-                        print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+                unsolved_tag = await get_unsolved_tag(forum_channel)
+                
+                current_tags = list(thread.applied_tags)
+                
+                # Remove unsolved tag if present
+                if unsolved_tag and unsolved_tag in current_tags:
+                    current_tags.remove(unsolved_tag)
+                    print(f"🏷️ Removed '{unsolved_tag.name}' tag from thread {thread_id}")
+                
+                # Add resolved tag if not present
+                if resolved_tag and resolved_tag not in current_tags:
+                    current_tags.append(resolved_tag)
+                    print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+                
+                # Update tags
+                await thread.edit(applied_tags=current_tags)
         except Exception as tag_error:
-            print(f"⚠ Could not apply resolved tag: {tag_error}")
+            print(f"⚠ Could not update tags: {tag_error}")
         
         # Lock and archive the thread
         try:
@@ -2731,21 +2792,31 @@ async def mark_as_solve(interaction: discord.Interaction):
                 )
                 print(f"✓ Marked thread {thread.id} as solved but could not save RAG entry (API not configured)")
             
-            # Apply "Resolved" tag if it exists
+            # Apply "Resolved" tag and remove "Unsolved" tag if it exists
             try:
                 thread = interaction.channel
                 forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
                 if forum_channel:
                     resolved_tag = await get_resolved_tag(forum_channel)
-                    if resolved_tag:
-                        # Get current tags and add resolved tag
-                        current_tags = list(thread.applied_tags)
-                        if resolved_tag not in current_tags:
-                            current_tags.append(resolved_tag)
-                            await thread.edit(applied_tags=current_tags)
-                            print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread.id}")
+                    unsolved_tag = await get_unsolved_tag(forum_channel)
+                    
+                    # Get current tags
+                    current_tags = list(thread.applied_tags)
+                    
+                    # Remove unsolved tag if present
+                    if unsolved_tag and unsolved_tag in current_tags:
+                        current_tags.remove(unsolved_tag)
+                        print(f"🏷️ Removed '{unsolved_tag.name}' tag from thread {thread.id}")
+                    
+                    # Add resolved tag if not present
+                    if resolved_tag and resolved_tag not in current_tags:
+                        current_tags.append(resolved_tag)
+                        print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread.id}")
+                    
+                    # Update tags
+                    await thread.edit(applied_tags=current_tags)
             except Exception as tag_error:
-                print(f"⚠ Could not apply resolved tag: {tag_error}")
+                print(f"⚠ Could not update tags: {tag_error}")
             
             # Lock and archive the thread since it's marked as solved
             try:
