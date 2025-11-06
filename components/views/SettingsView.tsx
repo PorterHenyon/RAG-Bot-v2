@@ -74,4 +74,3 @@ const SettingsView: React.FC = () => {
 };
 
 export default SettingsView;
-export default SettingsView;
