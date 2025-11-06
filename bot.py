@@ -1163,14 +1163,13 @@ async def on_thread_create(thread):
     else:
         relevant_docs = find_relevant_rag_entries(user_question)
         
-        # Use RAG if we have ANY matches at all (even weak ones)
-        # Only fall back to general AI if literally no matches
-        SCORE_THRESHOLD = 1  # Very low threshold - use RAG whenever possible
+        # AGGRESSIVE RAG USAGE - Use knowledge base if we have ANYTHING at all
+        # Prefer RAG over general AI responses
         confident_docs = []
         
-        # Recalculate scores to filter by threshold
+        # Prepare query words
         query_words = set(user_question.lower().split())
-        # Remove only common stopwords, keep all actual keywords (including short ones like vpn, api, ip)
+        # Remove only common stopwords, keep all actual keywords (including short ones like vpn, rbc, api, ip)
         stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
         query_words = {word for word in query_words if word not in stopwords}
         
@@ -1181,55 +1180,50 @@ async def on_thread_create(thread):
             for entry in RAG_DATABASE[:3]:
                 print(f"   - '{entry.get('title', 'Unknown')}' | Keywords: {entry.get('keywords', [])}")
         
-        for entry in relevant_docs:
+        # Score ALL entries and use ANY that have matches
+        all_scored_entries = []
+        for entry in RAG_DATABASE:
             score = 0
             entry_title = entry.get('title', '').lower()
             entry_keywords = ' '.join(entry.get('keywords', [])).lower()
             entry_content = entry.get('content', '').lower()
             
+            # More aggressive matching - check if keywords are substrings too
             for word in query_words:
-                if word in entry_title:
+                # Exact word matches in title (highest priority)
+                if f" {word} " in f" {entry_title} " or entry_title.startswith(word) or entry_title.endswith(word):
                     score += 5
-                if word in entry_keywords:
+                # Partial match in title
+                elif word in entry_title:
                     score += 3
+                    
+                # Exact word matches in keywords (high priority)
+                if f" {word} " in f" {entry_keywords} " or entry_keywords.startswith(word) or entry_keywords.endswith(word):
+                    score += 4
+                # Partial match in keywords
+                elif word in entry_keywords:
+                    score += 2
+                    
+                # Any match in content
                 if word in entry_content:
                     score += 1
             
-            if score >= SCORE_THRESHOLD:
-                confident_docs.append(entry)
+            if score > 0:
+                all_scored_entries.append({'entry': entry, 'score': score})
                 print(f"   ✓ Match found: '{entry.get('title', 'Unknown')}' (score: {score})")
         
-        if not confident_docs and relevant_docs:
-            print(f"⚠ No entries met minimum threshold ({SCORE_THRESHOLD}). Top matches:")
-            # Show top 3 scores even if below threshold
-            query_words = set(user_question.lower().split())
-            stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
-            query_words = {word for word in query_words if word not in stopwords}
-            
-            scored_entries = []
-            for entry in relevant_docs[:5]:  # Check top 5
-                score = 0
-                entry_title = entry.get('title', '').lower()
-                entry_keywords = ' '.join(entry.get('keywords', [])).lower()
-                entry_content = entry.get('content', '').lower()
-                
-                for word in query_words:
-                    if word in entry_title:
-                        score += 5
-                    if word in entry_keywords:
-                        score += 3
-                    if word in entry_content:
-                        score += 1
-                
-                scored_entries.append({'entry': entry, 'score': score})
-            
-            scored_entries.sort(key=lambda x: x['score'], reverse=True)
-            for item in scored_entries[:3]:
-                print(f"     - '{item['entry'].get('title', 'Unknown')}' (score: {item['score']})")
+        # Sort by score and use top matches
+        all_scored_entries.sort(key=lambda x: x['score'], reverse=True)
+        confident_docs = [item['entry'] for item in all_scored_entries[:5]]  # Use top 5 matches
+        
+        if not confident_docs:
+            print(f"⚠ No RAG entries had any keyword matches")
+            print(f"   This means no entry in your knowledge base contains any of the words: {query_words}")
 
         if confident_docs:
-            # Found confident matches in knowledge base
-            bot_response_text = await generate_ai_response(user_question, confident_docs[:2])  # Use top 2 confident docs
+            # Found matches in knowledge base - use top entries
+            num_to_use = min(3, len(confident_docs))  # Use up to 3 best matches
+            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use])
             
             # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
@@ -1242,10 +1236,14 @@ async def on_thread_create(thread):
                 value="Let me know if you need more help!",
                 inline=False
             )
-            ai_embed.set_footer(text="Revolution Macro AI")
+            ai_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
             await thread.send(embed=ai_embed)
             thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
-            print(f"✅ Responded to '{thread.name}' with RAG-based answer ({len(confident_docs)} documentation {'match' if len(confident_docs) == 1 else 'matches'}).")
+            
+            # Show which entries were used in terminal
+            print(f"✅ Responded to '{thread.name}' with RAG-based answer using {num_to_use} knowledge base {'entry' if num_to_use == 1 else 'entries'}:")
+            for i, doc in enumerate(confident_docs[:num_to_use], 1):
+                print(f"   {i}. '{doc.get('title', 'Unknown')}'")
         else:
             # No confident match - generate AI response using general Revolution Macro knowledge
             print(f"⚠ No confident RAG match found. Attempting AI response with general knowledge...")
