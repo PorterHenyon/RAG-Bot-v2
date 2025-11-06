@@ -52,39 +52,80 @@ const PendingRagCard: React.FC<{ entry: PendingRagEntry; onApprove: () => void; 
   </div>
 );
 
-const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; onEdit: () => void; }> = ({ entry, onDelete, onEdit }) => (
-  <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
-    <div className="flex justify-between items-start">
-        <h3 className="text-lg font-bold text-primary-400 pr-2 flex-1">{entry.title}</h3>
-        <div className="flex gap-2">
-            <button onClick={onEdit} className="p-1 rounded-full hover:bg-blue-500/20 text-gray-500 hover:text-blue-400 transition-colors">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-            </button>
-            <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors">
-                <TrashIcon className="w-5 h-5" />
-            </button>
-        </div>
+const RagEntryCard: React.FC<{ entry: RagEntry; onDelete: () => void; onEdit: () => void; }> = ({ entry, onDelete, onEdit }) => {
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  
+  return (
+    <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
+      <div className="flex justify-between items-start">
+          <button 
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-left flex-1 group"
+          >
+            <div className="flex items-center gap-2">
+              <svg 
+                className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+              <h3 className="text-lg font-bold text-primary-400 pr-2 group-hover:text-primary-300">{entry.title}</h3>
+            </div>
+          </button>
+          <div className="flex gap-2">
+              <button onClick={onEdit} className="p-1 rounded-full hover:bg-blue-500/20 text-gray-500 hover:text-blue-400 transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                  </svg>
+              </button>
+              <button onClick={onDelete} className="p-1 rounded-full hover:bg-red-500/20 text-gray-500 hover:text-red-400 transition-colors">
+                  <TrashIcon className="w-5 h-5" />
+              </button>
+          </div>
+      </div>
+      
+      {isExpanded && (
+        <p className="text-gray-300 mt-2 text-sm flex-grow">{entry.content}</p>
+      )}
+      
+      <div className="mt-3">
+        {entry.keywords.map(kw => (
+          <span key={kw} className="inline-block bg-gray-700 rounded-full px-3 py-1 text-xs font-semibold text-gray-300 mr-2 mb-2">
+            {kw}
+          </span>
+        ))}
+      </div>
+      <div className="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-700/50">
+        <span>Created by {entry.createdBy} on {new Date(entry.createdAt).toLocaleDateString()}</span>
+      </div>
     </div>
-    <p className="text-gray-300 mt-2 text-sm flex-grow">{entry.content}</p>
-    <div className="mt-4">
-      {entry.keywords.map(kw => (
-        <span key={kw} className="inline-block bg-gray-700 rounded-full px-3 py-1 text-xs font-semibold text-gray-300 mr-2 mb-2">
-          {kw}
-        </span>
-      ))}
-    </div>
-    <div className="text-xs text-gray-500 mt-2 pt-2 border-t border-gray-700/50">
-      <span>Created by {entry.createdBy} on {new Date(entry.createdAt).toLocaleDateString()}</span>
-    </div>
-  </div>
-);
+  );
+};
 
-const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void; onEdit: () => void; }> = ({ response, onDelete, onEdit }) => (
+const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void; onEdit: () => void; }> = ({ response, onDelete, onEdit }) => {
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  
+  return (
     <div className="bg-gray-800 p-4 rounded-lg shadow-md border border-gray-700 flex flex-col">
          <div className="flex justify-between items-start">
-            <h3 className="text-lg font-bold text-primary-400 pr-2 flex-1">{response.name}</h3>
+            <button 
+              onClick={() => setIsExpanded(!isExpanded)}
+              className="text-left flex-1 group"
+            >
+              <div className="flex items-center gap-2">
+                <svg 
+                  className={`w-4 h-4 text-gray-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+                <h3 className="text-lg font-bold text-primary-400 pr-2 group-hover:text-primary-300">{response.name}</h3>
+              </div>
+            </button>
             <div className="flex gap-2">
                 <button onClick={onEdit} className="p-1 rounded-full hover:bg-blue-500/20 text-gray-500 hover:text-blue-400 transition-colors">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -96,8 +137,12 @@ const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void;
                 </button>
             </div>
         </div>
-        <p className="text-gray-300 mt-2 text-sm italic flex-grow">"{response.responseText}"</p>
-        <div className="mt-4">
+        
+        {isExpanded && (
+          <p className="text-gray-300 mt-2 text-sm italic flex-grow">"{response.responseText}"</p>
+        )}
+        
+        <div className="mt-3">
             <p className="text-xs text-gray-400 mb-2 font-semibold">TRIGGERS:</p>
             {response.triggerKeywords.map(kw => (
                 <span key={kw} className="inline-block bg-gray-700 rounded-full px-3 py-1 text-xs font-semibold text-gray-300 mr-2 mb-2">
@@ -106,7 +151,8 @@ const AutoResponseCard: React.FC<{ response: AutoResponse; onDelete: () => void;
             ))}
         </div>
     </div>
-);
+  );
+};
 
 
 const RagManagementView: React.FC = () => {
@@ -447,8 +493,8 @@ const RagManagementView: React.FC = () => {
                             <svg className="w-12 h-12 text-gray-600 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                             </svg>
-                            <p className="text-gray-400 text-lg font-medium">No Pending Entries</p>
-                            <p className="text-gray-500 text-sm mt-2">Auto-generated entries from Discord will appear here for review</p>
+                            <p className="text-gray-400 text-lg font-medium">All clear</p>
+                            <p className="text-gray-500 text-sm mt-2">Bot entries show up here when they need review</p>
                         </div>
                     )}
 
@@ -467,8 +513,8 @@ const RagManagementView: React.FC = () => {
                             ) : (
                                 <div className="col-span-full bg-gray-800/50 p-8 rounded-lg border border-gray-700 text-center">
                                     <DatabaseIcon className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-                                    <p className="text-gray-400 text-lg">No knowledge base entries yet</p>
-                                    <p className="text-gray-500 text-sm mt-2">Click "Add New Entry" above to create one</p>
+                                    <p className="text-gray-400 text-lg">Nothing here yet</p>
+                                    <p className="text-gray-500 text-sm mt-2">Add entries using the button above</p>
                                 </div>
                             )}
                         </div>

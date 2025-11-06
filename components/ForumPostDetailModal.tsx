@@ -47,6 +47,11 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
     setIsProcessing(true);
     setProcessingAction(`Updating to ${newStatus}`);
     
+    // If changing to Solved, automatically move to Closed
+    if (newStatus === PostStatus.Solved) {
+      newStatus = PostStatus.Closed;
+    }
+    
     // If changing to Closed, automatically close the Discord thread
     if (newStatus === PostStatus.Closed) {
       try {

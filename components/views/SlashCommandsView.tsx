@@ -103,10 +103,9 @@ const SlashCommandsView: React.FC = () => {
                 <div className="flex items-start gap-3">
                     <div className="text-blue-400 mt-0.5">ℹ️</div>
                     <div>
-                        <strong className="text-blue-100">Note:</strong> Discord bot slash commands are defined in the bot's code. 
-                        This dashboard is for <strong>documentation purposes only</strong>. 
-                        Commands you add here will appear in the dashboard but won't automatically be added to the bot. 
-                        To add new bot commands, edit <code className="bg-blue-950/50 px-1.5 py-0.5 rounded text-xs">bot.py</code>.
+                        <strong className="text-blue-100">Note:</strong> Commands are defined in the bot code. 
+                        This is just for documentation. 
+                        To actually add commands to the bot, edit <code className="bg-blue-950/50 px-1.5 py-0.5 rounded text-xs">bot.py</code>.
                     </div>
                 </div>
             </div>
@@ -172,7 +171,7 @@ const SlashCommandsView: React.FC = () => {
             {filteredCommands.length === 0 && (
                 <div className="text-center py-12 text-gray-500">
                     <TerminalIcon className="w-16 h-16 mx-auto mb-4 opacity-50" />
-                    <p>No slash commands found. Add one to get started!</p>
+                    <p>Nothing here yet</p>
                 </div>
             )}
         </div>

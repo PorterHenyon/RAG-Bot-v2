@@ -25,12 +25,12 @@ const SettingsView: React.FC = () => {
     return (
         <div className="max-w-4xl mx-auto space-y-8">
             <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-                <h2 className="text-2xl font-bold text-white mb-4">🤖 AI System Instruction</h2>
+                <h2 className="text-2xl font-bold text-white mb-4">🤖 Bot Instructions</h2>
                 <p className="text-gray-400 mb-4">
-                    This is the core instruction that defines how the Revolution Macro support bot responds to users. It controls the bot's personality, knowledge, and behavior. Changes are synced to the bot automatically via the API.
+                    This controls how the bot responds to users. Changes sync automatically via the API.
                 </p>
                 <div className="mb-4 p-3 bg-blue-900/30 border border-blue-700/50 rounded-md text-sm text-blue-200">
-                    <strong className="text-blue-100">💡 Tip:</strong> The bot fetches this instruction from the API when responding. After saving, use <code className="bg-blue-950/50 px-1.5 py-0.5 rounded text-xs">/reload</code> in Discord to update the bot immediately, or wait for the next hourly sync.
+                    <strong className="text-blue-100">Tip:</strong> Use <code className="bg-blue-950/50 px-1.5 py-0.5 rounded text-xs">/reload</code> in Discord after saving to update the bot immediately.
                 </div>
                 <textarea
                     value={localPrompt}
@@ -56,48 +56,22 @@ const SettingsView: React.FC = () => {
             </div>
 
             <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-                <h2 className="text-2xl font-bold text-white mb-4">Bot Configuration</h2>
+                <h2 className="text-2xl font-bold text-white mb-4">Bot Status</h2>
                  <p className="text-gray-400 mb-4">
-                    This dashboard connects to your Discord bot, but it doesn't run the bot's code itself. You need to run your bot from your server or development environment (like PyCharm's terminal) for it to come online and for this dashboard to function correctly.
+                    The dashboard connects to your bot. Make sure your bot is running from your server or terminal.
                 </p>
                 <div className="flex items-center space-x-4 p-4 bg-gray-700/50 rounded-md">
                     <div className="w-3 h-3 rounded-full bg-green-500 animate-pulse"></div>
-                    <span className="font-semibold text-green-400">Bot is connected and operational.</span>
+                    <span className="font-semibold text-green-400">Connected</span>
                 </div>
                  <div className="text-xs text-gray-500 mt-4">
-                    Note: Your Discord and Gemini API keys should be managed as secure server-side environment variables, not here.
+                    Note: API keys are managed as environment variables.
                 </div>
             </div>
 
-            <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-                <h2 className="text-2xl font-bold text-white mb-4">Sharing Your Dashboard</h2>
-                 <p className="text-gray-400 mb-4">
-                    To share this dashboard with others, you need to "deploy" it to a cloud hosting service. This will give you a public, shareable link that anyone can access in their browser.
-                </p>
-                <div className="bg-gray-700/50 p-4 rounded-md">
-                    <h3 className="font-semibold text-primary-400 mb-2">Recommended Steps:</h3>
-                    <ol className="list-decimal list-inside text-gray-300 space-y-2">
-                        <li>
-                            Store your project's code on a version control platform like <strong>GitHub</strong>.
-                        </li>
-                        <li>
-                            Choose a web hosting service. Excellent, easy-to-use options with free plans include:
-                            <ul className="list-disc list-inside ml-6 mt-1">
-                                <li><strong>Vercel</strong></li>
-                                <li><strong>Netlify</strong></li>
-                            </ul>
-                        </li>
-                        <li>
-                            Sign up for one of those services, connect your GitHub account, and select your project.
-                        </li>
-                        <li>
-                            The service will automatically build and deploy your dashboard, providing you with a public URL (e.g., `https://your-app-name.vercel.app`).
-                        </li>
-                    </ol>
-                </div>
-            </div>
         </div>
     );
 };
 
+export default SettingsView;
 export default SettingsView;

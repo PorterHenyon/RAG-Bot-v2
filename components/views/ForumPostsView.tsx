@@ -137,12 +137,9 @@ const ForumPostsView: React.FC = () => {
 
       {filteredPosts.length === 0 ? (
         <div className="bg-gray-800 rounded-lg shadow-lg p-8 text-center">
-          <p className="text-gray-400 text-lg">No forum posts found</p>
+          <p className="text-gray-400 text-lg">Nothing here yet</p>
           <p className="text-gray-500 text-sm mt-2">
-            Forum posts from Discord will appear here automatically when created.
-          </p>
-          <p className="text-gray-500 text-xs mt-4">
-            Dashboard refreshes every 5 seconds. Make sure your bot is running!
+            Posts from Discord show up here once they're created.
           </p>
         </div>
       ) : (

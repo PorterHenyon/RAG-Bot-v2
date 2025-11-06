@@ -102,14 +102,14 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'module', description: 'The specific module to reload (e.g., "commands", "config").', type: 'string', required: false },
       ],
-      createdAt: '2024-10-31T10:00:00Z',
+      createdAt: '2025-01-15T10:00:00Z',
     },
     {
       id: 'CMD-SYS-002',
       name: 'stop',
       description: 'Stops the bot process gracefully. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-10-31T10:05:00Z',
+      createdAt: '2025-01-15T10:05:00Z',
     },
     {
       id: 'CMD-SYS-003',
@@ -118,21 +118,21 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'question', description: 'The question you want to ask the knowledge base', type: 'string', required: true },
       ],
-      createdAt: '2024-11-03T10:00:00Z',
+      createdAt: '2025-01-20T10:00:00Z',
     },
     {
       id: 'CMD-SYS-004',
       name: 'mark_as_solve',
       description: 'Mark a forum thread as solved. Analyzes the conversation and SAVES it as a RAG entry to the knowledge base. Updates dashboard status. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-11-03T10:05:00Z',
+      createdAt: '2025-01-20T10:05:00Z',
     },
     {
       id: 'CMD-SYS-004B',
       name: 'mark_as_solve_no_review',
       description: 'Mark thread as solved and lock it WITHOUT creating a RAG entry. Just closes the thread. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-11-03T10:06:00Z',
+      createdAt: '2025-01-20T10:06:00Z',
     },
     {
       id: 'CMD-SYS-005',
@@ -141,7 +141,7 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'channel_id', description: 'The Discord channel ID (right-click channel → Copy ID)', type: 'string', required: true },
       ],
-      createdAt: '2024-11-03T11:00:00Z',
+      createdAt: '2025-01-22T11:00:00Z',
     },
     {
       id: 'CMD-SYS-005B',
@@ -150,7 +150,7 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'post_id', description: 'The post/thread ID to ignore (right-click thread → Copy ID)', type: 'string', required: true },
       ],
-      createdAt: '2024-11-03T11:01:00Z',
+      createdAt: '2025-01-22T11:01:00Z',
     },
     {
       id: 'CMD-SYS-006',
@@ -159,7 +159,7 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'seconds', description: 'Delay in seconds (5-300)', type: 'number', required: true },
       ],
-      createdAt: '2024-11-03T11:05:00Z',
+      createdAt: '2025-01-25T11:05:00Z',
     },
     {
       id: 'CMD-SYS-007',
@@ -168,7 +168,7 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'temperature', description: 'Temperature value (0.0-2.0)', type: 'number', required: true },
       ],
-      createdAt: '2024-11-03T11:10:00Z',
+      createdAt: '2025-01-28T11:10:00Z',
     },
     {
       id: 'CMD-SYS-008',
@@ -177,35 +177,35 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'max_tokens', description: 'Max tokens (100-8192)', type: 'number', required: true },
       ],
-      createdAt: '2024-11-03T11:15:00Z',
+      createdAt: '2025-01-28T11:15:00Z',
     },
     {
       id: 'CMD-SYS-009',
       name: 'status',
       description: 'Check bot status including loaded data, AI settings, active timers, and configuration. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-11-03T11:20:00Z',
+      createdAt: '2025-02-01T11:20:00Z',
     },
     {
       id: 'CMD-SYS-010',
       name: 'check_rag_entries',
       description: 'List all loaded RAG knowledge base entries with titles and keywords. Useful for debugging. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-11-03T11:25:00Z',
+      createdAt: '2025-02-01T11:25:00Z',
     },
     {
       id: 'CMD-SYS-011',
       name: 'check_auto_entries',
       description: 'List all loaded auto-responses with triggers and previews. Useful for debugging. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-11-03T11:30:00Z',
+      createdAt: '2025-02-02T11:30:00Z',
     },
     {
       id: 'CMD-SYS-012',
       name: 'api_info',
       description: 'View sensitive API configuration including URLs and system prompt details. PRIVATE - only you can see. Requires Admin role.',
       parameters: [],
-      createdAt: '2024-11-03T11:35:00Z',
+      createdAt: '2025-02-02T11:35:00Z',
     },
     {
       id: 'CMD-SYS-013',
@@ -214,7 +214,7 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'hours', description: 'Hours of inactivity before escalation (1-168)', type: 'number', required: true },
       ],
-      createdAt: '2024-11-03T11:40:00Z',
+      createdAt: '2025-02-03T11:40:00Z',
     },
     {
       id: 'CMD-SYS-014',
@@ -223,7 +223,7 @@ const initialSlashCommands: SlashCommand[] = [
       parameters: [
         { name: 'days', description: 'Days to retain solved posts (1-365)', type: 'number', required: true },
       ],
-      createdAt: '2024-11-03T11:45:00Z',
+      createdAt: '2025-02-03T11:45:00Z',
     },
 ];
 
