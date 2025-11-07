@@ -1188,19 +1188,17 @@ async def on_ready():
         print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
     
     try:
-        # Clear old commands first to prevent duplicates
+        # DON'T clear commands on every startup - this causes CommandNotFound errors
+        # Only sync commands to update any changes
         guild = discord.Object(id=DISCORD_GUILD_ID)
         
-        # Clear both global and guild to prevent duplication
-        bot.tree.clear_commands(guild=None)  # Clear global
-        bot.tree.clear_commands(guild=guild)  # Clear guild
-        print(f'🧹 Cleared old commands (global + guild {DISCORD_GUILD_ID})')
+        print(f'🔄 Syncing slash commands to guild {DISCORD_GUILD_ID}...')
         
         # Sync commands to specific guild for instant availability
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f'✓ Slash commands synced to guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
-        print(f'   Commands will appear instantly in the server!')
+        print(f'   Commands are now available in the server!')
         print(f'   💡 If you see duplicates, use /fix_duplicate_commands')
         print(f'   ⚠ NOTE: If you don\'t see commands, re-invite bot with "applications.commands" scope!')
     except Exception as e:
