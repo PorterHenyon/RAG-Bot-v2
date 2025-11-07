@@ -72,6 +72,7 @@ BOT_SETTINGS_FILE = Path("bot_settings.json")
 BOT_SETTINGS = {
     'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
     'satisfaction_delay': 15,  # Seconds to wait before analyzing satisfaction
+    'satisfaction_analysis_enabled': True,  # Enable/disable automatic satisfaction analysis (saves API calls!)
     'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
     'ai_max_tokens': 2048,  # Max tokens for AI responses
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
@@ -82,6 +83,30 @@ BOT_SETTINGS = {
     'auto_rag_enabled': True,  # Auto-create RAG entries from solved threads
     'last_updated': datetime.now().isoformat()
 }
+
+# --- GEMINI API RATE LIMITING (10 requests per minute) ---
+from collections import deque
+gemini_api_calls = deque(maxlen=100)  # Track last 100 API calls
+
+async def check_rate_limit():
+    """Check if we can make a Gemini API call without hitting rate limit"""
+    now = datetime.now()
+    # Remove calls older than 1 minute
+    while gemini_api_calls and (now - gemini_api_calls[0]).total_seconds() > 60:
+        gemini_api_calls.popleft()
+    
+    # Check if we're at the limit (10 per minute)
+    if len(gemini_api_calls) >= 10:
+        oldest_call = gemini_api_calls[0]
+        wait_time = 60 - (now - oldest_call).total_seconds()
+        print(f"⚠️ RATE LIMIT: {len(gemini_api_calls)}/10 API calls in last minute. Waiting {wait_time:.1f}s...")
+        return False
+    return True
+
+def track_api_call():
+    """Track that we made a Gemini API call"""
+    gemini_api_calls.append(datetime.now())
+    print(f"📊 Gemini API calls: {len(gemini_api_calls)}/10 in last minute")
 
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
@@ -716,6 +741,11 @@ def build_user_context(query, context_entries):
 
 async def generate_ai_response(query, context_entries):
     try:
+        # Check rate limit before making API call
+        if not await check_rate_limit():
+            print(f"⚠️ Skipping AI response generation due to rate limit")
+            return "I'm experiencing high traffic right now. Please wait a moment or contact human support!"
+        
         # Use API system prompt if available, otherwise use default
         system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
         
@@ -743,6 +773,7 @@ async def generate_ai_response(query, context_entries):
             None,
             lambda: model.generate_content(user_context, generation_config=generation_config)
         )
+        track_api_call()  # Track successful API call
         return response.text
     except Exception as e:
         print(f"An error occurred with the Gemini API: {e}")
@@ -751,6 +782,11 @@ async def generate_ai_response(query, context_entries):
 async def analyze_conversation(conversation_text):
     """Analyze a conversation and create a RAG entry from it"""
     try:
+        # Check rate limit before making API call
+        if not await check_rate_limit():
+            print(f"⚠️ Skipping RAG entry generation due to rate limit")
+            return None
+        
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = (
@@ -805,6 +841,16 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
                 "wants_human": True
             }
         
+        # Check if satisfaction analysis is enabled (saves API calls!)
+        if not BOT_SETTINGS.get('satisfaction_analysis_enabled', True):
+            print(f"ℹ️ Satisfaction analysis disabled - skipping")
+            return {"satisfied": False, "reason": "Analysis disabled", "confidence": 0, "wants_human": False}
+        
+        # Check rate limit before making API call
+        if not await check_rate_limit():
+            print(f"⚠️ Skipping satisfaction analysis due to rate limit")
+            return {"satisfied": False, "reason": "Rate limit", "confidence": 0, "wants_human": False}
+        
         model = genai.GenerativeModel('gemini-2.5-flash')
         
         prompt = (
@@ -838,6 +884,7 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
         
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(None, model.generate_content, prompt)
+        track_api_call()  # Track successful API call
         
         # Parse JSON response
         response_text = response.text.strip()
@@ -2790,6 +2837,34 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
         print(f"Error in toggle_auto_rag: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="toggle_satisfaction_analysis", description="Enable/disable automatic satisfaction analysis (saves Gemini API calls!) (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled: bool):
+    """Toggle automatic satisfaction analysis to save API rate limits"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        global BOT_SETTINGS
+        BOT_SETTINGS['satisfaction_analysis_enabled'] = enabled
+        
+        if save_bot_settings():
+            status_emoji = "✅" if enabled else "❌"
+            status_text = "enabled" if enabled else "disabled"
+            
+            await interaction.followup.send(
+                f"{status_emoji} Satisfaction analysis is now **{status_text}**!\n\n"
+                f"{'✅ The bot will automatically analyze user messages to detect satisfaction and escalate when needed.' if enabled else '❌ The bot will NOT automatically analyze satisfaction. Users can still click buttons to give feedback.'}\n\n"
+                f"💡 **Gemini API Impact**: This saves ~1 API call per user reply (10 RPM limit)\n"
+                f"📊 **Current rate**: {len(gemini_api_calls)}/10 calls in last minute",
+                ephemeral=False
+            )
+            print(f"✓ Satisfaction analysis {status_text} by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in toggle_satisfaction_analysis: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def status(interaction: discord.Interaction):
@@ -2833,6 +2908,18 @@ async def status(interaction: discord.Interaction):
         status_embed.add_field(
             name="📚 Auto-RAG Creation",
             value=f"{'✅ Enabled' if BOT_SETTINGS.get('auto_rag_enabled', True) else '❌ Disabled'}",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="🔍 Satisfaction Analysis",
+            value=f"{'✅ Enabled' if BOT_SETTINGS.get('satisfaction_analysis_enabled', True) else '❌ Disabled (saves API calls)'}",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="🔥 Gemini API Rate",
+            value=f"**{len(gemini_api_calls)}/10** calls in last minute",
             inline=True
         )
         
