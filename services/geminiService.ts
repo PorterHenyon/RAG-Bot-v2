@@ -1,19 +1,7 @@
-import { GoogleGenAI, Type } from "@google/genai";
 import type { Message, RagEntry, AutoResponse } from '../types';
 
-// The API key is assumed to be set in the environment variables.
-// In Vite, environment variables are accessed via import.meta.env
-// Try multiple possible env var names
-const apiKey = import.meta.env.VITE_GEMINI_API_KEY 
-  || import.meta.env.GEMINI_API_KEY 
-  || import.meta.env.API_KEY 
-  || (typeof process !== 'undefined' ? (process.env as any).GEMINI_API_KEY || (process.env as any).API_KEY : undefined);
-
-if (!apiKey) {
-  console.warn('⚠ Gemini API key not found in environment variables. Summarization will fail.');
-}
-
-const ai = new GoogleGenAI({ apiKey: apiKey || '' });
+// NOTE: We no longer use the API key client-side for security reasons.
+// All AI operations that require the API key are done through secure API endpoints.
 
 export const geminiService = {
   // This is local logic, no API call needed.
@@ -29,108 +17,45 @@ export const geminiService = {
   },
 
   summarizeConversation: async (conversation: Message[]): Promise<string> => {
-    console.log("Calling Gemini API for summarization...");
+    console.log("Calling secure API endpoint for summarization...");
     try {
-        const conversationText = conversation.map(m => `${m.author}: ${m.content}`).join('\n');
-        const prompt = `Summarize the following support conversation into a concise paragraph that explains the user's problem and the final solution. This will be used for a knowledge base article. \n\nConversation:\n${conversationText}`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
+        const response = await fetch('/api/summarize', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ conversation }),
         });
 
-        return response.text || "There was an error generating the summary. Please try again.";
-    } catch (error) {
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'Failed to generate summary');
+        }
+
+        const data = await response.json();
+        return data.summary || "There was an error generating the summary. Please try again.";
+    } catch (error: any) {
         console.error("Error summarizing conversation:", error);
-        return "There was an error summarizing the conversation. Please try again.";
+        throw new Error(`Failed to generate summary: ${error.message}`);
     }
   },
 
   analyzeAndCreateRagEntry: async (conversation: Message[]): Promise<Omit<RagEntry, 'id' | 'createdAt' | 'createdBy'>> => {
-    console.log("Calling Gemini API for RAG entry creation...");
-    try {
-        const conversationText = conversation.map(m => `${m.author}: ${m.content}`).join('\n');
-        const prompt = `Analyze the following support conversation and generate a structured knowledge base entry from it.
-        - The "title" should be a clear, concise summary of the problem (e.g., "Fix for '...' Error").
-        - The "content" should be a detailed explanation of the solution.
-        - The "keywords" should be an array of relevant search terms.
-
-        Conversation:\n${conversationText}`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        title: { type: Type.STRING },
-                        content: { type: Type.STRING },
-                        keywords: {
-                            type: Type.ARRAY,
-                            items: { type: Type.STRING }
-                        }
-                    },
-                    required: ['title', 'content', 'keywords'],
-                }
-            }
-        });
-        
-        const responseText = response.text;
-        if (!responseText) {
-            throw new Error("API returned an empty response for RAG entry creation.");
-        }
-        const jsonString = responseText.trim();
-        if (!jsonString) {
-            throw new Error("API returned an empty response for RAG entry creation.");
-        }
-        return JSON.parse(jsonString);
-
-    } catch (error) {
-        console.error("Error creating RAG entry:", error);
-        // Return a default error structure
-        return {
-            title: "Error Generating Entry",
-            content: "The AI failed to generate a RAG entry from this conversation.",
-            keywords: ["error"],
-        };
-    }
+    console.log("RAG entry analysis (stub - not implemented client-side)");
+    // This functionality should be handled by the Discord bot server-side
+    // Keeping as a stub for backwards compatibility
+    return {
+        title: "Manual Entry Required",
+        content: "Please create this entry manually or use the Discord bot's automatic RAG creation.",
+        keywords: ["manual"],
+    };
   },
   
   classifyIssue: async (firstMessage: string): Promise<'User Error' | 'Macro Issue'> => {
-    console.log("Calling Gemini API for issue classification...");
-    try {
-        const prompt = `Classify the following user issue as either "User Error" or "Macro Issue". Only return one of these two options as a JSON object with a single "classification" key. Issue: "${firstMessage}"`;
-        
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: "application/json",
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        classification: {
-                            type: Type.STRING,
-                            enum: ['User Error', 'Macro Issue']
-                        }
-                    },
-                    required: ['classification']
-                }
-            }
-        });
-        
-        const responseText = response.text;
-        if (!responseText) return 'User Error'; // Default fallback
-        const jsonString = responseText.trim();
-        if (!jsonString) return 'User Error'; // Default fallback
-        const parsed = JSON.parse(jsonString);
-        return parsed.classification || 'User Error';
-    } catch (error) {
-        console.error("Error classifying issue:", error);
-        return 'User Error'; // Default fallback
-    }
+    console.log("Issue classification (stub - not implemented client-side)");
+    // This functionality is handled by the Discord bot server-side
+    // Keeping as a stub for backwards compatibility
+    return 'User Error'; // Default fallback
   },
 
   // This is local logic for scoring, no API call needed.
@@ -154,33 +79,12 @@ export const geminiService = {
   },
 
   generateBotResponse: async (query: string, contextEntries: RagEntry[]): Promise<string> => {
-    console.log("Calling Gemini API for bot response...");
-    try {
-        const contextText = contextEntries.map(entry => `Title: ${entry.title}\nContent: ${entry.content}`).join('\n\n');
-        const prompt = `You are an expert support bot for Revolution Macro, a powerful scripting application for gaming automation. Your role is to help users troubleshoot issues and understand features.
-
-Guidelines:
-- Be friendly, professional, and helpful
-- Provide clear, step-by-step solutions when possible
-- Reference specific Revolution Macro features and settings by name
-- If the context doesn't fully answer the question, be honest about limitations
-- Always maintain a positive, supportive tone
-
-User Question: "${query}"
-
-Using the following knowledge base context, provide a helpful answer. If the context is highly relevant, you can reference it directly.
-
-Knowledge Base Context:\n${contextText}`;
-
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-
-        return response.text || "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
-    } catch (error) {
-        console.error("Error generating bot response:", error);
-        return "I'm sorry, I encountered an error trying to generate a response. A human will be with you shortly.";
+    console.log("Bot response generation (stub - not implemented client-side)");
+    // This functionality is handled by the Discord bot server-side
+    // Keeping as a stub for backwards compatibility
+    if (contextEntries.length > 0) {
+        return `Based on your query, you might find these articles helpful:\n\n${contextEntries.map(e => `• ${e.title}`).join('\n')}`;
     }
+    return "I'm sorry, I couldn't find relevant information. Please try the Discord bot or contact support.";
   },
 };
