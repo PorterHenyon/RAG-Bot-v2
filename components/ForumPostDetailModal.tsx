@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { ForumPost, Message, PostStatus } from '../types';
 import { XMarkIcon, UserIcon, BotIcon, SupportIcon, HashtagIcon, SystemIcon } from './icons';
-import { geminiService } from '../services/geminiService';
 import { forumPostService } from '../services/forumPostService';
 
 interface ForumPostDetailModalProps {
@@ -118,49 +117,6 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
     }
   };
 
-  const handleSummarize = async () => {
-    if (post.status !== PostStatus.Solved) {
-      alert("Can only summarize solved posts. Please change status to 'Solved' first.");
-      return;
-    }
-    
-    setIsProcessing(true);
-    setProcessingAction('Summarizing');
-    
-    try {
-      console.log('Starting summarization...', post.conversation);
-      const summary = await geminiService.summarizeConversation(post.conversation);
-      
-      if (!summary || summary.includes('error') || summary.includes('Error')) {
-        throw new Error('Failed to generate summary');
-      }
-      
-      const summaryMessage: Message = { 
-        author: 'Bot', 
-        content: `AI Summary: ${summary}`, 
-        timestamp: new Date().toISOString()
-      };
-      
-      const updatedPost = {
-        ...post, 
-        conversation: [...post.conversation, summaryMessage]
-      };
-      
-      // Update via API
-      await forumPostService.updateForumPost(updatedPost);
-      onUpdate(updatedPost);
-      
-      // Show success message
-      alert('Summary generated and added to conversation history. You can now add this to the RAG database from the RAG Management view.');
-    } catch (error: any) {
-      console.error('Error summarizing:', error);
-      const errorMsg = error?.message || 'Unknown error';
-      alert(`Failed to generate summary: ${errorMsg}. Please check that VITE_GEMINI_API_KEY is set in Vercel environment variables and try again.`);
-    } finally {
-      setIsProcessing(false);
-      setProcessingAction(null);
-    }
-  };
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50 p-4">
@@ -231,12 +187,6 @@ const ForumPostDetailModal: React.FC<ForumPostDetailModalProps> = ({ post, onClo
             <div className="border-t border-gray-700 pt-4">
               <h4 className="font-semibold text-gray-300 mb-2">Admin Actions</h4>
               <div className="flex flex-col gap-2">
-                <button 
-                    onClick={handleSummarize}
-                    disabled={isProcessing || post.status !== PostStatus.Solved}
-                    className="w-full text-left bg-green-600 hover:bg-green-500 text-white font-bold py-2 px-4 rounded disabled:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-                    {isProcessing && processingAction === 'Summarizing' ? 'Summarizing...' : 'Summarize for RAG'}
-                </button>
                 {post.status === PostStatus.Solved && (
                      <button 
                         onClick={handleResolveAndClose}
