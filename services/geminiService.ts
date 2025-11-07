@@ -40,7 +40,7 @@ export const geminiService = {
     }
   },
 
-  analyzeAndCreateRagEntry: async (conversation: Message[]): Promise<Omit<RagEntry, 'id' | 'createdAt' | 'createdBy'>> => {
+  analyzeAndCreateRagEntry: async (_conversation: Message[]): Promise<Omit<RagEntry, 'id' | 'createdAt' | 'createdBy'>> => {
     console.log("RAG entry analysis (stub - not implemented client-side)");
     // This functionality should be handled by the Discord bot server-side
     // Keeping as a stub for backwards compatibility
@@ -51,7 +51,7 @@ export const geminiService = {
     };
   },
   
-  classifyIssue: async (firstMessage: string): Promise<'User Error' | 'Macro Issue'> => {
+  classifyIssue: async (_firstMessage: string): Promise<'User Error' | 'Macro Issue'> => {
     console.log("Issue classification (stub - not implemented client-side)");
     // This functionality is handled by the Discord bot server-side
     // Keeping as a stub for backwards compatibility
@@ -78,7 +78,7 @@ export const geminiService = {
     return scoredEntries.filter(e => e.score > 0).sort((a, b) => b.score - a.score);
   },
 
-  generateBotResponse: async (query: string, contextEntries: RagEntry[]): Promise<string> => {
+  generateBotResponse: async (_query: string, contextEntries: RagEntry[]): Promise<string> => {
     console.log("Bot response generation (stub - not implemented client-side)");
     // This functionality is handled by the Discord bot server-side
     // Keeping as a stub for backwards compatibility
