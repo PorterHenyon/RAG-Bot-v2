@@ -1190,14 +1190,18 @@ async def on_ready():
     try:
         # Clear old commands first to prevent duplicates
         guild = discord.Object(id=DISCORD_GUILD_ID)
-        bot.tree.clear_commands(guild=guild)
-        print(f'🧹 Cleared old commands from guild {DISCORD_GUILD_ID}')
+        
+        # Clear both global and guild to prevent duplication
+        bot.tree.clear_commands(guild=None)  # Clear global
+        bot.tree.clear_commands(guild=guild)  # Clear guild
+        print(f'🧹 Cleared old commands (global + guild {DISCORD_GUILD_ID})')
         
         # Sync commands to specific guild for instant availability
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         print(f'✓ Slash commands synced to guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
         print(f'   Commands will appear instantly in the server!')
+        print(f'   💡 If you see duplicates, use /fix_duplicate_commands')
         print(f'   ⚠ NOTE: If you don\'t see commands, re-invite bot with "applications.commands" scope!')
     except Exception as e:
         print(f'⚠ Failed to sync commands: {e}')
@@ -2513,6 +2517,46 @@ async def reload(interaction: discord.Interaction):
     else:
         await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
     print(f"Reload command issued by {interaction.user}.")
+
+@bot.tree.command(name="fix_duplicate_commands", description="Clear ALL slash commands and re-sync (fixes duplicates) (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def fix_duplicate_commands(interaction: discord.Interaction):
+    """Clear all slash commands (global + guild) and re-sync to fix duplicates"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        guild = discord.Object(id=DISCORD_GUILD_ID)
+        
+        # Step 1: Clear global commands
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync()
+        print(f"🧹 Cleared global commands")
+        
+        # Step 2: Clear guild commands
+        bot.tree.clear_commands(guild=guild)
+        await bot.tree.sync(guild=guild)
+        print(f"🧹 Cleared guild commands for {DISCORD_GUILD_ID}")
+        
+        # Step 3: Wait a moment for Discord to process
+        await asyncio.sleep(2)
+        
+        # Step 4: Re-sync commands to guild
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        
+        await interaction.followup.send(
+            f"✅ **Fixed duplicate commands!**\n\n"
+            f"🧹 Cleared: Global + Guild commands\n"
+            f"🔄 Re-synced: {len(synced)} commands to guild\n\n"
+            f"💡 **Refresh Discord** (`Ctrl+R`) to see the changes!\n"
+            f"Commands should now appear only once.",
+            ephemeral=False
+        )
+        print(f"✓ Fixed duplicate commands - re-synced {len(synced)} commands by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in fix_duplicate_commands: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="set_forums_id", description="Set the support forum channel ID for the bot to monitor (Admin only).")
 @app_commands.default_permissions(administrator=True)
