@@ -79,6 +79,7 @@ BOT_SETTINGS = {
     'solved_post_retention_days': 30,  # Days to keep solved/closed posts before deletion
     'unsolved_tag_id': None,  # Discord tag ID for "Unsolved" posts
     'resolved_tag_id': None,  # Discord tag ID for "Resolved" posts
+    'auto_rag_enabled': True,  # Auto-create RAG entries from solved threads
     'last_updated': datetime.now().isoformat()
 }
 
@@ -166,20 +167,24 @@ class SatisfactionButtons(discord.ui.View):
         except Exception as lock_error:
             print(f"❌ Error locking thread {self.thread_id}: {lock_error}")
         
-        # Create pending RAG entry
+        # Create pending RAG entry (if auto-RAG is enabled)
         try:
-            print(f"📝 Attempting to create RAG entry from solved conversation...")
-            
-            formatted_lines = []
-            for msg in self.conversation:
-                author = msg.get('author', 'Unknown')
-                content = msg.get('content', '')
-                formatted_lines.append(f"<@{author}> Said: {content}")
-            
-            conversation_text = "\n".join(formatted_lines)
-            rag_entry = await analyze_conversation(conversation_text)
-            
-            if self.thread_id not in no_review_threads and rag_entry and 'your-vercel-app' not in DATA_API_URL:
+            # Check if auto-RAG creation is enabled
+            if not BOT_SETTINGS.get('auto_rag_enabled', True):
+                print(f"ℹ️ Auto-RAG creation is disabled. Skipping RAG entry for thread {self.thread_id}")
+            else:
+                print(f"📝 Attempting to create RAG entry from solved conversation...")
+                
+                formatted_lines = []
+                for msg in self.conversation:
+                    author = msg.get('author', 'Unknown')
+                    content = msg.get('content', '')
+                    formatted_lines.append(f"<@{author}> Said: {content}")
+                
+                conversation_text = "\n".join(formatted_lines)
+                rag_entry = await analyze_conversation(conversation_text)
+                
+            if BOT_SETTINGS.get('auto_rag_enabled', True) and self.thread_id not in no_review_threads and rag_entry and 'your-vercel-app' not in DATA_API_URL:
                 data_api_url_rag = DATA_API_URL
                 
                 async with aiohttp.ClientSession() as rag_session:
@@ -1952,89 +1957,93 @@ async def on_message(message):
                                             import traceback
                                             traceback.print_exc()
                                         
-                                        # Automatically create RAG entry from this solved conversation
+                                        # Automatically create RAG entry from this solved conversation (if enabled)
                                         try:
-                                            print(f"📝 Attempting to create RAG entry from solved conversation...")
-                                            
-                                            # Format conversation for analysis
-                                            formatted_lines = []
-                                            for msg in conversation:
-                                                author = msg.get('author', 'Unknown')
-                                                content = msg.get('content', '')
-                                                formatted_lines.append(f"<@{author}> Said: {content}")
-                                            
-                                            conversation_text = "\n".join(formatted_lines)
-                                            
-                                            # Analyze conversation to create RAG entry
-                                            rag_entry = await analyze_conversation(conversation_text)
-                                            
-                                            # Check if thread was manually closed with no_review (don't create RAG)
-                                            if thread_id in no_review_threads:
-                                                print(f"🚫 Thread {thread_id} marked as no_review - skipping auto-RAG creation")
-                                            elif rag_entry and 'your-vercel-app' not in DATA_API_URL:
-                                                # Create pending RAG entry (requires approval)
-                                                data_api_url_rag = DATA_API_URL
-                                                
-                                                async with aiohttp.ClientSession() as rag_session:
-                                                    async with rag_session.get(data_api_url_rag) as get_data_response:
-                                                        current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': [], 'pendingRagEntries': []}
-                                                        if get_data_response.status == 200:
-                                                            current_data = await get_data_response.json()
-                                                        
-                                                        # Create conversation preview for review
-                                                        conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
-                                                        
-                                                        # Create new PENDING RAG entry
-                                                        new_pending_entry = {
-                                                            'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
-                                                            'title': rag_entry.get('title', 'Auto-generated from solved thread'),
-                                                            'content': rag_entry.get('content', ''),
-                                                            'keywords': rag_entry.get('keywords', []),
-                                                            'createdAt': datetime.now().isoformat(),
-                                                            'source': 'Auto-satisfaction',
-                                                            'threadId': str(thread_id),
-                                                            'conversationPreview': conversation_preview
-                                                        }
-                                                        
-                                                        pending_entries = current_data.get('pendingRagEntries', [])
-                                                        pending_entries.append(new_pending_entry)
-                                                        
-                                                        # Save to API (must include ALL fields)
-                                                        save_data = {
-                                                            'ragEntries': current_data.get('ragEntries', []),
-                                                            'autoResponses': current_data.get('autoResponses', []),
-                                                            'slashCommands': current_data.get('slashCommands', []),
-                                                            'botSettings': current_data.get('botSettings', {}),
-                                                            'pendingRagEntries': pending_entries
-                                                        }
-                                                        
-                                                        print(f"💾 Saving pending RAG entry to API for review...")
-                                                        print(f"   Total pending entries: {len(pending_entries)}")
-                                                        print(f"   New pending entry: '{new_pending_entry['title']}'")
-                                                        
-                                                        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                                                        async with rag_session.post(data_api_url_rag, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
-                                                            response_text = await save_response.text()
-                                                            if save_response.status == 200:
-                                                                print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
-                                                                print(f"   API response: {response_text[:200]}")
-                                                                
-                                                                # Send shorter notification in thread
-                                                                rag_notification = discord.Embed(
-                                                                    title="📋 Entry Saved for Review",
-                                                                    description=f"**{new_pending_entry['title']}**\n\nThis will be reviewed and added to help future users!",
-                                                                    color=0xF39C12
-                                                                )
-                                                                rag_notification.set_footer(text="Revolution Macro • Pending Approval")
-                                                                await thread_channel.send(embed=rag_notification)
-                                                            else:
-                                                                print(f"❌ Failed to create pending RAG entry!")
-                                                                print(f"   Status: {save_response.status}")
-                                                                print(f"   Response: {response_text[:300]}")
-                                                                print(f"   URL: {data_api_url_rag}")
-                                                                print(f"   Payload: {len(pending_entries)} pending entries")
+                                            # Check if auto-RAG is enabled
+                                            if not BOT_SETTINGS.get('auto_rag_enabled', True):
+                                                print(f"ℹ️ Auto-RAG creation is disabled - skipping RAG entry for thread {thread_id}")
                                             else:
-                                                print(f"ℹ Skipping RAG entry creation (no entry generated or API not configured)")
+                                                print(f"📝 Attempting to create RAG entry from solved conversation...")
+                                                
+                                                # Format conversation for analysis
+                                                formatted_lines = []
+                                                for msg in conversation:
+                                                    author = msg.get('author', 'Unknown')
+                                                    content = msg.get('content', '')
+                                                    formatted_lines.append(f"<@{author}> Said: {content}")
+                                                
+                                                conversation_text = "\n".join(formatted_lines)
+                                                
+                                                # Analyze conversation to create RAG entry
+                                                rag_entry = await analyze_conversation(conversation_text)
+                                                
+                                                # Check if thread was manually closed with no_review (don't create RAG)
+                                                if thread_id in no_review_threads:
+                                                    print(f"🚫 Thread {thread_id} marked as no_review - skipping auto-RAG creation")
+                                                elif rag_entry and 'your-vercel-app' not in DATA_API_URL:
+                                                    # Create pending RAG entry (requires approval)
+                                                    data_api_url_rag = DATA_API_URL
+                                                    
+                                                    async with aiohttp.ClientSession() as rag_session:
+                                                        async with rag_session.get(data_api_url_rag) as get_data_response:
+                                                            current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': [], 'pendingRagEntries': []}
+                                                            if get_data_response.status == 200:
+                                                                current_data = await get_data_response.json()
+                                                            
+                                                            # Create conversation preview for review
+                                                            conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
+                                                            
+                                                            # Create new PENDING RAG entry
+                                                            new_pending_entry = {
+                                                                'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
+                                                                'title': rag_entry.get('title', 'Auto-generated from solved thread'),
+                                                                'content': rag_entry.get('content', ''),
+                                                                'keywords': rag_entry.get('keywords', []),
+                                                                'createdAt': datetime.now().isoformat(),
+                                                                'source': 'Auto-satisfaction',
+                                                                'threadId': str(thread_id),
+                                                                'conversationPreview': conversation_preview
+                                                            }
+                                                            
+                                                            pending_entries = current_data.get('pendingRagEntries', [])
+                                                            pending_entries.append(new_pending_entry)
+                                                            
+                                                            # Save to API (must include ALL fields)
+                                                            save_data = {
+                                                                'ragEntries': current_data.get('ragEntries', []),
+                                                                'autoResponses': current_data.get('autoResponses', []),
+                                                                'slashCommands': current_data.get('slashCommands', []),
+                                                                'botSettings': current_data.get('botSettings', {}),
+                                                                'pendingRagEntries': pending_entries
+                                                            }
+                                                            
+                                                            print(f"💾 Saving pending RAG entry to API for review...")
+                                                            print(f"   Total pending entries: {len(pending_entries)}")
+                                                            print(f"   New pending entry: '{new_pending_entry['title']}'")
+                                                            
+                                                            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                                            async with rag_session.post(data_api_url_rag, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
+                                                                response_text = await save_response.text()
+                                                                if save_response.status == 200:
+                                                                    print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
+                                                                    print(f"   API response: {response_text[:200]}")
+                                                                    
+                                                                    # Send shorter notification in thread
+                                                                    rag_notification = discord.Embed(
+                                                                        title="📋 Entry Saved for Review",
+                                                                        description=f"**{new_pending_entry['title']}**\n\nThis will be reviewed and added to help future users!",
+                                                                        color=0xF39C12
+                                                                    )
+                                                                    rag_notification.set_footer(text="Revolution Macro • Pending Approval")
+                                                                    await thread_channel.send(embed=rag_notification)
+                                                                else:
+                                                                    print(f"❌ Failed to create pending RAG entry!")
+                                                                    print(f"   Status: {save_response.status}")
+                                                                    print(f"   Response: {response_text[:300]}")
+                                                                    print(f"   URL: {data_api_url_rag}")
+                                                                    print(f"   Payload: {len(pending_entries)} pending entries")
+                                                else:
+                                                    print(f"ℹ Skipping RAG entry creation (no entry generated or API not configured)")
                                         except Exception as rag_error:
                                             print(f"⚠ Error auto-creating RAG entry: {rag_error}")
                                             import traceback
@@ -2639,6 +2648,33 @@ async def set_solved_post_retention(interaction: discord.Interaction, days: int)
         print(f"Error in set_solved_post_retention: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="toggle_auto_rag", description="Enable/disable automatic RAG entry creation from solved threads (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
+    """Toggle automatic RAG entry creation from solved threads"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        global BOT_SETTINGS
+        BOT_SETTINGS['auto_rag_enabled'] = enabled
+        
+        if save_bot_settings():
+            status_emoji = "✅" if enabled else "❌"
+            status_text = "enabled" if enabled else "disabled"
+            
+            await interaction.followup.send(
+                f"{status_emoji} Auto-RAG creation is now **{status_text}**!\n\n"
+                f"{'✅ When users click "Yes, this solved my issue", the bot will automatically create a pending RAG entry for review.' if enabled else '❌ Solved threads will NOT automatically create RAG entries. You can still manually create them from the dashboard.'}\n\n"
+                f"💡 This setting helps control how many pending RAG entries are created.",
+                ephemeral=False
+            )
+            print(f"✓ Auto-RAG creation {status_text} by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in toggle_auto_rag: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def status(interaction: discord.Interaction):
@@ -2676,6 +2712,12 @@ async def status(interaction: discord.Interaction):
         status_embed.add_field(
             name="⏱️ Timers & Cleanup",
             value=f"**Satisfaction Delay:** {BOT_SETTINGS.get('satisfaction_delay', 15)}s\n**Active Timers:** {active_timers}\n**Post Inactivity:** {BOT_SETTINGS.get('post_inactivity_hours', 12)}h\n**Post Retention:** {BOT_SETTINGS.get('solved_post_retention_days', 30)}d",
+            inline=True
+        )
+        
+        status_embed.add_field(
+            name="📚 Auto-RAG Creation",
+            value=f"{'✅ Enabled' if BOT_SETTINGS.get('auto_rag_enabled', True) else '❌ Disabled'}",
             inline=True
         )
         
