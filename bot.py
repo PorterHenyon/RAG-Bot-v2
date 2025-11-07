@@ -300,12 +300,34 @@ class SatisfactionButtons(discord.ui.View):
             await self._escalate_to_human(thread)
     
     async def _escalate_to_human(self, thread):
-        """Escalate thread to human support"""
+        """Escalate thread to human support with log upload prompt"""
         escalated_threads.add(self.thread_id)
+        
+        # First, ask for logs to help support team
+        log_prompt_embed = discord.Embed(
+            title="📋 Before We Get Support...",
+            description="To help our team solve this faster, can you upload your **log files**?",
+            color=0xF39C12
+        )
+        log_prompt_embed.add_field(
+            name="📁 How to Find Logs",
+            value="1. Open Revolution Macro folder\n2. Look for `logs` or `output.log`\n3. Drag and drop the file here",
+            inline=False
+        )
+        log_prompt_embed.add_field(
+            name="⏭️ Skip This Step?",
+            value="No problem! Support will still help you.",
+            inline=False
+        )
+        log_prompt_embed.set_footer(text="💡 Logs help us identify issues much faster!")
+        await thread.send(embed=log_prompt_embed)
+        
+        # Wait a moment, then send escalation message
+        await asyncio.sleep(2)
         
         escalate_embed = discord.Embed(
             title="👨‍💼 Support Team Notified",
-            description="I wasn't able to fully help. Our support team has been notified and will assist you soon!",
+            description="Our support team has been notified and will review your issue soon!",
             color=0xE67E22
         )
         escalate_embed.add_field(
@@ -314,15 +336,15 @@ class SatisfactionButtons(discord.ui.View):
             inline=True
         )
         escalate_embed.add_field(
-            name="📸 Tip",
-            value="Send screenshots if helpful!",
+            name="📎 Helpful to Include",
+            value="Screenshots, videos, or error messages",
             inline=True
         )
         escalate_embed.set_footer(text="Revolution Macro Support Team")
         await thread.send(embed=escalate_embed)
         
         await update_forum_post_status(self.thread_id, 'Human Support')
-        print(f"⚠ Thread {self.thread_id} escalated to Human Support")
+        print(f"⚠ Thread {self.thread_id} escalated to Human Support (with log prompt)")
 
 
 async def update_forum_post_status(thread_id, status):
@@ -1373,7 +1395,28 @@ async def on_thread_create(thread):
         print(f"⚠ No initial message found in thread {thread.id}")
         return
 
-    initial_message = history[0].content
+    initial_msg = history[0]
+    initial_message = initial_msg.content
+    
+    # Check for attachments (images, videos, files)
+    has_attachments = len(initial_msg.attachments) > 0
+    attachment_types = []
+    if has_attachments:
+        for attachment in initial_msg.attachments:
+            if attachment.content_type:
+                if "image" in attachment.content_type:
+                    attachment_types.append("image")
+                    initial_message += f"\n[User attached an image: {attachment.filename}]"
+                elif "video" in attachment.content_type:
+                    attachment_types.append("video")
+                    initial_message += f"\n[User attached a video: {attachment.filename}]"
+                else:
+                    attachment_types.append("file")
+                    initial_message += f"\n[User attached a file: {attachment.filename}]"
+            else:
+                attachment_types.append("file")
+                initial_message += f"\n[User attached a file: {attachment.filename}]"
+        print(f"📎 User attached {len(initial_msg.attachments)} file(s): {', '.join(attachment_types)}")
     
     # Send greeting embed AFTER we have the initial message (Discord requirement) - SHORTER
     greeting_embed = discord.Embed(
@@ -1400,6 +1443,46 @@ async def on_thread_create(thread):
     # Check auto-responses first
     auto_response = get_auto_response(user_question)
     bot_response_text = None
+    
+    # If user attached media but text is vague/unclear, escalate to human immediately
+    needs_human_review = False
+    if has_attachments and not auto_response:
+        # Check if text is vague (short, unclear)
+        text_only = initial_msg.content.strip().lower() if initial_msg.content else ""
+        vague_indicators = ["help", "fix", "broken", "not working", "issue", "problem", "error", "can't", "cant", "wont", "won't", "doesn't work"]
+        is_vague = len(text_only.split()) < 10 and any(indicator in text_only for indicator in vague_indicators)
+        
+        if is_vague:
+            print(f"🚨 User has attachments + vague text - escalating to human support immediately")
+            needs_human_review = True
+    
+    # Handle immediate human escalation (vague text + attachments)
+    if needs_human_review:
+        escalated_threads.add(thread_id)
+        thread_response_type[thread_id] = 'human'
+        
+        human_escalation_embed = discord.Embed(
+            title="👨‍💼 Support Team Notified",
+            description="I see you've included media files. Our support team will review your attachments and help you directly!",
+            color=0xE67E22
+        )
+        human_escalation_embed.add_field(
+            name="⏰ Response Time",
+            value="Usually under 24 hours",
+            inline=True
+        )
+        human_escalation_embed.add_field(
+            name="📎 Attachments Received",
+            value=f"{len(initial_msg.attachments)} file(s)",
+            inline=True
+        )
+        human_escalation_embed.set_footer(text="Revolution Macro Support Team")
+        await thread.send(embed=human_escalation_embed)
+        
+        # Update forum post status
+        await update_forum_post_status(thread_id, 'Human Support')
+        print(f"✅ Thread {thread_id} escalated to human support (attachments + vague text)")
+        return  # Exit early - no bot response needed
     
     if auto_response:
         # Send auto-response as professional embed
@@ -2145,10 +2228,32 @@ async def on_message(message):
                                             updated_status = 'Human Support'
                                             escalated_threads.add(thread_id)  # Mark thread - bot stops talking
                                             
-                                            # Send shorter escalation embed
+                                            # First, ask for logs to help support team
+                                            log_prompt_embed = discord.Embed(
+                                                title="📋 Before We Get Support...",
+                                                description="To help our team solve this faster, can you upload your **log files**?",
+                                                color=0xF39C12
+                                            )
+                                            log_prompt_embed.add_field(
+                                                name="📁 How to Find Logs",
+                                                value="1. Open Revolution Macro folder\n2. Look for `logs` or `output.log`\n3. Drag and drop the file here",
+                                                inline=False
+                                            )
+                                            log_prompt_embed.add_field(
+                                                name="⏭️ Skip This Step?",
+                                                value="No problem! Support will still help you.",
+                                                inline=False
+                                            )
+                                            log_prompt_embed.set_footer(text="💡 Logs help us identify issues much faster!")
+                                            await thread_channel.send(embed=log_prompt_embed)
+                                            
+                                            # Wait a moment, then send escalation message
+                                            await asyncio.sleep(2)
+                                            
+                                            # Send escalation embed
                                             escalate_embed = discord.Embed(
                                                 title="👨‍💼 Support Team Notified",
-                                                description="I wasn't able to fully help. Our support team has been notified!",
+                                                description="Our support team has been notified and will review your issue soon!",
                                                 color=0xE67E22
                                             )
                                             escalate_embed.add_field(
@@ -2157,13 +2262,13 @@ async def on_message(message):
                                                 inline=True
                                             )
                                             escalate_embed.add_field(
-                                                name="📸 Tip",
-                                                value="Send screenshots if helpful!",
+                                                name="📎 Helpful to Include",
+                                                value="Screenshots, videos, or error messages",
                                                 inline=True
                                             )
                                             escalate_embed.set_footer(text="Revolution Macro Support Team")
                                             await thread_channel.send(embed=escalate_embed)
-                                            print(f"⚠ User unsatisfied after AI - escalating thread {thread_id} to Human Support (bot stops)")
+                                            print(f"⚠ User unsatisfied after AI - escalating thread {thread_id} to Human Support (with log prompt)")
                                         
                                         # STEP 4: No response type tracked - default behavior
                                         else:
