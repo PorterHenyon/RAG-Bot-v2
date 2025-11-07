@@ -1,5 +1,4 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleGenAI } from '@google/genai';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Enable CORS
@@ -22,7 +21,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!apiKey) {
       console.error('GEMINI_API_KEY not set in Vercel environment variables');
       return res.status(500).json({ 
-        error: 'Failed to generate summary. Please check that GEMINI_API_KEY is set in Vercel environment variables and try again.' 
+        error: 'GEMINI_API_KEY is not set in Vercel environment variables. Please add it in Settings > Environment Variables.' 
       });
     }
 
@@ -32,31 +31,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Invalid conversation data' });
     }
 
-    // Initialize Gemini AI
-    const ai = new GoogleGenAI({ apiKey });
+    // Import dynamically to avoid issues
+    const { GoogleGenerativeAI } = await import('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
     // Format conversation
     const conversationText = conversation
       .map((m: any) => `${m.author}: ${m.content}`)
       .join('\n');
 
-    const prompt = `Summarize the following support conversation into a concise paragraph that explains the user's problem and the final solution. This will be used for a knowledge base article. \n\nConversation:\n${conversationText}`;
+    const prompt = `Summarize the following support conversation into a concise paragraph that explains the user's problem and the final solution. This will be used for a knowledge base article.\n\nConversation:\n${conversationText}`;
 
     // Generate summary
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: prompt,
-    });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const summary = response.text();
 
-    const summary = response.text || "There was an error generating the summary. Please try again.";
+    if (!summary) {
+      throw new Error('Empty response from AI');
+    }
 
     return res.status(200).json({ summary });
 
   } catch (error: any) {
     console.error('Error in summarize API:', error);
     return res.status(500).json({ 
-      error: 'Failed to generate summary',
-      details: error.message 
+      error: 'Failed to generate summary: ' + error.message,
+      stack: error.stack
     });
   }
 }
