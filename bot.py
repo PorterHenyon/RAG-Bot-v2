@@ -306,20 +306,25 @@ class SatisfactionButtons(discord.ui.View):
         # First, ask for logs to help support team
         log_prompt_embed = discord.Embed(
             title="📋 Before We Get Support...",
-            description="To help our team solve this faster, can you upload your **log files**?",
+            description="To help our team solve this **much faster**, please upload your **log files**!\n\nLogs contain error details that help us identify exactly what's wrong.",
             color=0xF39C12
         )
         log_prompt_embed.add_field(
-            name="📁 How to Find Logs",
-            value="1. Open Revolution Macro folder\n2. Look for `logs` or `output.log`\n3. Drag and drop the file here",
+            name="📁 Where to Find Your Logs",
+            value="**Option 1:** Open your **Revolution Macro folder** → Look for the **`logs`** folder or **`output.log`** file\n\n**Option 2:** Watch our quick video tutorial in <#1403731005138800682> showing exactly where to find them!",
             inline=False
         )
         log_prompt_embed.add_field(
-            name="⏭️ Skip This Step?",
-            value="No problem! Support will still help you.",
+            name="📤 How to Upload",
+            value="Just **drag and drop** the log file into this thread!",
             inline=False
         )
-        log_prompt_embed.set_footer(text="💡 Logs help us identify issues much faster!")
+        log_prompt_embed.add_field(
+            name="⏭️ Don't Have Logs?",
+            value="No problem! Support will still help you, but it may take longer to diagnose.",
+            inline=False
+        )
+        log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
         await thread.send(embed=log_prompt_embed)
         
         # Wait a moment, then send escalation message
@@ -2231,20 +2236,25 @@ async def on_message(message):
                                             # First, ask for logs to help support team
                                             log_prompt_embed = discord.Embed(
                                                 title="📋 Before We Get Support...",
-                                                description="To help our team solve this faster, can you upload your **log files**?",
+                                                description="To help our team solve this **much faster**, please upload your **log files**!\n\nLogs contain error details that help us identify exactly what's wrong.",
                                                 color=0xF39C12
                                             )
                                             log_prompt_embed.add_field(
-                                                name="📁 How to Find Logs",
-                                                value="1. Open Revolution Macro folder\n2. Look for `logs` or `output.log`\n3. Drag and drop the file here",
+                                                name="📁 Where to Find Your Logs",
+                                                value="**Option 1:** Open your **Revolution Macro folder** → Look for the **`logs`** folder or **`output.log`** file\n\n**Option 2:** Watch our quick video tutorial in <#1403731005138800682> showing exactly where to find them!",
                                                 inline=False
                                             )
                                             log_prompt_embed.add_field(
-                                                name="⏭️ Skip This Step?",
-                                                value="No problem! Support will still help you.",
+                                                name="📤 How to Upload",
+                                                value="Just **drag and drop** the log file into this thread!",
                                                 inline=False
                                             )
-                                            log_prompt_embed.set_footer(text="💡 Logs help us identify issues much faster!")
+                                            log_prompt_embed.add_field(
+                                                name="⏭️ Don't Have Logs?",
+                                                value="No problem! Support will still help you, but it may take longer to diagnose.",
+                                                inline=False
+                                            )
+                                            log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
                                             await thread_channel.send(embed=log_prompt_embed)
                                             
                                             # Wait a moment, then send escalation message
