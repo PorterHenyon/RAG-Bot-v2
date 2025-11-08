@@ -1412,6 +1412,18 @@ async def on_thread_create(thread):
     if thread.id in processed_threads:
         print(f"⚠ Thread {thread.id} already processed, skipping duplicate event")
         return
+    
+    # Double-check by looking for bot messages already in thread
+    try:
+        bot_messages = [msg async for msg in thread.history(limit=10) if msg.author == bot.user]
+        if bot_messages:
+            print(f"⚠ Thread {thread.id} already has {len(bot_messages)} bot message(s), skipping duplicate processing")
+            processed_threads.add(thread.id)
+            return
+    except Exception as check_error:
+        print(f"⚠ Could not check for existing bot messages: {check_error}")
+    
+    # Mark as processed IMMEDIATELY to prevent race conditions
     processed_threads.add(thread.id)
 
     # Safely get owner information
