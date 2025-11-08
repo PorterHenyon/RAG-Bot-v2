@@ -113,6 +113,8 @@ def track_api_call():
 satisfaction_timers = {}  # {thread_id: asyncio.Task}
 # Track processed threads to avoid duplicate processing
 processed_threads = set()  # {thread_id}
+# Track threads currently being processed (lock to prevent race conditions)
+processing_threads = set()  # {thread_id}
 # Track threads escalated to human support (bot stops responding)
 escalated_threads = set()  # {thread_id}
 # Track what type of response was given per thread (for satisfaction flow)
