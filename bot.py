@@ -1408,10 +1408,19 @@ async def on_thread_create(thread):
     
     print(f"✅ Processing forum post: '{thread.name}'")
     
-    # Check if we've already processed this thread (prevent duplicates)
+    # LOCK: Check if this thread is currently being processed RIGHT NOW
+    if thread.id in processing_threads:
+        print(f"🔒 Thread {thread.id} is ALREADY being processed, skipping duplicate")
+        return
+    
+    # Check if we've already fully processed this thread
     if thread.id in processed_threads:
         print(f"⚠ Thread {thread.id} already processed, skipping duplicate event")
         return
+    
+    # LOCK THIS THREAD IMMEDIATELY (before any async operations that could cause race condition)
+    processing_threads.add(thread.id)
+    print(f"🔒 Locked thread {thread.id} for processing")
     
     # Double-check by looking for bot messages already in thread
     try:
@@ -1419,11 +1428,12 @@ async def on_thread_create(thread):
         if bot_messages:
             print(f"⚠ Thread {thread.id} already has {len(bot_messages)} bot message(s), skipping duplicate processing")
             processed_threads.add(thread.id)
+            processing_threads.remove(thread.id)  # Release lock
             return
     except Exception as check_error:
         print(f"⚠ Could not check for existing bot messages: {check_error}")
     
-    # Mark as processed IMMEDIATELY to prevent race conditions
+    # Mark as processed to prevent future duplicates
     processed_threads.add(thread.id)
 
     # Safely get owner information
@@ -1869,6 +1879,11 @@ async def on_thread_create(thread):
                 print(f"ℹ️ No 'Unsolved' tag available in forum channel")
     except Exception as tag_error:
         print(f"⚠ Could not apply unsolved tag: {tag_error}")
+    finally:
+        # ALWAYS release the processing lock
+        if thread.id in processing_threads:
+            processing_threads.remove(thread.id)
+            print(f"🔓 Released lock for thread {thread.id}")
 
 @bot.event
 async def on_message(message):
