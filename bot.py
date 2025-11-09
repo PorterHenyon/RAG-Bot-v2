@@ -3101,9 +3101,12 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
             status_emoji = "✅" if enabled else "❌"
             status_text = "enabled" if enabled else "disabled"
             
+            enabled_msg = "✅ When users click \"Yes, this solved my issue\", the bot will automatically create a pending RAG entry for review."
+            disabled_msg = "❌ Solved threads will NOT automatically create RAG entries. You can still manually create them from the dashboard."
+            
             await interaction.followup.send(
                 f"{status_emoji} Auto-RAG creation is now **{status_text}**!\n\n"
-                f"{'✅ When users click "Yes, this solved my issue", the bot will automatically create a pending RAG entry for review.' if enabled else '❌ Solved threads will NOT automatically create RAG entries. You can still manually create them from the dashboard.'}\n\n"
+                f"{enabled_msg if enabled else disabled_msg}\n\n"
                 f"💡 This setting helps control how many pending RAG entries are created.",
                 ephemeral=False
             )
