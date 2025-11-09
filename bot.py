@@ -340,22 +340,20 @@ class SatisfactionButtons(discord.ui.View):
             color=0xF39C12
         )
         log_prompt_embed.add_field(
-            name="📁 Where to Find Your Logs",
-            value="**Option 1:** Open your **Revolution Macro folder** → Look for the **`logs`** folder or **`output.log`** file\n\n**Option 2:** Watch our quick video tutorial in <#1403731005138800682> showing exactly where to find them!",
+            name="📤 How to Get Your Logs",
+            value="Choose your operating system below to see a quick tutorial!",
             inline=False
         )
         log_prompt_embed.add_field(
-            name="📤 How to Upload",
+            name="📁 Then Upload",
             value="Just **drag and drop** the log file into this thread!",
             inline=False
         )
-        log_prompt_embed.add_field(
-            name="⏭️ Don't Have Logs?",
-            value="No problem! Support will still help you, but it may take longer to diagnose.",
-            inline=False
-        )
         log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
-        await thread.send(embed=log_prompt_embed)
+        
+        # Add interactive OS selector dropdown
+        os_selector = OSLogTutorialSelect()
+        await thread.send(embed=log_prompt_embed, view=os_selector)
         
         # Wait a moment, then send escalation message
         await asyncio.sleep(2)
@@ -380,6 +378,76 @@ class SatisfactionButtons(discord.ui.View):
         
         await update_forum_post_status(self.thread_id, 'Human Support')
         print(f"⚠ Thread {self.thread_id} escalated to Human Support (with log prompt)")
+
+
+class OSLogTutorialSelect(discord.ui.View):
+    """Interactive dropdown menu for selecting OS to get log tutorial"""
+    
+    def __init__(self):
+        super().__init__(timeout=None)  # Never expires
+    
+    @discord.ui.select(
+        placeholder="Choose your operating system...",
+        options=[
+            discord.SelectOption(
+                label="Windows",
+                description="Get the Windows log tutorial",
+                emoji="🪟",
+                value="windows"
+            ),
+            discord.SelectOption(
+                label="MacOS",
+                description="Get the MacOS log tutorial",
+                emoji="🍎",
+                value="macos"
+            )
+        ]
+    )
+    async def os_select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        """Handle OS selection"""
+        await interaction.response.defer()
+        
+        selected_os = select.values[0]
+        
+        if selected_os == "windows":
+            tutorial_embed = discord.Embed(
+                title="🪟 Windows - How to Get Logs",
+                description="Follow the tutorial in this channel:",
+                color=0x0078D4
+            )
+            tutorial_embed.add_field(
+                name="📺 Video Tutorial",
+                value="<#1421996630088880138>",
+                inline=False
+            )
+            tutorial_embed.add_field(
+                name="📁 Quick Guide",
+                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find **`output.log`** file\n4. Drag and drop it here!",
+                inline=False
+            )
+            tutorial_embed.set_footer(text="Windows Log Tutorial")
+            await interaction.followup.send(embed=tutorial_embed, ephemeral=False)
+        
+        elif selected_os == "macos":
+            tutorial_embed = discord.Embed(
+                title="🍎 MacOS - How to Get Logs",
+                description="Follow the tutorial in this channel:",
+                color=0x000000
+            )
+            tutorial_embed.add_field(
+                name="📺 Video Tutorial",
+                value="<#1421996787475939379>",
+                inline=False
+            )
+            tutorial_embed.add_field(
+                name="📁 Quick Guide",
+                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find **`output.log`** file\n4. Drag and drop it here!",
+                inline=False
+            )
+            tutorial_embed.set_footer(text="MacOS Log Tutorial")
+            await interaction.followup.send(embed=tutorial_embed, ephemeral=False)
+        
+        print(f"📋 User selected {selected_os} log tutorial")
 
 
 async def update_forum_post_status(thread_id, status):
@@ -2384,22 +2452,20 @@ async def on_message(message):
                                                 color=0xF39C12
                                             )
                                             log_prompt_embed.add_field(
-                                                name="📁 Where to Find Your Logs",
-                                                value="**Option 1:** Open your **Revolution Macro folder** → Look for the **`logs`** folder or **`output.log`** file\n\n**Option 2:** Watch our quick video tutorial in <#1403731005138800682> showing exactly where to find them!",
+                                                name="📤 How to Get Your Logs",
+                                                value="Choose your operating system below to see a quick tutorial!",
                                                 inline=False
                                             )
                                             log_prompt_embed.add_field(
-                                                name="📤 How to Upload",
+                                                name="📁 Then Upload",
                                                 value="Just **drag and drop** the log file into this thread!",
                                                 inline=False
                                             )
-                                            log_prompt_embed.add_field(
-                                                name="⏭️ Don't Have Logs?",
-                                                value="No problem! Support will still help you, but it may take longer to diagnose.",
-                                                inline=False
-                                            )
                                             log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
-                                            await thread_channel.send(embed=log_prompt_embed)
+                                            
+                                            # Add interactive OS selector dropdown
+                                            os_selector = OSLogTutorialSelect()
+                                            await thread_channel.send(embed=log_prompt_embed, view=os_selector)
                                             
                                             # Wait a moment, then send escalation message
                                             await asyncio.sleep(2)
