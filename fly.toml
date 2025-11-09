@@ -1,7 +1,14 @@
-app = 'rag-bot-v2'
-primary_region = 'iad'
+# fly.toml app configuration file
+app = 'rag-bot-v2-silent-grass-1075'
+primary_region = 'sjc'
 
 [build]
+  dockerfile = "Dockerfile"
 
 [processes]
-  bot = 'python -u bot.py'
+  bot = "python -u bot.py"
+
+[[vm]]
+  memory = '512mb'
+  cpu_kind = 'shared'
+  cpus = 1
