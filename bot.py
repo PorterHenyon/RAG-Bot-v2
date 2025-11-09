@@ -987,7 +987,7 @@ async def cleanup_old_solved_posts():
             return  # Skip if API not configured
         
         retention_days = BOT_SETTINGS.get('solved_post_retention_days', 30)
-        print(f"\n🧹 Cleaning up solved posts older than {retention_days} days...")
+        print(f"\n🧹 Cleaning up posts that have been Solved/Closed for more than {retention_days} days...")
         
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
@@ -1008,26 +1008,27 @@ async def cleanup_old_solved_posts():
                     if status not in ['Solved', 'Closed']:
                         continue
                     
-                    # Check post age
-                    created_at_str = post.get('createdAt')
-                    if not created_at_str:
+                    # Check post age - Use updatedAt (when it was solved) NOT createdAt
+                    # This prevents immediate deletion of old posts that were just solved
+                    updated_at_str = post.get('updatedAt') or post.get('createdAt')
+                    if not updated_at_str:
                         continue
                     
                     try:
                         # Parse ISO timestamp
-                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                        updated_at = datetime.fromisoformat(updated_at_str.replace('Z', '+00:00'))
                         # Remove timezone info for comparison
-                        if created_at.tzinfo:
-                            created_at = created_at.replace(tzinfo=None)
+                        if updated_at.tzinfo:
+                            updated_at = updated_at.replace(tzinfo=None)
                         
-                        age_days = (now - created_at).total_seconds() / 86400  # seconds to days
+                        age_days = (now - updated_at).total_seconds() / 86400  # seconds to days
                         
                         if age_days > retention_days:
-                            # Post is old enough to delete
+                            # Post has been solved/closed long enough to delete
                             post_id = post.get('id') or f"POST-{post.get('postId')}"
                             post_title = post.get('postTitle', 'Unknown')
                             
-                            print(f"🗑️ Deleting old post: '{post_title}' ({age_days:.1f} days old)")
+                            print(f"🗑️ Deleting post that was solved {age_days:.1f} days ago: '{post_title}'")
                             
                             # Delete from dashboard
                             delete_payload = {
