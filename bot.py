@@ -422,10 +422,10 @@ class OSLogTutorialSelect(discord.ui.View):
             )
             tutorial_embed.add_field(
                 name="📁 Quick Guide",
-                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find **`output.log`** file\n4. Drag and drop it here!",
+                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find the **most recent** `.log` file\n   *(Format: `2025-11-09-14-3045.log`)*\n4. Drag and drop it here!",
                 inline=False
             )
-            tutorial_embed.set_footer(text="Windows Log Tutorial")
+            tutorial_embed.set_footer(text="Windows Log Tutorial • Upload the most recent log file")
             await interaction.followup.send(embed=tutorial_embed, ephemeral=False)
         
         elif selected_os == "macos":
@@ -441,10 +441,10 @@ class OSLogTutorialSelect(discord.ui.View):
             )
             tutorial_embed.add_field(
                 name="📁 Quick Guide",
-                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find **`output.log`** file\n4. Drag and drop it here!",
+                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find the **most recent** `.log` file\n   *(Format: `2025-11-09-14-3045.log`)*\n4. Drag and drop it here!",
                 inline=False
             )
-            tutorial_embed.set_footer(text="MacOS Log Tutorial")
+            tutorial_embed.set_footer(text="MacOS Log Tutorial • Upload the most recent log file")
             await interaction.followup.send(embed=tutorial_embed, ephemeral=False)
         
         print(f"📋 User selected {selected_os} log tutorial")
