@@ -52,11 +52,11 @@ genai.configure(api_key=GEMINI_API_KEY)
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
-intents.message_content = True
+intents.message_content = True  # CRITICAL: Required for reading message content
 intents.guilds = True
 intents.members = True
-# Note: Thread intents are included in default() for discord.py >= 2.0
-# Thread detection works automatically with these intents
+# Note: Threads are included in default() intents for discord.py >= 2.0
+# Make sure MESSAGE CONTENT intent is enabled in Discord Developer Portal!
 bot = commands.Bot(command_prefix="!unused-prefix!", intents=intents)
 
 # --- Constants ---
