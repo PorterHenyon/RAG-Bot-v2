@@ -1,22 +1,18 @@
-# fly.toml app configuration file
-# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
-
 app = "rag-bot-v2"
 primary_region = "iad"
-kill_signal = "SIGINT"
-kill_timeout = "5s"
 
 [build]
-  dockerfile = "Dockerfile"
 
 [env]
-  # Add any non-secret environment variables here
 
-# Discord bot configuration - no HTTP service needed
-[[vm]]
-  size = "shared-cpu-1x"
-  memory = "256mb"
+[[services]]
+  internal_port = 8080
+  protocol = "tcp"
 
-[deploy]
-  strategy = "immediate"
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
 
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
