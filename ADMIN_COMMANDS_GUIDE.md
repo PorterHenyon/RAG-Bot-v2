@@ -19,6 +19,13 @@ All commands require **Administrator** permissions in Discord.
 | `/set_satisfaction_delay` | Set timer delay | ⚙️ Configuration |
 | `/set_temperature` | Set AI creativity | ⚙️ Configuration |
 | `/set_max_tokens` | Set response length | ⚙️ Configuration |
+| `/set_post_inactivity_time` | Set hours before escalation | 🚨 High Priority |
+| `/set_ping_high_priority_interval` | Set check interval | 🚨 High Priority |
+| `/set_support_role` | Set support role to ping | 🚨 High Priority |
+| `/set_support_notification_channel` | Set notification channel | 🚨 High Priority |
+| `/set_high_priority_channel_id` | Set notification channel by ID | 🚨 High Priority |
+| `/list_high_priority_posts` | List all high priority posts | 🚨 High Priority |
+| `/ping_high_priority_now` | Manually send high priority summary | 🚨 High Priority |
 
 ---
 
@@ -402,6 +409,202 @@ All configuration commands save to `bot_settings.json`:
 
 ---
 
+## 🚨 **High Priority Commands**
+
+### `/set_post_inactivity_time`
+**Purpose:** Set how long a post must be open before it's escalated to High Priority
+
+**Usage:**
+```
+/set_post_inactivity_time hours:24
+```
+
+**Parameters:**
+- `hours`: Number of hours (1-168)
+
+**Example:**
+```
+/set_post_inactivity_time hours:12
+✅ Post inactivity threshold updated to 12 hours!
+Posts older than 12 hours will be escalated to High Priority.
+```
+
+---
+
+### `/set_ping_high_priority_interval`
+**Purpose:** Set how often the bot checks for old posts that need escalation
+
+**Usage:**
+```
+/set_ping_high_priority_interval hours:0.5
+```
+
+**Parameters:**
+- `hours`: Check interval in hours (0.25-24)
+  - `0.25` = 15 minutes
+  - `0.5` = 30 minutes
+  - `1.0` = 1 hour
+  - `2.0` = 2 hours
+
+**Example:**
+```
+/set_ping_high_priority_interval hours:0.5
+✅ High priority check interval updated to 30 minutes!
+
+📊 Current Settings:
+• Check Interval: Every 30 minutes
+• Escalation Threshold: 12 hours of inactivity
+• Notification Channel: #high-priority-alerts
+
+💡 Tip: Shorter intervals mean faster response to old posts, but check your server load!
+```
+
+**Why This Matters:**
+- Lower values = Faster detection of old posts
+- Higher values = Less frequent checks (better for server performance)
+- Default is 1 hour (good balance for most servers)
+
+---
+
+### `/set_support_role`
+**Purpose:** Set which role gets pinged when posts are escalated to High Priority
+
+**Usage:**
+```
+/set_support_role role:@Support
+```
+
+**Parameters:**
+- `role`: The Discord role to mention
+
+**Example:**
+```
+/set_support_role role:@Support Team
+✅ Support role set to @Support Team!
+
+This role will be pinged in #high-priority-alerts
+whenever a post is escalated to High Priority.
+```
+
+---
+
+### `/set_support_notification_channel`
+**Purpose:** Set which channel receives high priority notifications
+
+**Usage:**
+```
+/set_support_notification_channel channel:#alerts
+```
+
+**Parameters:**
+- `channel`: The Discord channel for notifications
+
+**Example:**
+```
+/set_support_notification_channel channel:#high-priority-alerts
+✅ Support notification channel set to #high-priority-alerts!
+
+Current Support Role: @Support Team
+High priority posts will be announced in #high-priority-alerts.
+
+Use /set_support_role to configure which role gets pinged.
+```
+
+---
+
+### `/list_high_priority_posts`
+**Purpose:** List all posts currently marked as High Priority
+
+**Usage:**
+```
+/list_high_priority_posts
+```
+
+**Shows:**
+```
+🚨 High Priority Posts (3)
+These posts need immediate attention from the support team:
+
+1. Macro not working after update
+   User: JohnDoe#1234
+   [View Post](link)
+
+2. License activation failed
+   User: JaneSmith#5678
+   [View Post](link)
+
+3. Game crashes on startup
+   User: BobJones#9012
+   [View Post](link)
+```
+
+---
+
+### `/set_high_priority_channel_id`
+**Purpose:** Set the high priority notification channel using a channel ID
+
+**Usage:**
+```
+/set_high_priority_channel_id channel_id:1436918674069000212
+```
+
+**Parameters:**
+- `channel_id`: The Discord channel ID (as a number string)
+
+**Example:**
+```
+/set_high_priority_channel_id channel_id:1436918674069000212
+✅ Support notification channel set to #high-priority-alerts!
+
+Channel ID: 1436918674069000212
+Current Support Role: @Support Staff
+
+High priority posts will be announced in #high-priority-alerts.
+Use /set_support_role to configure which role gets pinged.
+```
+
+**Why Use This Instead of `/set_support_notification_channel`?**
+- Useful when you can't select the channel in the dropdown
+- Works for any channel the bot can access
+- Easier to copy/paste channel IDs
+
+---
+
+### `/ping_high_priority_now`
+**Purpose:** Manually send a summary of all high priority posts to the notification channel
+
+**Usage:**
+```
+/ping_high_priority_now
+```
+
+**What It Sends:**
+```
+@Support Staff
+
+High Priority Posts:
+
+1. [Macro not starting after update](https://discord.com/channels/.../thread1)
+2. [License key not working](https://discord.com/channels/.../thread2)
+3. [Game crashes on launch](https://discord.com/channels/.../thread3)
+```
+
+**When to Use:**
+- Check on high priority posts immediately (don't wait for auto-check)
+- Alert support team manually
+- After making configuration changes
+- For testing the notification system
+
+**Example:**
+```
+/ping_high_priority_now
+✅ High priority summary sent to #high-priority-alerts!
+
+Check the channel for the list of all current high priority posts.
+```
+
+---
+
 ## 🎯 **Recommended Settings**
 
 ### For Production:
@@ -429,16 +632,18 @@ All configuration commands save to `bot_settings.json`:
 
 ## ✅ **What's Been Added:**
 
-✅ **11 admin commands total**  
+✅ **16+ admin commands total**  
 ✅ **All require admin permissions**  
 ✅ **Settings persist in bot_settings.json**  
 ✅ **No code editing needed**  
 ✅ **Perfect for testing and tuning**  
 ✅ **All commands in dashboard documentation**  
+✅ **High priority notification system**  
+✅ **Configurable check intervals**  
 
 ---
 
-**Everything is pushed to GitHub and ready to test!** 🎉
+**Everything is ready to use!** 🎉
 
-Just restart the bot and type `/` in Discord to see all 11 commands!
+Just restart the bot and type `/` in Discord to see all commands!
 

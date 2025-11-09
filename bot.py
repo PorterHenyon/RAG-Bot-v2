@@ -77,10 +77,13 @@ BOT_SETTINGS = {
     'ai_max_tokens': 2048,  # Max tokens for AI responses
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
     'post_inactivity_hours': 12,  # Hours before escalating old posts to High Priority
+    'high_priority_check_interval_hours': 1.0,  # Hours between high priority checks (0.25 = 15 min, 1.0 = 1 hour)
     'solved_post_retention_days': 30,  # Days to keep solved/closed posts before deletion
     'unsolved_tag_id': None,  # Discord tag ID for "Unsolved" posts
     'resolved_tag_id': None,  # Discord tag ID for "Resolved" posts
     'auto_rag_enabled': True,  # Auto-create RAG entries from solved threads
+    'support_notification_channel_id': 1436918674069000212,  # Channel ID for high priority notifications
+    'support_role_id': None,  # Support role ID to ping (optional)
     'last_updated': datetime.now().isoformat()
 }
 
@@ -1054,7 +1057,66 @@ async def cleanup_old_solved_posts():
         import traceback
         traceback.print_exc()
 
-@tasks.loop(hours=1)  # Run every hour
+async def notify_support_channel_summary():
+    """Send a summary of all high priority posts to the support channel"""
+    try:
+        support_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
+        if not support_channel_id:
+            print("⚠ Support notification channel not configured")
+            return
+        
+        support_channel = bot.get_channel(support_channel_id)
+        if not support_channel:
+            print(f"⚠ Support notification channel {support_channel_id} not found")
+            return
+        
+        # Fetch all high priority posts from API
+        if 'your-vercel-app' in DATA_API_URL:
+            return
+        
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        
+        async with aiohttp.ClientSession() as session:
+            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+            async with session.get(forum_api_url, headers=headers) as response:
+                if response.status != 200:
+                    print(f"⚠ Failed to fetch posts for notification: {response.status}")
+                    return
+                
+                all_posts = await response.json()
+                
+                # Filter for high priority posts
+                high_priority_posts = [p for p in all_posts if p.get('status') == 'High Priority']
+                
+                if not high_priority_posts:
+                    print("✓ No high priority posts to notify about")
+                    return
+                
+                # Build the message content
+                support_role_id = BOT_SETTINGS.get('support_role_id')
+                message_content = f"<@&{support_role_id}>\n\n" if support_role_id else ""
+                message_content += "**High Priority Posts:**\n\n"
+                
+                # Add each post as a numbered list item
+                for i, post in enumerate(high_priority_posts[:10], 1):  # Limit to 10
+                    thread_id = post.get('postId')
+                    post_title = post.get('postTitle', 'Unknown Post')
+                    post_url = f"https://discord.com/channels/{DISCORD_GUILD_ID}/{thread_id}"
+                    message_content += f"{i}. [{post_title}]({post_url})\n"
+                
+                if len(high_priority_posts) > 10:
+                    message_content += f"\n*... and {len(high_priority_posts) - 10} more*"
+                
+                # Send the message
+                await support_channel.send(message_content)
+                print(f"✅ Sent high priority summary to support channel ({len(high_priority_posts)} posts)")
+    
+    except Exception as e:
+        print(f"❌ Error sending support notification summary: {e}")
+        import traceback
+        traceback.print_exc()
+
+@tasks.loop(hours=1)  # Default interval, can be changed dynamically
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
     try:
@@ -1062,7 +1124,8 @@ async def check_old_posts():
             return  # Skip if API not configured
         
         inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
-        print(f"\n🔍 Checking for old unsolved posts (>{inactivity_threshold} hours)...")
+        interval_hours = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
+        print(f"\n🔍 Checking for old unsolved posts (>{inactivity_threshold} hours, checking every {interval_hours}h)...")
         
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
@@ -1146,6 +1209,8 @@ async def check_old_posts():
                 
                 if escalated_count > 0:
                     print(f"✅ Escalated {escalated_count} old post(s) to High Priority")
+                    # Send summary of all high priority posts to support channel
+                    await notify_support_channel_summary()
                 else:
                     print(f"✓ No old posts found needing escalation")
     
@@ -2852,6 +2917,147 @@ async def set_post_inactivity_time(interaction: discord.Interaction, hours: int)
         print(f"Error in set_post_inactivity_time: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="set_ping_high_priority_interval", description="Set how often to check for high priority posts in hours (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_ping_high_priority_interval(interaction: discord.Interaction, hours: float):
+    """Set the interval for checking old posts that need escalation"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        if hours < 0.25 or hours > 24:  # 15 minutes to 24 hours
+            await interaction.followup.send("❌ Interval must be between 0.25 (15 min) and 24 hours.", ephemeral=False)
+            return
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['high_priority_check_interval_hours'] = hours
+        
+        if save_bot_settings():
+            # Update the background task interval
+            check_old_posts.change_interval(hours=hours)
+            
+            # Convert to readable format
+            if hours < 1:
+                minutes = int(hours * 60)
+                time_str = f"{minutes} minutes"
+            else:
+                time_str = f"{hours} hour{'s' if hours != 1 else ''}"
+            
+            inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
+            await interaction.followup.send(
+                f"✅ High priority check interval updated to **{time_str}**!\n\n"
+                f"📊 **Current Settings:**\n"
+                f"• Check Interval: Every {time_str}\n"
+                f"• Escalation Threshold: {inactivity_threshold} hours of inactivity\n"
+                f"• Notification Channel: <#{BOT_SETTINGS.get('support_notification_channel_id')}>\n\n"
+                f"💡 **Tip**: Shorter intervals mean faster response to old posts, but check your server load!",
+                ephemeral=False
+            )
+            print(f"✓ High priority check interval updated to {hours} hours ({time_str}) by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_ping_high_priority_interval: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_support_role", description="Set the role to ping for high priority posts (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_support_role(interaction: discord.Interaction, role: discord.Role):
+    """Set the support role to ping for high priority posts"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        global BOT_SETTINGS
+        BOT_SETTINGS['support_role_id'] = role.id
+        
+        if save_bot_settings():
+            await interaction.followup.send(
+                f"✅ Support role set to {role.mention}!\n\n"
+                f"This role will be pinged in <#{BOT_SETTINGS.get('support_notification_channel_id')}> "
+                f"whenever a post is escalated to **High Priority**.",
+                ephemeral=False
+            )
+            print(f"✓ Support role set to {role.name} (ID: {role.id}) by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_support_role: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_support_notification_channel", description="Set channel for high priority notifications (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_support_notification_channel(interaction: discord.Interaction, channel: discord.TextChannel):
+    """Set the channel for high priority post notifications"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        global BOT_SETTINGS
+        BOT_SETTINGS['support_notification_channel_id'] = channel.id
+        
+        if save_bot_settings():
+            role_mention = f"<@&{BOT_SETTINGS.get('support_role_id')}>" if BOT_SETTINGS.get('support_role_id') else "No role set"
+            await interaction.followup.send(
+                f"✅ Support notification channel set to {channel.mention}!\n\n"
+                f"**Current Support Role:** {role_mention}\n"
+                f"High priority posts will be announced in {channel.mention}.\n\n"
+                f"Use `/set_support_role` to configure which role gets pinged.",
+                ephemeral=False
+            )
+            print(f"✓ Support notification channel set to #{channel.name} (ID: {channel.id}) by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_support_notification_channel: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_high_priority_channel_id", description="Set high priority notification channel by ID (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def set_high_priority_channel_id(interaction: discord.Interaction, channel_id: str):
+    """Set the high priority notification channel by ID"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Validate channel ID
+        try:
+            new_channel_id = int(channel_id)
+        except ValueError:
+            await interaction.followup.send("❌ Invalid channel ID. Must be a number.", ephemeral=False)
+            return
+        
+        # Try to get the channel
+        channel = bot.get_channel(new_channel_id)
+        
+        global BOT_SETTINGS
+        BOT_SETTINGS['support_notification_channel_id'] = new_channel_id
+        
+        if save_bot_settings():
+            if channel:
+                role_mention = f"<@&{BOT_SETTINGS.get('support_role_id')}>" if BOT_SETTINGS.get('support_role_id') else "No role set"
+                await interaction.followup.send(
+                    f"✅ Support notification channel set to {channel.mention}!\n\n"
+                    f"**Channel ID:** {new_channel_id}\n"
+                    f"**Current Support Role:** {role_mention}\n\n"
+                    f"High priority posts will be announced in {channel.mention}.\n"
+                    f"Use `/set_support_role` to configure which role gets pinged.",
+                    ephemeral=False
+                )
+                print(f"✓ Support notification channel set to #{channel.name} (ID: {new_channel_id}) by {interaction.user}")
+            else:
+                await interaction.followup.send(
+                    f"⚠️ Channel ID {new_channel_id} set, but channel not found.\n\n"
+                    f"Make sure:\n"
+                    f"1. The ID is correct\n"
+                    f"2. Bot has access to this channel\n"
+                    f"3. Bot is in the same server\n\n"
+                    f"The setting has been saved and will work once the channel is accessible.",
+                    ephemeral=False
+                )
+                print(f"⚠️ Support notification channel ID set to {new_channel_id} (channel not found) by {interaction.user}")
+        else:
+            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+    except Exception as e:
+        print(f"Error in set_high_priority_channel_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="set_solved_post_retention", description="Set days to keep solved posts before auto-deletion (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def set_solved_post_retention(interaction: discord.Interaction, days: int):
@@ -2906,6 +3112,96 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
             await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
     except Exception as e:
         print(f"Error in toggle_auto_rag: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="list_high_priority_posts", description="List all current high priority posts (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def list_high_priority_posts(interaction: discord.Interaction):
+    """List all posts currently marked as High Priority"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        forum_api_url = DATA_API_URL.replace('/data', '/forum-posts')
+        
+        async with aiohttp.ClientSession() as session:
+            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+            async with session.get(forum_api_url, headers=headers) as response:
+                if response.status != 200:
+                    await interaction.followup.send("❌ Failed to fetch posts from API.", ephemeral=False)
+                    return
+                
+                all_posts = await response.json()
+                
+                # Filter for high priority posts
+                high_priority_posts = [p for p in all_posts if p.get('status') == 'High Priority']
+                
+                if not high_priority_posts:
+                    await interaction.followup.send(
+                        "✅ No high priority posts at the moment!\n\n"
+                        "All support requests are being handled normally.",
+                        ephemeral=False
+                    )
+                    return
+                
+                # Build embed with list of high priority posts
+                embed = discord.Embed(
+                    title=f"🚨 High Priority Posts ({len(high_priority_posts)})",
+                    description="These posts need immediate attention from the support team:",
+                    color=0xE74C3C
+                )
+                
+                for i, post in enumerate(high_priority_posts[:10], 1):  # Limit to 10 posts
+                    thread_id = post.get('postId')
+                    post_title = post.get('postTitle', 'Unknown')
+                    user_name = post.get('user', {}).get('username', 'Unknown')
+                    
+                    embed.add_field(
+                        name=f"{i}. {post_title}",
+                        value=f"**User:** {user_name}\n[View Post](https://discord.com/channels/{DISCORD_GUILD_ID}/{thread_id})",
+                        inline=False
+                    )
+                
+                if len(high_priority_posts) > 10:
+                    embed.set_footer(text=f"Showing 10 of {len(high_priority_posts)} high priority posts")
+                else:
+                    embed.set_footer(text=f"Support Notification Channel: #{bot.get_channel(BOT_SETTINGS.get('support_notification_channel_id')).name if bot.get_channel(BOT_SETTINGS.get('support_notification_channel_id')) else 'Not set'}")
+                
+                await interaction.followup.send(embed=embed, ephemeral=False)
+                
+    except Exception as e:
+        print(f"Error in list_high_priority_posts: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="ping_high_priority_now", description="Manually send high priority summary to notification channel (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def ping_high_priority_now(interaction: discord.Interaction):
+    """Manually trigger a high priority posts summary notification"""
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Send the summary
+        await notify_support_channel_summary()
+        
+        support_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
+        support_channel = bot.get_channel(support_channel_id)
+        
+        if support_channel:
+            await interaction.followup.send(
+                f"✅ High priority summary sent to {support_channel.mention}!\n\n"
+                f"Check the channel for the list of all current high priority posts.",
+                ephemeral=False
+            )
+        else:
+            await interaction.followup.send(
+                "✅ Attempted to send high priority summary!\n\n"
+                "Check bot logs for any issues.",
+                ephemeral=False
+            )
+        
+        print(f"✓ Manual high priority ping triggered by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in ping_high_priority_now: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="toggle_satisfaction_analysis", description="Enable/disable automatic satisfaction analysis (saves Gemini API calls!) (Admin only).")

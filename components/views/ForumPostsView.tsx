@@ -47,7 +47,14 @@ const ForumPostsView: React.FC = () => {
         post.user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
         post.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
         post.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
-      );
+      )
+      .sort((a, b) => {
+        // High priority posts always come first
+        if (a.status === PostStatus.HighPriority && b.status !== PostStatus.HighPriority) return -1;
+        if (a.status !== PostStatus.HighPriority && b.status === PostStatus.HighPriority) return 1;
+        // Otherwise, sort by creation date (newest first)
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
   }, [forumPosts, filter, searchTerm]);
 
   const handleCloseModal = () => {
