@@ -1,0 +1,21 @@
+# Ignore frontend/dashboard files
+node_modules/
+dist/
+*.md
+.git/
+.github/
+__pycache__/
+*.pyc
+venv/
+.env
+.vscode/
+.cursor/
+
+# Ignore everything except bot files
+!bot.py
+!requirements.txt
+!bot_settings.json
+
+# Keep documentation we need
+!README.md
+
