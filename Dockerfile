@@ -12,13 +12,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the bot code
 COPY bot.py .
-COPY bot_settings.json .
 
-# Create localrag directory
+# Create localrag directory (bot will populate it)
 RUN mkdir -p localrag
-
-# Copy localrag files if they exist
-COPY localrag/ ./localrag/ 2>/dev/null || true
 
 # Run the bot
 CMD ["python", "-u", "bot.py"]
