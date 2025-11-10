@@ -13,8 +13,8 @@ COPY bot_settings.json* ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Create directory for local RAG storage
-RUN mkdir -p localrag
+# Create directories for local RAG storage and backups
+RUN mkdir -p localrag backups
 
 # Run the bot
 CMD ["python", "-u", "bot.py"]

@@ -1185,6 +1185,73 @@ async def notify_support_channel_summary():
         import traceback
         traceback.print_exc()
 
+@tasks.loop(hours=24)  # Run daily backup
+async def auto_backup_data():
+    """Background task to automatically backup RAG entries and auto-responses"""
+    try:
+        if 'your-vercel-app' in DATA_API_URL:
+            return  # Skip if API not configured
+        
+        print(f"\n💾 Starting automatic data backup...")
+        
+        # Create backups directory if it doesn't exist
+        backup_dir = Path("backups")
+        backup_dir.mkdir(exist_ok=True)
+        
+        # Fetch current data from API
+        async with aiohttp.ClientSession() as session:
+            async with session.get(DATA_API_URL) as response:
+                if response.status != 200:
+                    print(f"⚠ Failed to fetch data for backup: {response.status}")
+                    return
+                
+                data = await response.json()
+                
+                # Create timestamped backup filename
+                timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M%S")
+                backup_filename = f"backup-{timestamp}.json"
+                backup_path = backup_dir / backup_filename
+                
+                # Prepare backup data
+                backup_data = {
+                    'timestamp': datetime.now().isoformat(),
+                    'ragEntries': data.get('ragEntries', []),
+                    'autoResponses': data.get('autoResponses', []),
+                    'slashCommands': data.get('slashCommands', []),
+                    'pendingRagEntries': data.get('pendingRagEntries', []),
+                    'botSettings': BOT_SETTINGS,
+                    'stats': {
+                        'total_rag_entries': len(data.get('ragEntries', [])),
+                        'total_auto_responses': len(data.get('autoResponses', [])),
+                        'total_pending': len(data.get('pendingRagEntries', []))
+                    }
+                }
+                
+                # Save to file
+                with open(backup_path, 'w', encoding='utf-8') as f:
+                    json.dump(backup_data, f, indent=2, ensure_ascii=False)
+                
+                print(f"✅ Backup created: {backup_filename}")
+                print(f"   📊 RAG Entries: {backup_data['stats']['total_rag_entries']}")
+                print(f"   ⚡ Auto Responses: {backup_data['stats']['total_auto_responses']}")
+                print(f"   📋 Pending: {backup_data['stats']['total_pending']}")
+                
+                # Clean up old backups (keep last 30 days)
+                cutoff_date = datetime.now().timestamp() - (30 * 24 * 60 * 60)
+                deleted_count = 0
+                for old_backup in backup_dir.glob("backup-*.json"):
+                    if old_backup.stat().st_mtime < cutoff_date:
+                        old_backup.unlink()
+                        deleted_count += 1
+                
+                if deleted_count > 0:
+                    print(f"🗑️ Cleaned up {deleted_count} old backup(s)")
+    
+    except Exception as e:
+        print(f"❌ Error in auto_backup_data task: {e}")
+        import traceback
+        traceback.print_exc()
+
 @tasks.loop(hours=1)  # Default interval, can be changed dynamically
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
@@ -1322,6 +1389,11 @@ async def on_ready():
     if not cleanup_old_solved_posts.is_running():
         cleanup_old_solved_posts.start()
         print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
+    
+    # Start auto-backup task
+    if not auto_backup_data.is_running():
+        auto_backup_data.start()
+        print("✓ Started background task: auto_backup_data (runs daily)")
     
     try:
         # DON'T clear commands on every startup - this causes CommandNotFound errors
@@ -3520,6 +3592,103 @@ async def check_auto_entries(interaction: discord.Interaction):
     except Exception as e:
         print(f"Error in check_auto_entries: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
+
+@bot.tree.command(name="export_data", description="Download backup of all RAG entries and auto-responses (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def export_data(interaction: discord.Interaction):
+    """Export all data as downloadable JSON file"""
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        print(f"📥 Export data requested by {interaction.user}")
+        
+        # Fetch current data from API
+        if 'your-vercel-app' in DATA_API_URL:
+            await interaction.followup.send("⚠️ API not configured. Cannot export data.", ephemeral=True)
+            return
+        
+        async with aiohttp.ClientSession() as session:
+            async with session.get(DATA_API_URL) as response:
+                if response.status != 200:
+                    await interaction.followup.send(f"❌ Failed to fetch data: Status {response.status}", ephemeral=True)
+                    return
+                
+                data = await response.json()
+                
+                # Create export data
+                export_data = {
+                    'export_info': {
+                        'timestamp': datetime.now().isoformat(),
+                        'exported_by': str(interaction.user),
+                        'bot_version': 'RAG-Bot-v2'
+                    },
+                    'ragEntries': data.get('ragEntries', []),
+                    'autoResponses': data.get('autoResponses', []),
+                    'slashCommands': data.get('slashCommands', []),
+                    'pendingRagEntries': data.get('pendingRagEntries', []),
+                    'botSettings': BOT_SETTINGS,
+                    'statistics': {
+                        'total_rag_entries': len(data.get('ragEntries', [])),
+                        'total_auto_responses': len(data.get('autoResponses', [])),
+                        'total_slash_commands': len(data.get('slashCommands', [])),
+                        'total_pending': len(data.get('pendingRagEntries', []))
+                    }
+                }
+                
+                # Create filename with timestamp
+                timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M%S")
+                filename = f"revolution-macro-export-{timestamp}.json"
+                
+                # Save to temporary file
+                temp_path = Path(filename)
+                with open(temp_path, 'w', encoding='utf-8') as f:
+                    json.dump(export_data, f, indent=2, ensure_ascii=False)
+                
+                # Create embed with export info
+                export_embed = discord.Embed(
+                    title="📦 Data Export Ready",
+                    description="Your complete data backup is ready to download!",
+                    color=0x2ECC71
+                )
+                export_embed.add_field(
+                    name="📊 Export Contents",
+                    value=f"**RAG Entries:** {export_data['statistics']['total_rag_entries']}\n"
+                          f"**Auto-Responses:** {export_data['statistics']['total_auto_responses']}\n"
+                          f"**Pending Entries:** {export_data['statistics']['total_pending']}\n"
+                          f"**Slash Commands:** {export_data['statistics']['total_slash_commands']}",
+                    inline=False
+                )
+                export_embed.add_field(
+                    name="📅 Export Time",
+                    value=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    inline=True
+                )
+                export_embed.add_field(
+                    name="📁 Filename",
+                    value=f"`{filename}`",
+                    inline=True
+                )
+                export_embed.set_footer(text="💡 Keep this file safe! It contains your entire knowledge base.")
+                
+                # Send file as attachment
+                with open(temp_path, 'rb') as f:
+                    file = discord.File(f, filename=filename)
+                    await interaction.followup.send(
+                        embed=export_embed,
+                        file=file,
+                        ephemeral=True
+                    )
+                
+                # Clean up temp file
+                temp_path.unlink()
+                
+                print(f"✅ Data exported successfully for {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in export_data: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error exporting data: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 @app_commands.default_permissions(administrator=True)
