@@ -483,37 +483,59 @@ async def update_forum_post_status(thread_id, status):
 
 # --- BOT SETTINGS FUNCTIONS ---
 def load_bot_settings():
-    """Load bot settings from local file"""
-    global BOT_SETTINGS, SUPPORT_FORUM_CHANNEL_ID
+    """Load bot settings from API (called during data sync)"""
+    # This is now handled in fetch_data_from_api()
+    # Settings are loaded from API's botSettings field
+    # Keeping this function for backwards compatibility
+    print(f"ℹ️ Bot settings loaded from API during sync")
+    return True
+
+async def save_bot_settings_to_api():
+    """Save bot settings to API (persists across deployments)"""
     try:
-        if BOT_SETTINGS_FILE.exists():
-            with open(BOT_SETTINGS_FILE, 'r') as f:
-                loaded_settings = json.load(f)
-                BOT_SETTINGS.update(loaded_settings)
-                # Update the forum channel ID if it's in settings
-                if 'support_forum_channel_id' in loaded_settings:
-                    SUPPORT_FORUM_CHANNEL_ID = int(loaded_settings['support_forum_channel_id'])
-                    print(f"✓ Loaded forum channel ID from settings: {SUPPORT_FORUM_CHANNEL_ID}")
-                print(f"✓ Loaded bot settings: satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
-                      f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
-                      f"max_tokens={BOT_SETTINGS.get('ai_max_tokens', 2048)}, "
-                      f"post_inactivity_hours={BOT_SETTINGS.get('post_inactivity_hours', 12)}h, "
-                      f"solved_post_retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d")
-                return True
+        if 'your-vercel-app' in DATA_API_URL:
+            print("⚠ API not configured, cannot save settings")
+            return False
+        
+        BOT_SETTINGS['last_updated'] = datetime.now().isoformat()
+        
+        # Fetch current data from API
+        async with aiohttp.ClientSession() as session:
+            async with session.get(DATA_API_URL) as get_response:
+                if get_response.status != 200:
+                    print(f"⚠ Failed to fetch current data: {get_response.status}")
+                    return False
+                
+                current_data = await get_response.json()
+                
+                # Update botSettings in the data
+                current_data['botSettings'] = BOT_SETTINGS
+                
+                # Save back to API
+                headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                async with session.post(DATA_API_URL, json=current_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
+                    if save_response.status == 200:
+                        print(f"✅ Saved bot settings to API (persisted)")
+                        return True
+                    else:
+                        print(f"⚠ Failed to save settings to API: {save_response.status}")
+                        return False
     except Exception as e:
-        print(f"⚠ Error loading bot settings: {e}")
-    return False
+        print(f"⚠ Error saving bot settings to API: {e}")
+        return False
 
 def save_bot_settings():
-    """Save bot settings to local file"""
+    """Wrapper for backwards compatibility - schedules async save"""
+    # Create a task to save settings asynchronously
     try:
-        BOT_SETTINGS['last_updated'] = datetime.now().isoformat()
-        with open(BOT_SETTINGS_FILE, 'w') as f:
-            json.dump(BOT_SETTINGS, f, indent=2)
-        print(f"✓ Saved bot settings to {BOT_SETTINGS_FILE}")
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(save_bot_settings_to_api())
+        else:
+            loop.run_until_complete(save_bot_settings_to_api())
         return True
     except Exception as e:
-        print(f"⚠ Error saving bot settings: {e}")
+        print(f"⚠ Error scheduling settings save: {e}")
         return False
 
 # --- DATA SYNC FUNCTIONS ---
@@ -553,6 +575,17 @@ async def fetch_data_from_api():
                     if new_settings and 'systemPrompt' in new_settings:
                         SYSTEM_PROMPT_TEXT = new_settings['systemPrompt']
                         print(f"✓ Loaded custom system prompt from API ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                    
+                    # Load bot settings from API (persists across deployments!)
+                    if new_settings:
+                        # Merge API settings with defaults, API takes priority
+                        settings_to_merge = {k: v for k, v in new_settings.items() if k != 'systemPrompt'}
+                        if settings_to_merge:
+                            BOT_SETTINGS.update(settings_to_merge)
+                            print(f"✓ Loaded bot settings from API (persisted across deployments)")
+                            print(f"   satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
+                                  f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
+                                  f"retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d")
                     
                     # Log changes for visibility
                     print(f"✓ Successfully connected to dashboard API!")
@@ -1360,8 +1393,8 @@ async def on_ready():
     print(f'Logged in as {bot.user.name} (ID: {bot.user.id})')
     print('-------------------')
     
-    # Load bot settings from file
-    load_bot_settings()
+    # Bot settings are now loaded from API during fetch_data_from_api()
+    # This ensures settings persist across deployments!
     
     print(f'📡 API Configuration:')
     if 'your-vercel-app' in DATA_API_URL:
