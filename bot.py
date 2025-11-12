@@ -2913,15 +2913,15 @@ async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
         # Save to API (persists across deployments)
         if await save_bot_settings_to_api():
             await interaction.followup.send(
-                f"✅ Resolved tag ID set to **{tag_id}**!\n\n"
-                f"Solved posts will automatically be tagged as 'Resolved'.",
+                f"✅ Solved tag ID set to **{tag_id}**!\n\n"
+                f"Posts marked as Solved will automatically get this tag applied.",
                 ephemeral=False
             )
-            print(f"✓ Set resolved tag ID to {tag_id} by {interaction.user}")
+            print(f"✓ Solved tag ID set to {tag_id} by {interaction.user}")
         else:
             await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
     except Exception as e:
-        print(f"Error in set_resolved_tag_id: {e}")
+        print(f"Error in set_solved_tag_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
