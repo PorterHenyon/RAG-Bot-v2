@@ -513,6 +513,10 @@ async def save_bot_settings_to_api():
                 # Update botSettings in the data
                 current_data['botSettings'] = BOT_SETTINGS
                 
+                # Debug: Show what we're saving
+                print(f"🔍 DEBUG: Saving botSettings to API")
+                print(f"🔍 DEBUG: support_notification_channel_id = {BOT_SETTINGS.get('support_notification_channel_id')}")
+                
                 # Save back to API
                 headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
                 async with session.post(DATA_API_URL, json=current_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
@@ -562,6 +566,12 @@ async def fetch_data_from_api():
                     new_auto = data.get('autoResponses', [])
                     new_settings = data.get('botSettings', {})
                     
+                    # Debug: Show what settings we got from API
+                    if new_settings:
+                        print(f"🔍 DEBUG: Received botSettings from API with keys: {list(new_settings.keys())}")
+                        if 'support_notification_channel_id' in new_settings:
+                            print(f"🔍 DEBUG: support_notification_channel_id = {new_settings['support_notification_channel_id']}")
+                    
                     # Check if data actually changed (count or content) - BEFORE updating
                     old_rag_count = len(RAG_DATABASE)
                     old_auto_count = len(AUTO_RESPONSES)
@@ -587,7 +597,8 @@ async def fetch_data_from_api():
                             print(f"✓ Loaded bot settings from API (persisted across deployments)")
                             print(f"   satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
                                   f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
-                                  f"retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d")
+                                  f"retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d, "
+                                  f"notification_channel={BOT_SETTINGS.get('support_notification_channel_id', 'Not set')}")
                     
                     # Log changes for visibility
                     print(f"✓ Successfully connected to dashboard API!")
