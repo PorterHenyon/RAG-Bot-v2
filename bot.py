@@ -510,12 +510,18 @@ async def save_bot_settings_to_api():
                 
                 current_data = await get_response.json()
                 
-                # Update botSettings in the data
-                current_data['botSettings'] = BOT_SETTINGS
+                # Update botSettings in the data - include system prompt if we have it
+                full_bot_settings = BOT_SETTINGS.copy()
+                if SYSTEM_PROMPT_TEXT:
+                    full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
+                    print(f"🔍 DEBUG: Including custom system prompt ({len(SYSTEM_PROMPT_TEXT)} chars)")
+                
+                current_data['botSettings'] = full_bot_settings
                 
                 # Debug: Show what we're saving
                 print(f"🔍 DEBUG: Saving botSettings to API")
                 print(f"🔍 DEBUG: support_notification_channel_id = {BOT_SETTINGS.get('support_notification_channel_id')}")
+                print(f"🔍 DEBUG: systemPrompt included = {bool(full_bot_settings.get('systemPrompt'))}")
                 
                 # Save back to API
                 headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
@@ -1268,18 +1274,23 @@ async def auto_backup_data():
                 backup_filename = f"backup-{timestamp}.json"
                 backup_path = backup_dir / backup_filename
                 
-                # Prepare backup data
+                # Prepare backup data with FULL bot settings including system prompt
+                full_bot_settings = BOT_SETTINGS.copy()
+                if SYSTEM_PROMPT_TEXT:
+                    full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
+                
                 backup_data = {
                     'timestamp': datetime.now().isoformat(),
                     'ragEntries': data.get('ragEntries', []),
                     'autoResponses': data.get('autoResponses', []),
                     'slashCommands': data.get('slashCommands', []),
                     'pendingRagEntries': data.get('pendingRagEntries', []),
-                    'botSettings': BOT_SETTINGS,
+                    'botSettings': full_bot_settings,
                     'stats': {
                         'total_rag_entries': len(data.get('ragEntries', [])),
                         'total_auto_responses': len(data.get('autoResponses', [])),
-                        'total_pending': len(data.get('pendingRagEntries', []))
+                        'total_pending': len(data.get('pendingRagEntries', [])),
+                        'has_custom_prompt': bool(SYSTEM_PROMPT_TEXT)
                     }
                 }
                 
@@ -3733,7 +3744,11 @@ async def export_data(interaction: discord.Interaction):
                 
                 data = await response.json()
                 
-                # Create export data
+                # Create export data with FULL bot settings including system prompt
+                full_bot_settings = BOT_SETTINGS.copy()
+                if SYSTEM_PROMPT_TEXT:
+                    full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
+                
                 export_data = {
                     'export_info': {
                         'timestamp': datetime.now().isoformat(),
@@ -3744,12 +3759,13 @@ async def export_data(interaction: discord.Interaction):
                     'autoResponses': data.get('autoResponses', []),
                     'slashCommands': data.get('slashCommands', []),
                     'pendingRagEntries': data.get('pendingRagEntries', []),
-                    'botSettings': BOT_SETTINGS,
+                    'botSettings': full_bot_settings,
                     'statistics': {
                         'total_rag_entries': len(data.get('ragEntries', [])),
                         'total_auto_responses': len(data.get('autoResponses', [])),
                         'total_slash_commands': len(data.get('slashCommands', [])),
-                        'total_pending': len(data.get('pendingRagEntries', []))
+                        'total_pending': len(data.get('pendingRagEntries', [])),
+                        'has_custom_prompt': bool(SYSTEM_PROMPT_TEXT)
                     }
                 }
                 
