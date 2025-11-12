@@ -1,0 +1,52 @@
+{
+  "timestamp": "2025-11-12T18:30:45",
+  "ragEntries": [
+    {
+      "id": "RAG-001",
+      "title": "Example RAG Entry",
+      "content": "Example content...",
+      "keywords": ["example", "test"]
+    }
+  ],
+  "autoResponses": [
+    {
+      "id": "AR-001",
+      "name": "Example Auto Response",
+      "triggerKeywords": ["example"],
+      "responseText": "Example response..."
+    }
+  ],
+  "slashCommands": [
+    {
+      "id": "CMD-001",
+      "name": "example",
+      "description": "Example command"
+    }
+  ],
+  "pendingRagEntries": [],
+  "botSettings": {
+    "systemPrompt": "Your custom system prompt text here...",
+    "support_forum_channel_id": "1435455947551150171",
+    "satisfaction_delay": 15,
+    "satisfaction_analysis_enabled": true,
+    "ai_temperature": 0.7,
+    "ai_max_tokens": 8192,
+    "ignored_post_ids": ["1435990895659978973"],
+    "post_inactivity_hours": 12,
+    "high_priority_check_interval_hours": 12.0,
+    "solved_post_retention_days": 14,
+    "unsolved_tag_id": "1435458407216840775",
+    "resolved_tag_id": null,
+    "auto_rag_enabled": false,
+    "support_notification_channel_id": "1436918674069000212",
+    "support_role_id": null,
+    "last_updated": "2025-11-12T18:30:45"
+  },
+  "stats": {
+    "total_rag_entries": 19,
+    "total_auto_responses": 5,
+    "total_pending": 0,
+    "has_custom_prompt": true
+  }
+}
+

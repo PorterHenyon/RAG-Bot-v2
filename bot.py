@@ -3720,6 +3720,45 @@ async def check_auto_entries(interaction: discord.Interaction):
         print(f"Error in check_auto_entries: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
+@bot.tree.command(name="manual_backup", description="Manually trigger a backup now (Admin only).")
+@app_commands.default_permissions(administrator=True)
+async def manual_backup(interaction: discord.Interaction):
+    """Manually create a backup immediately"""
+    await interaction.response.defer(ephemeral=True)
+    
+    # Check permissions
+    if not is_owner_or_admin(interaction):
+        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
+        return
+    
+    try:
+        # Run the backup task manually
+        await auto_backup_data()
+        
+        # Find the most recent backup
+        backup_dir = Path("backups")
+        if backup_dir.exists():
+            backups = sorted(backup_dir.glob("backup-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if backups:
+                latest_backup = backups[0]
+                await interaction.followup.send(
+                    f"✅ Manual backup created successfully!\n\n"
+                    f"**Filename:** `{latest_backup.name}`\n"
+                    f"**Location:** Server `/backups/` folder\n\n"
+                    f"💡 Use `/export_data` to download the backup file.",
+                    ephemeral=True
+                )
+            else:
+                await interaction.followup.send("⚠️ Backup created but file not found.", ephemeral=True)
+        else:
+            await interaction.followup.send("⚠️ Backup directory not found.", ephemeral=True)
+    
+    except Exception as e:
+        print(f"Error in manual_backup: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error creating backup: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="export_data", description="Download backup of all RAG entries and auto-responses (Admin only).")
 @app_commands.default_permissions(administrator=True)
 async def export_data(interaction: discord.Interaction):
@@ -3733,6 +3772,7 @@ async def export_data(interaction: discord.Interaction):
     
     try:
         print(f"📥 Export data requested by {interaction.user}")
+        print(f"🔍 DEBUG: Current SYSTEM_PROMPT_TEXT length: {len(SYSTEM_PROMPT_TEXT) if SYSTEM_PROMPT_TEXT else 0}")
         
         # Fetch current data from API
         if 'your-vercel-app' in DATA_API_URL:
@@ -3751,6 +3791,17 @@ async def export_data(interaction: discord.Interaction):
                 full_bot_settings = BOT_SETTINGS.copy()
                 if SYSTEM_PROMPT_TEXT:
                     full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
+                    print(f"✓ Including custom system prompt in export ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                else:
+                    print(f"⚠ No custom system prompt to export (using default)")
+                
+                # Show what's in the settings
+                print(f"📊 Export will include these settings:")
+                for key in full_bot_settings.keys():
+                    if key != 'systemPrompt':  # Don't log entire prompt
+                        print(f"   - {key}: {full_bot_settings[key]}")
+                    else:
+                        print(f"   - systemPrompt: {len(full_bot_settings[key])} characters")
                 
                 export_data = {
                     'export_info': {
@@ -3792,7 +3843,9 @@ async def export_data(interaction: discord.Interaction):
                     value=f"**RAG Entries:** {export_data['statistics']['total_rag_entries']}\n"
                           f"**Auto-Responses:** {export_data['statistics']['total_auto_responses']}\n"
                           f"**Pending Entries:** {export_data['statistics']['total_pending']}\n"
-                          f"**Slash Commands:** {export_data['statistics']['total_slash_commands']}",
+                          f"**Slash Commands:** {export_data['statistics']['total_slash_commands']}\n"
+                          f"**Bot Settings:** {len(full_bot_settings)} settings\n"
+                          f"**Custom Prompt:** {'✅ Yes' if export_data['statistics']['has_custom_prompt'] else '❌ No'}",
                     inline=False
                 )
                 export_embed.add_field(
