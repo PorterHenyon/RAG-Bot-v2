@@ -61,6 +61,7 @@ bot = commands.Bot(command_prefix="!unused-prefix!", intents=intents)
 
 # --- Constants ---
 IGNORE = "!"  # Messages starting with this prefix are ignored
+STAFF_ROLE_ID = 1422106035337826315  # Staff role that can use bot commands
 
 # --- DATA STORAGE (Synced from Dashboard) ---
 RAG_DATABASE = []
@@ -807,31 +808,33 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE):
     return [item['entry'] for item in scored_entries]
 
 SYSTEM_PROMPT = (
-    "You are Revolution Macro support bot. Help users with simple, SHORT answers.\n\n"
+    "You are Revolution Macro support bot. ALWAYS try to answer directly based on the post title and message - DON'T ask 'what's wrong' unless absolutely necessary.\n\n"
     
-    "FEATURES:\n"
-    "- Auto farming\n"
-    "- Smart navigation\n"
-    "- Auto-deposit\n"
-    "- License system\n\n"
+    "CRITICAL RULES:\n"
+    "1. Read the POST TITLE first - it contains the key issue\n"
+    "2. ALWAYS attempt a direct answer based on title + message\n"
+    "3. Use knowledge base if available\n"
+    "4. Keep answers SHORT (2-3 sentences MAX)\n"
+    "5. If you truly can't help, acknowledge human support is available\n\n"
+    
+    "REVOLUTION MACRO FEATURES:\n"
+    "- Auto farming/gathering resources\n"
+    "- Smart navigation and pathfinding\n"
+    "- Auto-deposit to containers\n"
+    "- Planter automation and scheduling\n"
+    "- License activation system\n"
+    "- Robobear challenge automation\n\n"
     
     "HOW TO ANSWER:\n"
-    "1. Use SIMPLE words\n"
-    "2. Keep it SHORT (2-3 sentences MAX)\n"
-    "3. Use numbered steps (1. 2. 3.)\n"
-    "4. One solution at a time\n"
-    "5. NO long paragraphs\n\n"
+    "✅ GOOD: 'To download, go to #downloads channel and click the latest version link. Run the .exe file after extracting.'\n"
+    "❌ BAD: 'Could you clarify what you're trying to download?' [Wasting time!]\n\n"
+    "✅ GOOD: 'Try: 1. Restart macro 2. Check license is active 3. Use windowed mode'\n"
+    "❌ BAD: 'Well, this could be caused by several things...' [Too long!]\n\n"
     
-    "EXAMPLE GOOD ANSWER:\n"
-    "Try these steps:\n"
-    "1. Restart the macro\n"
-    "2. Check your license is active\n"
-    "3. Make sure the game is in windowed mode\n\n"
+    "IF YOU CAN'T HELP:\n"
+    "Say: 'I don't have specific info on this. Our support team can help - they usually respond within 24 hours.'\n\n"
     
-    "EXAMPLE BAD ANSWER:\n"
-    "Well, this could be caused by several things. First, you'll need to understand that Revolution Macro uses... [TOO LONG]\n\n"
-    
-    "Remember: SHORT and SIMPLE. Users don't read long answers."
+    "Remember: POST TITLE = Main clue. Answer directly. Be SHORT. Human support is backup."
 )
 
 def build_user_context(query, context_entries):
@@ -3723,11 +3726,21 @@ async def export_data(interaction: discord.Interaction):
         traceback.print_exc()
         await interaction.followup.send(f"❌ Error exporting data: {str(e)}", ephemeral=True)
 
+def has_staff_role(interaction: discord.Interaction) -> bool:
+    """Check if user has admin or staff role"""
+    if interaction.user.guild_permissions.administrator:
+        return True
+    return any(role.id == STAFF_ROLE_ID for role in interaction.user.roles)
+
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
-@app_commands.default_permissions(administrator=True)
 async def ask(interaction: discord.Interaction, question: str):
     """Staff command to query the RAG knowledge base"""
     await interaction.response.defer(ephemeral=False)
+    
+    # Check if user has staff role or admin
+    if not has_staff_role(interaction):
+        await interaction.followup.send("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+        return
     
     try:
         # Check auto-responses first
@@ -3782,10 +3795,14 @@ async def ask(interaction: discord.Interaction, question: str):
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="mark_as_solve_no_review", description="Mark thread as solved and lock it WITHOUT creating a RAG entry (Staff only).")
-@app_commands.default_permissions(administrator=True)
 async def mark_as_solve_no_review(interaction: discord.Interaction):
     """Mark thread as solved and lock it without creating RAG entry"""
     await interaction.response.defer(ephemeral=False)
+    
+    # Check if user has staff role or admin
+    if not has_staff_role(interaction):
+        await interaction.followup.send("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+        return
     
     try:
         # Must be used in a thread
@@ -3893,9 +3910,13 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="mark_as_solve", description="Mark thread as solved and send conversation to analyzer (Staff only).")
-@app_commands.default_permissions(administrator=True)
 async def mark_as_solve(interaction: discord.Interaction):
     """Mark a thread as solved and analyze the conversation for RAG entry creation"""
+    # Check if user has staff role or admin
+    if not has_staff_role(interaction):
+        await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+        return
+    
     # Check if this is in a thread
     if not isinstance(interaction.channel, discord.Thread):
         await interaction.response.send_message("❌ This command can only be used in a thread.", ephemeral=True)
