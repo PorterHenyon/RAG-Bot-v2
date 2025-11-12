@@ -2855,7 +2855,7 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
             )
             print(f"✓ Added post ID {post_id} to ignore list by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_ignore_post_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -2887,7 +2887,7 @@ async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
             )
             print(f"✓ Set unsolved tag ID to {tag_id} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_unsolved_tag_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -2919,7 +2919,7 @@ async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
             )
             print(f"✓ Solved tag ID set to {tag_id} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_solved_tag_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -2947,7 +2947,7 @@ async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int)
             )
             print(f"✓ Satisfaction delay updated to {seconds} seconds by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_satisfaction_delay: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -2977,7 +2977,7 @@ async def set_temperature(interaction: discord.Interaction, temperature: float):
             )
             print(f"✓ AI temperature updated to {temperature} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_temperature: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3006,7 +3006,7 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
             )
             print(f"✓ Max tokens updated to {max_tokens} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_max_tokens: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3035,7 +3035,7 @@ async def set_post_inactivity_time(interaction: discord.Interaction, hours: int)
             )
             print(f"✓ Post inactivity threshold updated to {hours} hours by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_post_inactivity_time: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3085,7 +3085,7 @@ async def set_ping_high_priority_interval(interaction: discord.Interaction, hour
             )
             print(f"✓ High priority check interval updated to {hours} hours ({time_str}) by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_ping_high_priority_interval: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3120,7 +3120,7 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
             )
             print(f"✓ Support role set to {role.name} (ID: {role.id}) by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_support_role: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3147,7 +3147,7 @@ async def set_support_notification_channel(interaction: discord.Interaction, cha
             )
             print(f"✓ Support notification channel set to #{channel.name} (ID: {channel.id}) by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_support_notification_channel: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3198,7 +3198,7 @@ async def set_high_priority_channel_id(interaction: discord.Interaction, channel
                 )
                 print(f"⚠️ Support notification channel ID set to {new_channel_id} (channel not found) by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_high_priority_channel_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3228,7 +3228,7 @@ async def set_solved_post_retention(interaction: discord.Interaction, days: int)
             )
             print(f"✓ Solved post retention updated to {days} days by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_solved_post_retention: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3259,7 +3259,7 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
             )
             print(f"✓ Auto-RAG creation {status_text} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in toggle_auto_rag: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
@@ -3389,7 +3389,7 @@ async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled
             )
             print(f"✓ Satisfaction analysis {status_text} by {interaction.user}")
         else:
-            await interaction.followup.send("⚠️ Failed to save settings to file.", ephemeral=False)
+            await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in toggle_satisfaction_analysis: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
