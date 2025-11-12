@@ -2875,7 +2875,8 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
         BOT_SETTINGS['support_forum_channel_id'] = new_channel_id
         
         # Save to file
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             print(f"✓ Updated forum channel ID to {new_channel_id}")
         else:
             await interaction.followup.send(
@@ -2913,7 +2914,8 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
         ignored_posts.append(post_id)
         BOT_SETTINGS['ignored_post_ids'] = ignored_posts
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             await interaction.followup.send(
                 f"✅ Post ID **{post_id}** added to ignore list!\n\n"
                 f"The bot will no longer respond to this post.\n"
@@ -2944,7 +2946,8 @@ async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
         global BOT_SETTINGS
         BOT_SETTINGS['unsolved_tag_id'] = tag_id_int
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             await interaction.followup.send(
                 f"✅ Unsolved tag ID set to **{tag_id}**!\n\n"
                 f"New forum posts will automatically be tagged as 'Unsolved'.",
@@ -2974,7 +2977,8 @@ async def set_resolved_tag_id(interaction: discord.Interaction, tag_id: str):
         global BOT_SETTINGS
         BOT_SETTINGS['resolved_tag_id'] = tag_id_int
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             await interaction.followup.send(
                 f"✅ Resolved tag ID set to **{tag_id}**!\n\n"
                 f"Solved posts will automatically be tagged as 'Resolved'.",
@@ -3001,7 +3005,8 @@ async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int)
         global BOT_SETTINGS
         BOT_SETTINGS['satisfaction_delay'] = seconds
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             await interaction.followup.send(
                 f"✅ Satisfaction delay updated to **{seconds} seconds**!\n\n"
                 f"The bot will now wait {seconds} seconds after a user's last message before analyzing their satisfaction.",
@@ -3028,7 +3033,8 @@ async def set_temperature(interaction: discord.Interaction, temperature: float):
         global BOT_SETTINGS
         BOT_SETTINGS['ai_temperature'] = temperature
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             temp_desc = "more focused/deterministic" if temperature < 0.7 else "more creative/varied" if temperature > 1.3 else "balanced"
             await interaction.followup.send(
                 f"✅ AI temperature updated to **{temperature}**!\n\n"
@@ -3057,7 +3063,8 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
         global BOT_SETTINGS
         BOT_SETTINGS['ai_max_tokens'] = max_tokens
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             length_desc = "shorter" if max_tokens < 1024 else "longer" if max_tokens > 3072 else "medium"
             await interaction.followup.send(
                 f"✅ Max tokens updated to **{max_tokens}**!\n\n"
@@ -3085,7 +3092,8 @@ async def set_post_inactivity_time(interaction: discord.Interaction, hours: int)
         global BOT_SETTINGS
         BOT_SETTINGS['post_inactivity_hours'] = hours
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             await interaction.followup.send(
                 f"✅ Post inactivity threshold updated to **{hours} hours**!\n\n"
                 f"Posts older than {hours} hours will be escalated to **High Priority**.\n"
@@ -3113,7 +3121,8 @@ async def set_ping_high_priority_interval(interaction: discord.Interaction, hour
         global BOT_SETTINGS
         BOT_SETTINGS['high_priority_check_interval_hours'] = hours
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             # Update the background task interval
             check_old_posts.change_interval(hours=hours)
             
@@ -3158,7 +3167,8 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
         global BOT_SETTINGS
         BOT_SETTINGS['support_role_id'] = role.id
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             # Get channel info - always use clickable format
             notification_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
             if notification_channel_id:
@@ -3189,7 +3199,8 @@ async def set_support_notification_channel(interaction: discord.Interaction, cha
         global BOT_SETTINGS
         BOT_SETTINGS['support_notification_channel_id'] = channel.id
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             role_mention = f"<@&{BOT_SETTINGS.get('support_role_id')}>" if BOT_SETTINGS.get('support_role_id') else "No role set"
             await interaction.followup.send(
                 f"✅ Support notification channel set to {channel.mention}!\n\n"
@@ -3225,7 +3236,8 @@ async def set_high_priority_channel_id(interaction: discord.Interaction, channel
         global BOT_SETTINGS
         BOT_SETTINGS['support_notification_channel_id'] = new_channel_id
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             if channel:
                 role_mention = f"<@&{BOT_SETTINGS.get('support_role_id')}>" if BOT_SETTINGS.get('support_role_id') else "No role set"
                 await interaction.followup.send(
@@ -3268,7 +3280,8 @@ async def set_solved_post_retention(interaction: discord.Interaction, days: int)
         global BOT_SETTINGS
         BOT_SETTINGS['solved_post_retention_days'] = days
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             await interaction.followup.send(
                 f"✅ Solved post retention updated to **{days} days**!\n\n"
                 f"Posts with status **Solved** or **Closed** older than {days} days will be automatically deleted.\n"
@@ -3293,7 +3306,8 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
         global BOT_SETTINGS
         BOT_SETTINGS['auto_rag_enabled'] = enabled
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             status_emoji = "✅" if enabled else "❌"
             status_text = "enabled" if enabled else "disabled"
             
@@ -3413,7 +3427,8 @@ async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled
         global BOT_SETTINGS
         BOT_SETTINGS['satisfaction_analysis_enabled'] = enabled
         
-        if save_bot_settings():
+        # Save to API (persists across deployments)
+        if await save_bot_settings_to_api():
             status_emoji = "✅" if enabled else "❌"
             status_text = "enabled" if enabled else "disabled"
             
