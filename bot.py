@@ -3125,12 +3125,20 @@ async def set_ping_high_priority_interval(interaction: discord.Interaction, hour
                 time_str = f"{hours} hour{'s' if hours != 1 else ''}"
             
             inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
+            # Get channel info
+            notification_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
+            if notification_channel_id:
+                notification_channel = bot.get_channel(notification_channel_id)
+                channel_display = f"<#{notification_channel_id}>" if notification_channel else f"ID: {notification_channel_id} (Not found)"
+            else:
+                channel_display = "Not configured (use `/set_support_notification_channel`)"
+            
             await interaction.followup.send(
                 f"✅ High priority check interval updated to **{time_str}**!\n\n"
                 f"📊 **Current Settings:**\n"
                 f"• Check Interval: Every {time_str}\n"
                 f"• Escalation Threshold: {inactivity_threshold} hours of inactivity\n"
-                f"• Notification Channel: <#{BOT_SETTINGS.get('support_notification_channel_id')}>\n\n"
+                f"• Notification Channel: {channel_display}\n\n"
                 f"💡 **Tip**: Shorter intervals mean faster response to old posts, but check your server load!",
                 ephemeral=False
             )
@@ -3152,9 +3160,17 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
         BOT_SETTINGS['support_role_id'] = role.id
         
         if save_bot_settings():
+            # Get channel info
+            notification_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
+            if notification_channel_id:
+                notification_channel = bot.get_channel(notification_channel_id)
+                channel_display = f"<#{notification_channel_id}>" if notification_channel else f"channel ID {notification_channel_id}"
+            else:
+                channel_display = "the notification channel (set with `/set_support_notification_channel`)"
+            
             await interaction.followup.send(
                 f"✅ Support role set to {role.mention}!\n\n"
-                f"This role will be pinged in <#{BOT_SETTINGS.get('support_notification_channel_id')}> "
+                f"This role will be pinged in {channel_display} "
                 f"whenever a post is escalated to **High Priority**.",
                 ephemeral=False
             )
