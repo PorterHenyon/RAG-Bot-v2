@@ -461,7 +461,7 @@ async def update_forum_post_status(thread_id, status):
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(forum_api_url) as get_resp:
+            async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
                 if get_resp.status == 200:
                     all_posts = await get_resp.json()
                     current_post = None
@@ -1118,7 +1118,7 @@ async def cleanup_old_solved_posts():
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(forum_api_url) as response:
+            async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
                     print(f"⚠ Failed to fetch posts for cleanup: {response.status}")
                     return
@@ -1163,7 +1163,7 @@ async def cleanup_old_solved_posts():
                             }
                             
                             headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                            async with session.post(forum_api_url, json=delete_payload, headers=headers) as delete_response:
+                            async with session.post(forum_api_url, json=delete_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as delete_response:
                                 if delete_response.status == 200:
                                     deleted_count += 1
                                     print(f"✅ Deleted: '{post_title}'")
@@ -1262,7 +1262,7 @@ async def auto_backup_data():
         
         # Fetch current data from API
         async with aiohttp.ClientSession() as session:
-            async with session.get(DATA_API_URL) as response:
+            async with session.get(DATA_API_URL, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
                     print(f"⚠ Failed to fetch data for backup: {response.status}")
                     return
@@ -1333,7 +1333,7 @@ async def check_old_posts():
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(forum_api_url) as response:
+            async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
                     print(f"⚠ Failed to fetch posts for age check: {response.status}")
                     return
@@ -1382,7 +1382,7 @@ async def check_old_posts():
                             }
                             
                             headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                            async with session.post(forum_api_url, json=update_payload, headers=headers) as update_response:
+                            async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as update_response:
                                 if update_response.status == 200:
                                     print(f"✅ Escalated to High Priority: '{post_title}'")
                                     escalated_count += 1
@@ -2902,7 +2902,8 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
         # Update global variable
         global SUPPORT_FORUM_CHANNEL_ID, BOT_SETTINGS
         SUPPORT_FORUM_CHANNEL_ID = new_channel_id
-        BOT_SETTINGS['support_forum_channel_id'] = new_channel_id
+        # Store as STRING to prevent JavaScript number precision loss
+        BOT_SETTINGS['support_forum_channel_id'] = str(new_channel_id)
         
         # Save to file
         # Save to API (persists across deployments)
@@ -2937,11 +2938,13 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
         global BOT_SETTINGS
         ignored_posts = BOT_SETTINGS.get('ignored_post_ids', [])
         
-        if post_id in ignored_posts:
+        # Check if already in list (stored as strings)
+        if str(post_id_int) in ignored_posts or post_id in ignored_posts:
             await interaction.followup.send(f"⚠️ Post ID {post_id} is already in the ignore list.", ephemeral=False)
             return
         
-        ignored_posts.append(post_id)
+        # Store as STRING to prevent JavaScript number precision loss
+        ignored_posts.append(str(post_id_int))
         BOT_SETTINGS['ignored_post_ids'] = ignored_posts
         
         # Save to API (persists across deployments)
@@ -3737,7 +3740,7 @@ async def export_data(interaction: discord.Interaction):
             return
         
         async with aiohttp.ClientSession() as session:
-            async with session.get(DATA_API_URL) as response:
+            async with session.get(DATA_API_URL, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status != 200:
                     await interaction.followup.send(f"❌ Failed to fetch data: Status {response.status}", ephemeral=True)
                     return
