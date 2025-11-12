@@ -84,7 +84,7 @@ BOT_SETTINGS = {
     'unsolved_tag_id': None,  # Discord tag ID for "Unsolved" posts
     'resolved_tag_id': None,  # Discord tag ID for "Resolved" posts
     'auto_rag_enabled': True,  # Auto-create RAG entries from solved threads
-    'support_notification_channel_id': 1436918674069000212,  # Channel ID for high priority notifications
+    'support_notification_channel_id': '1436918674069000212',  # Channel ID for high priority notifications (string to prevent JS precision loss)
     'support_role_id': None,  # Support role ID to ping (optional)
     'last_updated': datetime.now().isoformat()
 }
@@ -1034,6 +1034,8 @@ async def get_resolved_tag(forum_channel):
         # First, check if we have a specific tag ID set
         resolved_tag_id = BOT_SETTINGS.get('resolved_tag_id')
         if resolved_tag_id:
+            # Convert to int (stored as string to prevent JavaScript precision loss)
+            resolved_tag_id = int(resolved_tag_id) if isinstance(resolved_tag_id, str) else resolved_tag_id
             for tag in forum_channel.available_tags:
                 if tag.id == resolved_tag_id:
                     print(f"✓ Found resolved tag by ID: '{tag.name}' (ID: {tag.id})")
@@ -1064,6 +1066,8 @@ async def get_unsolved_tag(forum_channel):
         # First, check if we have a specific tag ID set
         unsolved_tag_id = BOT_SETTINGS.get('unsolved_tag_id')
         if unsolved_tag_id:
+            # Convert to int (stored as string to prevent JavaScript precision loss)
+            unsolved_tag_id = int(unsolved_tag_id) if isinstance(unsolved_tag_id, str) else unsolved_tag_id
             for tag in forum_channel.available_tags:
                 if tag.id == unsolved_tag_id:
                     print(f"✓ Found unsolved tag by ID: '{tag.name}' (ID: {tag.id})")
@@ -1182,6 +1186,9 @@ async def notify_support_channel_summary():
             print("⚠ Support notification channel not configured")
             return
         
+        # Convert to int (stored as string to prevent JavaScript precision loss)
+        support_channel_id = int(support_channel_id) if isinstance(support_channel_id, str) else support_channel_id
+        
         support_channel = bot.get_channel(support_channel_id)
         if not support_channel:
             print(f"⚠ Support notification channel {support_channel_id} not found")
@@ -1211,6 +1218,7 @@ async def notify_support_channel_summary():
                 
                 # Build the message content
                 support_role_id = BOT_SETTINGS.get('support_role_id')
+                # Note: support_role_id is stored as string to prevent JavaScript precision loss
                 message_content = f"<@&{support_role_id}>\n\n" if support_role_id else ""
                 message_content += "**High Priority Posts:**\n\n"
                 
@@ -2955,7 +2963,8 @@ async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
             return
         
         global BOT_SETTINGS
-        BOT_SETTINGS['unsolved_tag_id'] = tag_id_int
+        # Store as STRING to prevent JavaScript number precision loss
+        BOT_SETTINGS['unsolved_tag_id'] = str(tag_id_int)
         
         # Save to API (persists across deployments)
         if await save_bot_settings_to_api():
@@ -2986,7 +2995,8 @@ async def set_resolved_tag_id(interaction: discord.Interaction, tag_id: str):
             return
         
         global BOT_SETTINGS
-        BOT_SETTINGS['resolved_tag_id'] = tag_id_int
+        # Store as STRING to prevent JavaScript number precision loss
+        BOT_SETTINGS['resolved_tag_id'] = str(tag_id_int)
         
         # Save to API (persists across deployments)
         if await save_bot_settings_to_api():
@@ -3176,14 +3186,17 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
     
     try:
         global BOT_SETTINGS
-        BOT_SETTINGS['support_role_id'] = role.id
+        # Store as STRING to prevent JavaScript number precision loss
+        BOT_SETTINGS['support_role_id'] = str(role.id)
         
         # Save to API (persists across deployments)
         if await save_bot_settings_to_api():
             # Get channel info - always use clickable format
             notification_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
             if notification_channel_id:
-                channel_display = f"<#{notification_channel_id}>"
+                # Convert to int for Discord API (stored as string to prevent precision loss)
+                channel_id_int = int(notification_channel_id) if isinstance(notification_channel_id, str) else notification_channel_id
+                channel_display = f"<#{channel_id_int}>"
             else:
                 channel_display = "the notification channel (set with `/set_support_notification_channel`)"
             
@@ -3245,7 +3258,8 @@ async def set_high_priority_channel_id(interaction: discord.Interaction, channel
         channel = bot.get_channel(new_channel_id)
         
         global BOT_SETTINGS
-        BOT_SETTINGS['support_notification_channel_id'] = new_channel_id
+        # Store as STRING to prevent JavaScript number precision loss
+        BOT_SETTINGS['support_notification_channel_id'] = str(new_channel_id)
         
         # Save to API (persists across deployments)
         if await save_bot_settings_to_api():
@@ -3388,7 +3402,15 @@ async def list_high_priority_posts(interaction: discord.Interaction):
                 if len(high_priority_posts) > 10:
                     embed.set_footer(text=f"Showing 10 of {len(high_priority_posts)} high priority posts")
                 else:
-                    embed.set_footer(text=f"Support Notification Channel: #{bot.get_channel(BOT_SETTINGS.get('support_notification_channel_id')).name if bot.get_channel(BOT_SETTINGS.get('support_notification_channel_id')) else 'Not set'}")
+                    # Get notification channel info
+                    notif_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
+                    if notif_channel_id:
+                        notif_channel_id = int(notif_channel_id) if isinstance(notif_channel_id, str) else notif_channel_id
+                        notif_channel = bot.get_channel(notif_channel_id)
+                        channel_name = f"#{notif_channel.name}" if notif_channel else "Not set"
+                    else:
+                        channel_name = "Not set"
+                    embed.set_footer(text=f"Support Notification Channel: {channel_name}")
                 
                 await interaction.followup.send(embed=embed, ephemeral=False)
                 
@@ -3407,7 +3429,10 @@ async def ping_high_priority_now(interaction: discord.Interaction):
         await notify_support_channel_summary()
         
         support_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
-        support_channel = bot.get_channel(support_channel_id)
+        if support_channel_id:
+            # Convert to int (stored as string to prevent JavaScript precision loss)
+            support_channel_id = int(support_channel_id) if isinstance(support_channel_id, str) else support_channel_id
+        support_channel = bot.get_channel(support_channel_id) if support_channel_id else None
         
         if support_channel:
             await interaction.followup.send(
