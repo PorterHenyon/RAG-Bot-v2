@@ -830,7 +830,7 @@ SYSTEM_PROMPT = (
 )
 
 async def download_images_for_gemini(attachments):
-    """Download images from Discord attachments and prepare them for Gemini"""
+    """Download images from Discord, prepare for Gemini, returns list of PIL Images"""
     image_data = []
     try:
         import PIL.Image
@@ -841,10 +841,10 @@ async def download_images_for_gemini(attachments):
             if attachment.content_type and "image" in attachment.content_type:
                 print(f"📥 Downloading image: {attachment.filename}")
                 
-                # Download the image
+                # Download the image to memory
                 image_bytes = await attachment.read()
                 
-                # Open with PIL
+                # Open with PIL (in memory, no disk I/O)
                 image = PIL.Image.open(io.BytesIO(image_bytes))
                 
                 # Gemini accepts PIL Image objects directly
@@ -919,6 +919,13 @@ async def generate_ai_response(query, context_entries, image_data=None):
             lambda: model.generate_content(prompt_content, generation_config=generation_config)
         )
         track_api_call()  # Track successful API call
+        
+        # Clean up images from memory after use
+        if image_data:
+            for img in image_data:
+                img.close()  # Release image from memory
+            print(f"🗑️ Cleaned up {len(image_data)} image(s) from memory")
+        
         return response.text
     except Exception as e:
         print(f"An error occurred with the Gemini API: {e}")
@@ -1746,6 +1753,72 @@ async def on_thread_create(thread):
         if image_data:
             print(f"✅ Downloaded {len(image_data)} image(s) for Gemini vision analysis")
     
+    # If user uploaded image with NO text or very little text, enhance with image analysis
+    text_only = initial_msg.content.strip() if initial_msg.content else ""
+    if image_data and len(text_only) < 10:
+        print(f"📸 Image-only post detected (minimal text) - analyzing image to understand issue...")
+        # Ask Gemini what's in the image to enhance the query
+        try:
+            import google.generativeai as genai
+            vision_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            image_analysis_prompt = "Describe what you see in this image. What issue or problem does it show? Be brief (2-3 sentences)."
+            
+            # Create content with images
+            content_parts = []
+            for img in image_data:
+                content_parts.append(img)
+            content_parts.append(image_analysis_prompt)
+            
+            loop = asyncio.get_event_loop()
+            analysis = await loop.run_in_executor(None, lambda: vision_model.generate_content(content_parts))
+            image_description = analysis.text
+            
+            # Enhance the user question with what we see in the image
+            user_question = f"{thread.name}\n{initial_message}\n\nWhat I see in the image: {image_description}"
+            print(f"🔍 Image analysis: {image_description[:100]}...")
+        except Exception as e:
+            print(f"⚠ Error analyzing image: {e}")
+    
+    # If user attached videos or non-image files, escalate to human
+    needs_human_review = False
+    if has_attachments and ("video" in attachment_types or len([t for t in attachment_types if t not in ["image"]]) > 0):
+        print(f"🎥 User attached video/file - escalating to human support for review")
+        needs_human_review = True
+    
+    # Handle immediate human escalation (videos or non-image files)
+    if needs_human_review:
+        escalated_threads.add(thread_id)
+        thread_response_type[thread_id] = 'human'
+        
+        human_escalation_embed = discord.Embed(
+            title="👨‍💼 Support Team Notified",
+            description="I see you've included video/file attachments. Our support team will review them and help you directly!",
+            color=0xE67E22
+        )
+        human_escalation_embed.add_field(
+            name="⏰ Response Time",
+            value="Usually under 24 hours",
+            inline=True
+        )
+        human_escalation_embed.add_field(
+            name="📎 Attachments Received",
+            value=f"{len(initial_msg.attachments)} file(s)",
+            inline=True
+        )
+        human_escalation_embed.set_footer(text="Revolution Macro Support Team")
+        await thread.send(embed=human_escalation_embed)
+        
+        # Clean up images if we downloaded any
+        if image_data:
+            for img in image_data:
+                img.close()
+            print(f"🗑️ Cleaned up {len(image_data)} image(s) from memory")
+        
+        # Update forum post status
+        await update_forum_post_status(thread_id, 'Human Support')
+        print(f"✅ Thread {thread_id} escalated to human support (video/file attachments)")
+        return  # Exit early - no bot response needed
+    
     if auto_response:
         # Send auto-response as professional embed
         auto_embed = discord.Embed(
@@ -2066,6 +2139,15 @@ async def on_thread_create(thread):
     except Exception as tag_error:
         print(f"⚠ Could not apply unsolved tag: {tag_error}")
     finally:
+        # Clean up images from memory if we downloaded any
+        if 'image_data' in locals() and image_data:
+            try:
+                for img in image_data:
+                    img.close()
+                print(f"🗑️ Final cleanup: Released {len(image_data)} image(s) from memory")
+            except Exception as cleanup_error:
+                print(f"⚠ Error cleaning up images: {cleanup_error}")
+        
         # ALWAYS release the processing lock
         if thread.id in processing_threads:
             processing_threads.remove(thread.id)
