@@ -69,8 +69,7 @@ RAG_DATABASE = []
 AUTO_RESPONSES = []
 SYSTEM_PROMPT_TEXT = ""  # Fetched from API, fallback to default if not available
 
-# --- BOT SETTINGS (Local File Storage) ---
-BOT_SETTINGS_FILE = Path("bot_settings.json")
+# --- BOT SETTINGS (Stored in Vercel KV API - NO local files) ---
 BOT_SETTINGS = {
     'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
     'satisfaction_delay': 15,  # Seconds to wait before analyzing satisfaction
@@ -127,9 +126,7 @@ thread_response_type = {}  # {thread_id: 'auto' | 'ai' | None}
 # Track threads manually closed with no_review (don't create RAG entries)
 no_review_threads = set()  # {thread_id}
 
-# --- Local RAG Storage ---
-LOCALRAG_DIR = Path("localrag")
-LOCALRAG_DIR.mkdir(exist_ok=True)
+# REMOVED: No local storage - all data in Vercel KV API only
 
 # --- SATISFACTION BUTTON VIEW ---
 class SatisfactionButtons(discord.ui.View):
@@ -729,31 +726,8 @@ async def fetch_context(msg):
     formatted_string = "\n".join(formatted_lines)
     return formatted_string
 
-# --- Local RAG Functions ---
-async def download_rag_to_local():
-    """Download RAG entries to local files"""
-    try:
-        # Clear existing local files
-        for file in LOCALRAG_DIR.glob("*.txt"):
-            file.unlink()
-        
-        # Write each RAG entry to a file
-        for entry in RAG_DATABASE:
-            entry_id = entry.get('id', f"RAG-{hash(entry.get('title', 'unknown'))}")
-            filename = f"{entry_id}.txt"
-            filepath = LOCALRAG_DIR / filename
-            
-            content = f"Title: {entry.get('title', '')}\n"
-            content += f"Content: {entry.get('content', '')}\n"
-            content += f"Keywords: {', '.join(entry.get('keywords', []))}"
-            
-            filepath.write_text(content, encoding='utf-8')
-        
-        print(f"✓ Downloaded {len(RAG_DATABASE)} RAG entries to localrag/")
-        return len(RAG_DATABASE)
-    except Exception as e:
-        print(f"⚠ Error downloading RAG to local: {e}")
-        return 0
+# REMOVED: No local RAG storage - all data loaded from API in memory only
+# RAG_DATABASE is loaded from API and kept in memory
 
 # --- CORE BOT LOGIC (MIRRORS PLAYGROUND) ---
 def get_auto_response(query: str) -> str | None:
@@ -1097,8 +1071,7 @@ async def get_unsolved_tag(forum_channel):
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
-    # Also download to local RAG after syncing
-    await download_rag_to_local()
+    # All data stored in memory (loaded from API) - no local files
 
 @sync_data_task.before_loop
 async def before_sync_task():
@@ -1247,77 +1220,8 @@ async def notify_support_channel_summary():
         import traceback
         traceback.print_exc()
 
-@tasks.loop(hours=24)  # Run daily backup
-async def auto_backup_data():
-    """Background task to automatically backup RAG entries and auto-responses"""
-    try:
-        if 'your-vercel-app' in DATA_API_URL:
-            return  # Skip if API not configured
-        
-        print(f"\n💾 Starting automatic data backup...")
-        
-        # Create backups directory if it doesn't exist
-        backup_dir = Path("backups")
-        backup_dir.mkdir(exist_ok=True)
-        
-        # Fetch current data from API
-        async with aiohttp.ClientSession() as session:
-            async with session.get(DATA_API_URL, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    print(f"⚠ Failed to fetch data for backup: {response.status}")
-                    return
-                
-                data = await response.json()
-                
-                # Create timestamped backup filename
-                timestamp = datetime.now().strftime("%Y-%m-%d-%H-%M%S")
-                backup_filename = f"backup-{timestamp}.json"
-                backup_path = backup_dir / backup_filename
-                
-                # Prepare backup data with FULL bot settings including system prompt
-                full_bot_settings = BOT_SETTINGS.copy()
-                if SYSTEM_PROMPT_TEXT:
-                    full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
-                
-                backup_data = {
-                    'timestamp': datetime.now().isoformat(),
-                    'ragEntries': data.get('ragEntries', []),
-                    'autoResponses': data.get('autoResponses', []),
-                    'slashCommands': data.get('slashCommands', []),
-                    'pendingRagEntries': data.get('pendingRagEntries', []),
-                    'botSettings': full_bot_settings,
-                    'stats': {
-                        'total_rag_entries': len(data.get('ragEntries', [])),
-                        'total_auto_responses': len(data.get('autoResponses', [])),
-                        'total_pending': len(data.get('pendingRagEntries', [])),
-                        'has_custom_prompt': bool(SYSTEM_PROMPT_TEXT)
-                    }
-                }
-                
-                # Save to file
-                with open(backup_path, 'w', encoding='utf-8') as f:
-                    json.dump(backup_data, f, indent=2, ensure_ascii=False)
-                
-                print(f"✅ Backup created: {backup_filename}")
-                print(f"   📊 RAG Entries: {backup_data['stats']['total_rag_entries']}")
-                print(f"   ⚡ Auto Responses: {backup_data['stats']['total_auto_responses']}")
-                print(f"   📋 Pending: {backup_data['stats']['total_pending']}")
-                
-                # Clean up old backups (keep last 30 days)
-                cutoff_date = datetime.now().timestamp() - (30 * 24 * 60 * 60)
-                deleted_count = 0
-                for old_backup in backup_dir.glob("backup-*.json"):
-                    if old_backup.stat().st_mtime < cutoff_date:
-                        old_backup.unlink()
-                        deleted_count += 1
-                
-                if deleted_count > 0:
-                    print(f"🗑️ Cleaned up {deleted_count} old backup(s)")
-    
-    except Exception as e:
-        print(f"❌ Error in auto_backup_data task: {e}")
-        import traceback
-        traceback.print_exc()
+# REMOVED: Local backups disabled - all data stored in Vercel KV API only
+# Users can download backups anytime with /export_data command
 
 @tasks.loop(hours=1)  # Default interval, can be changed dynamically
 async def check_old_posts():
@@ -1439,10 +1343,8 @@ async def on_ready():
     print(f'📺 Forum Channel ID: {SUPPORT_FORUM_CHANNEL_ID}')
     print('-------------------')
     
-    # Initial data sync
+    # Initial data sync - loads everything into memory from API
     await fetch_data_from_api()
-    # Initial local RAG download
-    await download_rag_to_local()
     
     # Start periodic sync
     sync_data_task.start()
@@ -1457,10 +1359,7 @@ async def on_ready():
         cleanup_old_solved_posts.start()
         print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
     
-    # Start auto-backup task
-    if not auto_backup_data.is_running():
-        auto_backup_data.start()
-        print("✓ Started background task: auto_backup_data (runs daily)")
+    # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
     try:
         # DON'T clear commands on every startup - this causes CommandNotFound errors
@@ -2816,8 +2715,7 @@ async def reload(interaction: discord.Interaction):
     
     success = await fetch_data_from_api()
     if success:
-        count = await download_rag_to_local()
-        await interaction.followup.send(f"✅ Data reloaded successfully from dashboard! Downloaded {count} RAG entries to localrag/.", ephemeral=False)
+        await interaction.followup.send(f"✅ Data reloaded successfully from dashboard! Loaded {len(RAG_DATABASE)} RAG entries into memory.", ephemeral=False)
     else:
         await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
     print(f"Reload command issued by {interaction.user}.")
@@ -3603,7 +3501,7 @@ async def api_info(interaction: discord.Interaction):
         prompt_preview = (SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)[:200] + "..." if prompt_length > 200 else (SYSTEM_PROMPT_TEXT or SYSTEM_PROMPT)
         
         # Bot settings file
-        settings_file_exists = BOT_SETTINGS_FILE.exists()
+        # All settings stored in Vercel KV API now (no local file)
         
         api_embed = discord.Embed(
             title="🔐 Sensitive API Configuration",
@@ -3625,7 +3523,7 @@ async def api_info(interaction: discord.Interaction):
         
         api_embed.add_field(
             name="💾 Bot Settings File",
-            value=f"**File:** `{BOT_SETTINGS_FILE}`\n**Exists:** {'✅ Yes' if settings_file_exists else '❌ No'}\n**Contents:** {len(BOT_SETTINGS)} settings",
+            value=f"**Storage:** Vercel KV API (persists across deployments)\n**Loaded Settings:** {len(BOT_SETTINGS)} settings",
             inline=False
         )
         
@@ -3720,44 +3618,7 @@ async def check_auto_entries(interaction: discord.Interaction):
         print(f"Error in check_auto_entries: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
-@bot.tree.command(name="manual_backup", description="Manually trigger a backup now (Admin only).")
-@app_commands.default_permissions(administrator=True)
-async def manual_backup(interaction: discord.Interaction):
-    """Manually create a backup immediately"""
-    await interaction.response.defer(ephemeral=True)
-    
-    # Check permissions
-    if not is_owner_or_admin(interaction):
-        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
-        return
-    
-    try:
-        # Run the backup task manually
-        await auto_backup_data()
-        
-        # Find the most recent backup
-        backup_dir = Path("backups")
-        if backup_dir.exists():
-            backups = sorted(backup_dir.glob("backup-*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if backups:
-                latest_backup = backups[0]
-                await interaction.followup.send(
-                    f"✅ Manual backup created successfully!\n\n"
-                    f"**Filename:** `{latest_backup.name}`\n"
-                    f"**Location:** Server `/backups/` folder\n\n"
-                    f"💡 Use `/export_data` to download the backup file.",
-                    ephemeral=True
-                )
-            else:
-                await interaction.followup.send("⚠️ Backup created but file not found.", ephemeral=True)
-        else:
-            await interaction.followup.send("⚠️ Backup directory not found.", ephemeral=True)
-    
-    except Exception as e:
-        print(f"Error in manual_backup: {e}")
-        import traceback
-        traceback.print_exc()
-        await interaction.followup.send(f"❌ Error creating backup: {str(e)}", ephemeral=True)
+# REMOVED: No local backups - use /export_data to download complete backup anytime
 
 @bot.tree.command(name="export_data", description="Download backup of all RAG entries and auto-responses (Admin only).")
 @app_commands.default_permissions(administrator=True)

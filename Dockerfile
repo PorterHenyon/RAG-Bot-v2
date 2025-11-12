@@ -13,8 +13,7 @@ COPY bot_settings.json* ./
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Create directories for local RAG storage and backups
-RUN mkdir -p localrag backups
+# No local storage needed - all data in Vercel KV API
 
 # Run the bot
 CMD ["python", "-u", "bot.py"]
