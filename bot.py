@@ -2892,10 +2892,10 @@ async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
         print(f"Error in set_unsolved_tag_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="set_resolved_tag_id", description="Set the Discord tag ID for 'Resolved' posts (Admin only).")
+@bot.tree.command(name="set_solved_tag_id", description="Set the Discord tag ID for 'Solved' posts (Admin only).")
 @app_commands.default_permissions(administrator=True)
-async def set_resolved_tag_id(interaction: discord.Interaction, tag_id: str):
-    """Set the resolved tag ID"""
+async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the solved tag ID"""
     await interaction.response.defer(ephemeral=False)
     
     try:
