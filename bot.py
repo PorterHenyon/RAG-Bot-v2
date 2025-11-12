@@ -3125,11 +3125,10 @@ async def set_ping_high_priority_interval(interaction: discord.Interaction, hour
                 time_str = f"{hours} hour{'s' if hours != 1 else ''}"
             
             inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
-            # Get channel info
+            # Get channel info - always use clickable format
             notification_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
             if notification_channel_id:
-                notification_channel = bot.get_channel(notification_channel_id)
-                channel_display = f"<#{notification_channel_id}>" if notification_channel else f"ID: {notification_channel_id} (Not found)"
+                channel_display = f"<#{notification_channel_id}>"
             else:
                 channel_display = "Not configured (use `/set_support_notification_channel`)"
             
@@ -3160,11 +3159,10 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
         BOT_SETTINGS['support_role_id'] = role.id
         
         if save_bot_settings():
-            # Get channel info
+            # Get channel info - always use clickable format
             notification_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
             if notification_channel_id:
-                notification_channel = bot.get_channel(notification_channel_id)
-                channel_display = f"<#{notification_channel_id}>" if notification_channel else f"channel ID {notification_channel_id}"
+                channel_display = f"<#{notification_channel_id}>"
             else:
                 channel_display = "the notification channel (set with `/set_support_notification_channel`)"
             
