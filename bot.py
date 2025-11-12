@@ -292,11 +292,11 @@ class SatisfactionButtons(discord.ui.View):
                 # Try to find RAG entries
                 relevant_docs = find_relevant_rag_entries(user_question)
                 
-                # Generate AI response
+                # Generate AI response (no images in button handler)
                 if relevant_docs:
-                    ai_response = await generate_ai_response(user_question, relevant_docs[:2])
+                    ai_response = await generate_ai_response(user_question, relevant_docs[:2], None)
                 else:
-                    ai_response = await generate_ai_response(user_question, [])
+                    ai_response = await generate_ai_response(user_question, [], None)
                 
                 # Send AI response with buttons
                 ai_embed = discord.Embed(
@@ -829,6 +829,34 @@ SYSTEM_PROMPT = (
     "Remember: POST TITLE = Main clue. Answer directly. Be SHORT. Human support is backup."
 )
 
+async def download_images_for_gemini(attachments):
+    """Download images from Discord attachments and prepare them for Gemini"""
+    image_data = []
+    try:
+        import PIL.Image
+        import io
+        
+        for attachment in attachments:
+            # Only process images
+            if attachment.content_type and "image" in attachment.content_type:
+                print(f"📥 Downloading image: {attachment.filename}")
+                
+                # Download the image
+                image_bytes = await attachment.read()
+                
+                # Open with PIL
+                image = PIL.Image.open(io.BytesIO(image_bytes))
+                
+                # Gemini accepts PIL Image objects directly
+                image_data.append(image)
+                print(f"✅ Image prepared: {attachment.filename} ({image.size[0]}x{image.size[1]})")
+        
+        return image_data if image_data else None
+    
+    except Exception as e:
+        print(f"⚠ Error downloading images: {e}")
+        return None
+
 def build_user_context(query, context_entries):
     """Build the user message with query and knowledge base context."""
     context_text = "\n\n".join(
@@ -840,7 +868,7 @@ def build_user_context(query, context_entries):
         f"User Question:\n{query}"
     )
 
-async def generate_ai_response(query, context_entries):
+async def generate_ai_response(query, context_entries, image_data=None):
     try:
         # Check rate limit before making API call
         if not await check_rate_limit():
@@ -854,10 +882,15 @@ async def generate_ai_response(query, context_entries):
         temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
         max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
         
+        # Use vision model if we have images
+        model_name = 'gemini-2.0-flash-exp' if image_data else 'gemini-2.5-flash'
         model = genai.GenerativeModel(
-            'gemini-2.5-flash',
+            model_name,
             system_instruction=system_instruction
         )
+        
+        if image_data:
+            print(f"🖼️ Using vision model with {len(image_data)} image(s)")
         
         # Configure generation settings
         generation_config = genai.types.GenerationConfig(
@@ -868,11 +901,22 @@ async def generate_ai_response(query, context_entries):
         # User context separated
         user_context = build_user_context(query, context_entries)
         
+        # Prepare content for Gemini (text + images if provided)
+        if image_data:
+            # Include images in the prompt for vision model
+            content_parts = []
+            for img in image_data:
+                content_parts.append(img)
+            content_parts.append(user_context)
+            prompt_content = content_parts
+        else:
+            prompt_content = user_context
+        
         # Generate response with custom settings
         loop = asyncio.get_event_loop()
         response = await loop.run_in_executor(
             None,
-            lambda: model.generate_content(user_context, generation_config=generation_config)
+            lambda: model.generate_content(prompt_content, generation_config=generation_config)
         )
         track_api_call()  # Track successful API call
         return response.text
@@ -1694,45 +1738,13 @@ async def on_thread_create(thread):
     auto_response = get_auto_response(user_question)
     bot_response_text = None
     
-    # If user attached media but text is vague/unclear, escalate to human immediately
-    needs_human_review = False
-    if has_attachments and not auto_response:
-        # Check if text is vague (short, unclear)
-        text_only = initial_msg.content.strip().lower() if initial_msg.content else ""
-        vague_indicators = ["help", "fix", "broken", "not working", "issue", "problem", "error", "can't", "cant", "wont", "won't", "doesn't work"]
-        is_vague = len(text_only.split()) < 10 and any(indicator in text_only for indicator in vague_indicators)
-        
-        if is_vague:
-            print(f"🚨 User has attachments + vague text - escalating to human support immediately")
-            needs_human_review = True
-    
-    # Handle immediate human escalation (vague text + attachments)
-    if needs_human_review:
-        escalated_threads.add(thread_id)
-        thread_response_type[thread_id] = 'human'
-        
-        human_escalation_embed = discord.Embed(
-            title="👨‍💼 Support Team Notified",
-            description="I see you've included media files. Our support team will review your attachments and help you directly!",
-            color=0xE67E22
-        )
-        human_escalation_embed.add_field(
-            name="⏰ Response Time",
-            value="Usually under 24 hours",
-            inline=True
-        )
-        human_escalation_embed.add_field(
-            name="📎 Attachments Received",
-            value=f"{len(initial_msg.attachments)} file(s)",
-            inline=True
-        )
-        human_escalation_embed.set_footer(text="Revolution Macro Support Team")
-        await thread.send(embed=human_escalation_embed)
-        
-        # Update forum post status
-        await update_forum_post_status(thread_id, 'Human Support')
-        print(f"✅ Thread {thread_id} escalated to human support (attachments + vague text)")
-        return  # Exit early - no bot response needed
+    # Download images if user attached them (for Gemini vision)
+    image_data = None
+    if has_attachments and "image" in attachment_types:
+        print(f"🖼️ User attached {attachment_types.count('image')} image(s) - downloading for analysis...")
+        image_data = await download_images_for_gemini(initial_msg.attachments)
+        if image_data:
+            print(f"✅ Downloaded {len(image_data)} image(s) for Gemini vision analysis")
     
     if auto_response:
         # Send auto-response as professional embed
@@ -1831,7 +1843,7 @@ async def on_thread_create(thread):
         if confident_docs:
             # Found matches in knowledge base - use top entries
             num_to_use = min(3, len(confident_docs))  # Use up to 3 best matches
-            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use])
+            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use], image_data)
             
             # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
@@ -2429,13 +2441,13 @@ async def on_message(message):
                                                 # Try to find RAG entries
                                                 relevant_docs = find_relevant_rag_entries(user_question)
                                                 
-                                                # Generate AI response (ALWAYS, with or without RAG)
+                                                # Generate AI response (ALWAYS, with or without RAG) - no images in on_message handler
                                                 if relevant_docs:
                                                     print(f"📚 Found {len(relevant_docs)} RAG entries for AI response")
-                                                    ai_response = await generate_ai_response(user_question, relevant_docs[:2])
+                                                    ai_response = await generate_ai_response(user_question, relevant_docs[:2], None)
                                                 else:
                                                     print(f"💭 No RAG entries - AI using general knowledge")
-                                                    ai_response = await generate_ai_response(user_question, [])
+                                                    ai_response = await generate_ai_response(user_question, [], None)
                                                 
                                                 print(f"✅ AI response generated ({len(ai_response)} chars)")
                                                 
@@ -3785,8 +3797,8 @@ async def ask(interaction: discord.Interaction, question: str):
         relevant_docs = find_relevant_rag_entries(question)
         
         if relevant_docs:
-            # Generate AI response
-            ai_response = await generate_ai_response(question, relevant_docs[:2])
+            # Generate AI response (no images in /ask command)
+            ai_response = await generate_ai_response(question, relevant_docs[:2], None)
             
             embed = discord.Embed(
                 title="✅ AI Response",
