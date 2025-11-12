@@ -62,6 +62,7 @@ bot = commands.Bot(command_prefix="!unused-prefix!", intents=intents)
 # --- Constants ---
 IGNORE = "!"  # Messages starting with this prefix are ignored
 STAFF_ROLE_ID = 1422106035337826315  # Staff role that can use bot commands
+OWNER_USER_ID = 614865086804394012  # Bot owner - full access to all commands
 
 # --- DATA STORAGE (Synced from Dashboard) ---
 RAG_DATABASE = []
@@ -2777,6 +2778,12 @@ async def on_thread_delete(thread):
 @app_commands.default_permissions(administrator=True)
 async def reload(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
+    
+    # Check permissions
+    if not is_owner_or_admin(interaction):
+        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
+        return
+    
     success = await fetch_data_from_api()
     if success:
         count = await download_rag_to_local()
@@ -3416,6 +3423,11 @@ async def status(interaction: discord.Interaction):
     """Show bot status and configuration"""
     await interaction.response.defer(ephemeral=False)
     
+    # Check permissions
+    if not is_owner_or_admin(interaction):
+        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
+        return
+    
     try:
         # Get channel info
         channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
@@ -3635,6 +3647,11 @@ async def export_data(interaction: discord.Interaction):
     """Export all data as downloadable JSON file"""
     await interaction.response.defer(ephemeral=True)
     
+    # Check permissions
+    if not is_owner_or_admin(interaction):
+        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
+        return
+    
     try:
         print(f"📥 Export data requested by {interaction.user}")
         
@@ -3728,9 +3745,19 @@ async def export_data(interaction: discord.Interaction):
 
 def has_staff_role(interaction: discord.Interaction) -> bool:
     """Check if user has admin or staff role"""
+    # Owner has access to everything
+    if interaction.user.id == OWNER_USER_ID:
+        return True
     if interaction.user.guild_permissions.administrator:
         return True
     return any(role.id == STAFF_ROLE_ID for role in interaction.user.roles)
+
+def is_owner_or_admin(interaction: discord.Interaction) -> bool:
+    """Check if user is owner or admin (for admin-only commands)"""
+    # Owner has access to everything
+    if interaction.user.id == OWNER_USER_ID:
+        return True
+    return interaction.user.guild_permissions.administrator
 
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 async def ask(interaction: discord.Interaction, question: str):
