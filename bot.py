@@ -341,7 +341,7 @@ class SatisfactionButtons(discord.ui.View):
         log_prompt_embed.add_field(
             name="🧭 How to Get Logs (from the Macro)",
             value=(
-                "1) Open the macro and go to the **Logs** tab\n"
+                "1) Open the macro and go to **Status → Logs**\n"
                 "2) Click **Copy Logs** → then paste here\n"
                 "   - or -\n"
                 "   Click **Open Logs Folder** → upload the most recent `.log` file"
@@ -2531,7 +2531,7 @@ async def on_message(message):
                                             log_prompt_embed.add_field(
                                                 name="🧭 How to Get Logs (from the Macro)",
                                                 value=(
-                                                    "1) Open the macro and go to the **Logs** tab\n"
+                                                    "1) Open the macro and go to **Status → Logs**\n"
                                                     "2) Click **Copy Logs** → then paste here\n"
                                                     "   - or -\n"
                                                     "   Click **Open Logs Folder** → upload the most recent `.log` file"
