@@ -335,24 +335,28 @@ class SatisfactionButtons(discord.ui.View):
         # First, ask for logs to help support team
         log_prompt_embed = discord.Embed(
             title="📋 Before We Get Support...",
-            description="To help our team solve this **much faster**, please upload your **log files**!\n\nLogs contain error details that help us identify exactly what's wrong.",
+            description="To help our team solve this **much faster**, please include your **logs**!\n\nLogs contain error details that help us identify exactly what's wrong.",
             color=0xF39C12
         )
         log_prompt_embed.add_field(
-            name="📤 How to Get Your Logs",
-            value="Choose your operating system below to see a quick tutorial!",
+            name="🧭 How to Get Logs (from the Macro)",
+            value=(
+                "1) Open the macro and go to the **Logs** tab\n"
+                "2) Click **Copy Logs** → then paste here\n"
+                "   - or -\n"
+                "   Click **Open Logs Folder** → upload the most recent `.log` file"
+            ),
             inline=False
         )
         log_prompt_embed.add_field(
-            name="📁 Then Upload",
-            value="Just **drag and drop** the log file into this thread!",
+            name="📌 Tips",
+            value="Please include screenshots or a short video if possible. It helps a ton!",
             inline=False
         )
         log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
         
-        # Add interactive OS selector dropdown
-        os_selector = OSLogTutorialSelect()
-        await thread.send(embed=log_prompt_embed, view=os_selector)
+        # Send the unified logs instructions (no OS selector needed anymore)
+        await thread.send(embed=log_prompt_embed)
         
         # Wait a moment, then send escalation message
         await asyncio.sleep(2)
@@ -385,68 +389,9 @@ class OSLogTutorialSelect(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # Never expires
     
-    @discord.ui.select(
-        placeholder="Choose your operating system...",
-        options=[
-            discord.SelectOption(
-                label="Windows",
-                description="Get the Windows log tutorial",
-                emoji="🪟",
-                value="windows"
-            ),
-            discord.SelectOption(
-                label="MacOS",
-                description="Get the MacOS log tutorial",
-                emoji="🍎",
-                value="macos"
-            )
-        ]
-    )
-    async def os_select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
-        """Handle OS selection"""
-        await interaction.response.defer()
-        
-        selected_os = select.values[0]
-        
-        if selected_os == "windows":
-            tutorial_embed = discord.Embed(
-                title="🪟 Windows - How to Get Logs",
-                description="Follow the tutorial in this channel:",
-                color=0x0078D4
-            )
-            tutorial_embed.add_field(
-                name="📺 Video Tutorial",
-                value="<#1421996630088880138>",
-                inline=False
-            )
-            tutorial_embed.add_field(
-                name="📁 Quick Guide",
-                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find the **most recent** `.log` file\n   *(Format: `2025-11-09-14-3045.log`)*\n4. Drag and drop it here!",
-                inline=False
-            )
-            tutorial_embed.set_footer(text="Windows Log Tutorial • Upload the most recent log file")
-            await interaction.followup.send(embed=tutorial_embed, ephemeral=False)
-        
-        elif selected_os == "macos":
-            tutorial_embed = discord.Embed(
-                title="🍎 MacOS - How to Get Logs",
-                description="Follow the tutorial in this channel:",
-                color=0x000000
-            )
-            tutorial_embed.add_field(
-                name="📺 Video Tutorial",
-                value="<#1421996787475939379>",
-                inline=False
-            )
-            tutorial_embed.add_field(
-                name="📁 Quick Guide",
-                value="1. Open **Revolution Macro folder**\n2. Look for **`logs`** folder\n3. Find the **most recent** `.log` file\n   *(Format: `2025-11-09-14-3045.log`)*\n4. Drag and drop it here!",
-                inline=False
-            )
-            tutorial_embed.set_footer(text="MacOS Log Tutorial • Upload the most recent log file")
-            await interaction.followup.send(embed=tutorial_embed, ephemeral=False)
-        
-        print(f"📋 User selected {selected_os} log tutorial")
+    # The OS selector is now deprecated in favor of in-macro instructions.
+    # Keep a simple helper button-less view to maintain compatibility if referenced.
+    pass
 
 
 async def update_forum_post_status(thread_id, status):
@@ -2580,24 +2525,28 @@ async def on_message(message):
                                             # First, ask for logs to help support team
                                             log_prompt_embed = discord.Embed(
                                                 title="📋 Before We Get Support...",
-                                                description="To help our team solve this **much faster**, please upload your **log files**!\n\nLogs contain error details that help us identify exactly what's wrong.",
+                                                description="To help our team solve this **much faster**, please include your **logs**!\n\nLogs contain error details that help us identify exactly what's wrong.",
                                                 color=0xF39C12
                                             )
                                             log_prompt_embed.add_field(
-                                                name="📤 How to Get Your Logs",
-                                                value="Choose your operating system below to see a quick tutorial!",
+                                                name="🧭 How to Get Logs (from the Macro)",
+                                                value=(
+                                                    "1) Open the macro and go to the **Logs** tab\n"
+                                                    "2) Click **Copy Logs** → then paste here\n"
+                                                    "   - or -\n"
+                                                    "   Click **Open Logs Folder** → upload the most recent `.log` file"
+                                                ),
                                                 inline=False
                                             )
                                             log_prompt_embed.add_field(
-                                                name="📁 Then Upload",
-                                                value="Just **drag and drop** the log file into this thread!",
+                                                name="📌 Tips",
+                                                value="Please include screenshots or a short video if possible. It helps a ton!",
                                                 inline=False
                                             )
                                             log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
                                             
-                                            # Add interactive OS selector dropdown
-                                            os_selector = OSLogTutorialSelect()
-                                            await thread_channel.send(embed=log_prompt_embed, view=os_selector)
+                                            # Send the unified logs instructions (no OS selector needed anymore)
+                                            await thread_channel.send(embed=log_prompt_embed)
                                             
                                             # Wait a moment, then send escalation message
                                             await asyncio.sleep(2)
