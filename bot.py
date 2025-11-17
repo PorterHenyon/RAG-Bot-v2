@@ -3564,8 +3564,6 @@ async def status(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=False)
-        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
-        return
     
     try:
         # Get channel info
@@ -3795,8 +3793,6 @@ async def export_data(interaction: discord.Interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=True)
-        await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
-        return
     
     try:
         print(f"📥 Export data requested by {interaction.user}")
