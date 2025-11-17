@@ -2771,8 +2771,11 @@ async def on_message(message):
 
 # --- ADMIN SLASH COMMANDS ---
 @bot.tree.command(name="stop", description="Stops the bot gracefully (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def stop(interaction: discord.Interaction):
+    """Stop the bot - requires admin or bot permissions role"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.send_message("🛑 Shutting down Revolution Macro bot...", ephemeral=True)
     print(f"Stop command issued by {interaction.user}. Shutting down in 2 seconds...")
     
@@ -2829,7 +2832,6 @@ async def on_thread_delete(thread):
         traceback.print_exc()
 
 @bot.tree.command(name="reload", description="Reloads data from dashboard (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def reload(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     
@@ -2846,9 +2848,11 @@ async def reload(interaction: discord.Interaction):
     print(f"Reload command issued by {interaction.user}.")
 
 @bot.tree.command(name="fix_duplicate_commands", description="Clear ALL slash commands and re-sync (fixes duplicates) (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def fix_duplicate_commands(interaction: discord.Interaction):
     """Clear all slash commands (global + guild) and re-sync to fix duplicates"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -2886,9 +2890,11 @@ async def fix_duplicate_commands(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="set_forums_id", description="Set the support forum channel ID for the bot to monitor (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_forums_id(interaction: discord.Interaction, channel_id: str):
     """Set the forum channel ID and save to settings file"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -2945,9 +2951,11 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_ignore_post_id", description="Set a post ID to ignore (like rules post). Bot won't respond to it (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
     """Add a post ID to the ignore list"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -2986,9 +2994,11 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_unsolved_tag_id", description="Set the Discord tag ID for 'Unsolved' posts (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
     """Set the unsolved tag ID"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3018,9 +3028,11 @@ async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_solved_tag_id", description="Set the Discord tag ID for 'Solved' posts (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
     """Set the solved tag ID"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3050,9 +3062,11 @@ async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int):
     """Set the satisfaction analysis delay"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3078,9 +3092,11 @@ async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int)
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_temperature", description="Set the AI temperature (0.0-2.0) for response generation (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_temperature(interaction: discord.Interaction, temperature: float):
     """Set the AI temperature"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3108,9 +3124,11 @@ async def set_temperature(interaction: discord.Interaction, temperature: float):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_max_tokens", description="Set the maximum tokens for AI responses (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
     """Set the maximum tokens for AI responses"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3137,9 +3155,11 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_post_inactivity_time", description="Set hours before old posts escalate to High Priority (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_post_inactivity_time(interaction: discord.Interaction, hours: int):
     """Set the post inactivity threshold for auto-escalation"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3166,9 +3186,11 @@ async def set_post_inactivity_time(interaction: discord.Interaction, hours: int)
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_ping_high_priority_interval", description="Set how often to check for high priority posts in hours (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_ping_high_priority_interval(interaction: discord.Interaction, hours: float):
     """Set the interval for checking old posts that need escalation"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3216,9 +3238,11 @@ async def set_ping_high_priority_interval(interaction: discord.Interaction, hour
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_support_role", description="Set the role to ping for high priority posts (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_support_role(interaction: discord.Interaction, role: discord.Role):
     """Set the support role to ping for high priority posts"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3251,9 +3275,11 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_support_notification_channel", description="Set channel for high priority notifications (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_support_notification_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     """Set the channel for high priority post notifications"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3278,9 +3304,11 @@ async def set_support_notification_channel(interaction: discord.Interaction, cha
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_high_priority_channel_id", description="Set high priority notification channel by ID (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_high_priority_channel_id(interaction: discord.Interaction, channel_id: str):
     """Set the high priority notification channel by ID"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3329,9 +3357,11 @@ async def set_high_priority_channel_id(interaction: discord.Interaction, channel
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_solved_post_retention", description="Set days to keep solved posts before auto-deletion (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def set_solved_post_retention(interaction: discord.Interaction, days: int):
     """Set how long to keep solved/closed posts before automatic deletion"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3359,9 +3389,11 @@ async def set_solved_post_retention(interaction: discord.Interaction, days: int)
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="toggle_auto_rag", description="Enable/disable automatic RAG entry creation from solved threads (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
     """Toggle automatic RAG entry creation from solved threads"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3390,9 +3422,11 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="list_high_priority_posts", description="List all current high priority posts (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def list_high_priority_posts(interaction: discord.Interaction):
     """List all posts currently marked as High Priority"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3456,9 +3490,11 @@ async def list_high_priority_posts(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="ping_high_priority_now", description="Manually send high priority summary to notification channel (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def ping_high_priority_now(interaction: discord.Interaction):
     """Manually trigger a high priority posts summary notification"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3491,9 +3527,11 @@ async def ping_high_priority_now(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="toggle_satisfaction_analysis", description="Enable/disable automatic satisfaction analysis (saves Gemini API calls!) (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled: bool):
     """Toggle automatic satisfaction analysis to save API rate limits"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3520,13 +3558,12 @@ async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def status(interaction: discord.Interaction):
     """Show bot status and configuration"""
-    await interaction.response.defer(ephemeral=False)
-    
-    # Check permissions
     if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=False)
         await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
         return
     
@@ -3610,9 +3647,11 @@ async def status(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="api_info", description="View sensitive API configuration (Private, Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def api_info(interaction: discord.Interaction):
     """Show sensitive API and configuration details (private)"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=True)
     
     try:
@@ -3668,9 +3707,11 @@ async def api_info(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="check_rag_entries", description="List all loaded RAG knowledge base entries (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def check_rag_entries(interaction: discord.Interaction):
     """Show all RAG entries"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3706,9 +3747,11 @@ async def check_rag_entries(interaction: discord.Interaction):
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="check_auto_entries", description="List all loaded auto-responses (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def check_auto_entries(interaction: discord.Interaction):
     """Show all auto-responses"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     try:
@@ -3746,13 +3789,12 @@ async def check_auto_entries(interaction: discord.Interaction):
 # REMOVED: No local backups - use /export_data to download complete backup anytime
 
 @bot.tree.command(name="export_data", description="Download backup of all RAG entries and auto-responses (Admin only).")
-@app_commands.default_permissions(administrator=True)
 async def export_data(interaction: discord.Interaction):
     """Export all data as downloadable JSON file"""
-    await interaction.response.defer(ephemeral=True)
-    
-    # Check permissions
     if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
         await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
         return
     
@@ -3891,11 +3933,15 @@ def is_staff_or_admin(member: discord.Member) -> bool:
     return STAFF_ROLE_ID in user_roles or BOT_PERMISSIONS_ROLE_ID in user_roles
 
 def is_owner_or_admin(interaction: discord.Interaction) -> bool:
-    """Check if user is owner or admin (for admin-only commands)"""
+    """Check if user is owner, admin, or has bot permissions role (for admin-only commands)"""
     # Owner has access to everything
     if interaction.user.id == OWNER_USER_ID:
         return True
-    return interaction.user.guild_permissions.administrator
+    if interaction.user.guild_permissions.administrator:
+        return True
+    # Check for bot permissions role
+    user_roles = [role.id for role in interaction.user.roles]
+    return BOT_PERMISSIONS_ROLE_ID in user_roles
 
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 async def ask(interaction: discord.Interaction, question: str):
