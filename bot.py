@@ -301,14 +301,8 @@ class HighPriorityPostsView(discord.ui.View):
         # Calculate total pages, ensure at least 1 page even if empty
         self.total_pages = max(1, (len(posts) + page_size - 1) // page_size) if posts else 1
         
-        # Set initial button states after super().__init__() creates buttons
-        # Disable navigation buttons if only one page or no posts
-        if self.total_pages <= 1:
-            # Find and disable the next button
-            for item in self.children:
-                if isinstance(item, discord.ui.Button) and item.custom_id == "hp_next":
-                    item.disabled = True
-                    break
+        # Note: Button states will be set after super().__init__() creates them
+        # We'll disable them in a post_init if needed
     
     def get_page_posts(self):
         """Get posts for current page"""
@@ -374,36 +368,28 @@ class HighPriorityPostsView(discord.ui.View):
         embed.set_footer(text=f"Use the buttons below to navigate • Total: {len(self.posts)} posts")
         return embed
     
-    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.primary, disabled=True, custom_id="hp_prev")
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.primary, disabled=True, row=0)
     async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Go to previous page"""
         if self.current_page > 0:
             self.current_page -= 1
-            # Update button states by finding buttons in children
-            for item in self.children:
-                if isinstance(item, discord.ui.Button):
-                    if item.custom_id == "hp_prev":
-                        item.disabled = self.current_page == 0
-                    elif item.custom_id == "hp_next":
-                        item.disabled = self.current_page >= self.total_pages - 1
+            # Update button states directly
+            self.prev_button.disabled = self.current_page == 0
+            self.next_button.disabled = self.current_page >= self.total_pages - 1
             # Update embed
             embed = self.create_embed(interaction.guild_id)
             await interaction.response.edit_message(embed=embed, view=self)
         else:
             await interaction.response.defer()
     
-    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.primary, custom_id="hp_next")
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.primary, row=0)
     async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Go to next page"""
         if self.current_page < self.total_pages - 1:
             self.current_page += 1
-            # Update button states by finding buttons in children
-            for item in self.children:
-                if isinstance(item, discord.ui.Button):
-                    if item.custom_id == "hp_prev":
-                        item.disabled = self.current_page == 0
-                    elif item.custom_id == "hp_next":
-                        item.disabled = self.current_page >= self.total_pages - 1
+            # Update button states directly
+            self.prev_button.disabled = self.current_page == 0
+            self.next_button.disabled = self.current_page >= self.total_pages - 1
             # Update embed
             embed = self.create_embed(interaction.guild_id)
             await interaction.response.edit_message(embed=embed, view=self)
