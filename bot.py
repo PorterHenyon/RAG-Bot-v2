@@ -129,6 +129,135 @@ no_review_threads = set()  # {thread_id}
 
 # REMOVED: No local storage - all data in Vercel KV API only
 
+# --- PAGINATED HIGH PRIORITY POSTS VIEW ---
+class HighPriorityPostsView(discord.ui.View):
+    """Paginated view for browsing high priority posts"""
+    
+    def __init__(self, posts, page_size=10):
+        super().__init__(timeout=3600)  # 1 hour timeout
+        self.posts = posts
+        self.page_size = page_size
+        self.current_page = 0
+        # Calculate total pages, ensure at least 1 page even if empty
+        self.total_pages = max(1, (len(posts) + page_size - 1) // page_size) if posts else 1
+        
+        # Set initial button states after super().__init__() creates buttons
+        # Disable navigation buttons if only one page or no posts
+        if self.total_pages <= 1:
+            # Find and disable the next button
+            for item in self.children:
+                if isinstance(item, discord.ui.Button) and item.custom_id == "hp_next":
+                    item.disabled = True
+                    break
+    
+    def get_page_posts(self):
+        """Get posts for current page"""
+        start = self.current_page * self.page_size
+        end = start + self.page_size
+        return self.posts[start:end]
+    
+    def create_embed(self, guild_id):
+        """Create embed for current page"""
+        page_posts = self.get_page_posts()
+        
+        embed = discord.Embed(
+            title=f"🚨 High Priority Posts (Page {self.current_page + 1}/{self.total_pages})",
+            description=f"Showing {len(self.posts)} total high priority post(s)",
+            color=0xE74C3C  # Red for high priority
+        )
+        
+        # Add posts to embed fields
+        for i, post in enumerate(page_posts, start=self.current_page * self.page_size + 1):
+            thread_id = post.get('postId')
+            post_title = post.get('postTitle', 'Unknown Post')
+            
+            # Get last activity time
+            updated_at = post.get('updatedAt') or post.get('createdAt', '')
+            activity_info = ""
+            if updated_at:
+                try:
+                    # Try ISO format first (most common)
+                    if 'T' in updated_at:
+                        updated_dt = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                    else:
+                        # Fallback to strptime
+                        updated_dt = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                    
+                    now = datetime.now(updated_dt.tzinfo) if hasattr(updated_dt, 'tzinfo') and updated_dt.tzinfo else datetime.now()
+                    # Remove timezone info for comparison if present
+                    if hasattr(updated_dt, 'replace') and updated_dt.tzinfo:
+                        updated_dt = updated_dt.replace(tzinfo=None)
+                    if hasattr(now, 'replace') and now.tzinfo:
+                        now = now.replace(tzinfo=None)
+                    
+                    time_diff = now - updated_dt
+                    if time_diff.days > 0:
+                        activity_info = f" ({time_diff.days}d ago)"
+                    elif time_diff.seconds // 3600 > 0:
+                        activity_info = f" ({time_diff.seconds // 3600}h ago)"
+                    elif time_diff.seconds // 60 > 0:
+                        activity_info = f" ({time_diff.seconds // 60}m ago)"
+                    else:
+                        activity_info = " (just now)"
+                except:
+                    pass
+            
+            post_url = f"https://discord.com/channels/{guild_id}/{thread_id}"
+            # Truncate title if too long
+            display_title = post_title[:60] + "..." if len(post_title) > 60 else post_title
+            embed.add_field(
+                name=f"{i}. {display_title}{activity_info}",
+                value=f"[View Post]({post_url})",
+                inline=False
+            )
+        
+        embed.set_footer(text=f"Use the buttons below to navigate • Total: {len(self.posts)} posts")
+        return embed
+    
+    @discord.ui.button(label="◀ Previous", style=discord.ButtonStyle.primary, disabled=True, custom_id="hp_prev")
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Go to previous page"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            # Update button states by finding buttons in children
+            for item in self.children:
+                if isinstance(item, discord.ui.Button):
+                    if item.custom_id == "hp_prev":
+                        item.disabled = self.current_page == 0
+                    elif item.custom_id == "hp_next":
+                        item.disabled = self.current_page >= self.total_pages - 1
+            # Update embed
+            embed = self.create_embed(interaction.guild_id)
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.defer()
+    
+    @discord.ui.button(label="Next ▶", style=discord.ButtonStyle.primary, custom_id="hp_next")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Go to next page"""
+        if self.current_page < self.total_pages - 1:
+            self.current_page += 1
+            # Update button states by finding buttons in children
+            for item in self.children:
+                if isinstance(item, discord.ui.Button):
+                    if item.custom_id == "hp_prev":
+                        item.disabled = self.current_page == 0
+                    elif item.custom_id == "hp_next":
+                        item.disabled = self.current_page >= self.total_pages - 1
+            # Update embed
+            embed = self.create_embed(interaction.guild_id)
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            await interaction.response.defer()
+    
+    @discord.ui.button(label="🔄 Refresh", style=discord.ButtonStyle.secondary, custom_id="hp_refresh")
+    async def refresh_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Refresh the list"""
+        await interaction.response.defer()
+        # Reload posts from API (this would need to be implemented)
+        # For now, just acknowledge
+        await interaction.followup.send("⚠️ Refresh not yet implemented. Use the navigation buttons.", ephemeral=True)
+
 # --- SATISFACTION BUTTON VIEW ---
 class SatisfactionButtons(discord.ui.View):
     """Interactive buttons for user feedback on bot responses"""
@@ -567,12 +696,22 @@ async def fetch_data_from_api():
                         # Merge API settings with defaults, API takes priority
                         settings_to_merge = {k: v for k, v in new_settings.items() if k != 'systemPrompt'}
                         if settings_to_merge:
+                            old_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
                             BOT_SETTINGS.update(settings_to_merge)
                             print(f"✓ Loaded bot settings from API (persisted across deployments)")
                             print(f"   satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
                                   f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
                                   f"retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d, "
                                   f"notification_channel={BOT_SETTINGS.get('support_notification_channel_id', 'Not set')}")
+                            
+                            # Update task intervals if they changed
+                            new_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
+                            if old_interval != new_interval and check_old_posts.is_running():
+                                try:
+                                    check_old_posts.change_interval(hours=new_interval)
+                                    print(f"✓ Updated check_old_posts interval to {new_interval} hours")
+                                except Exception as interval_error:
+                                    print(f"⚠ Could not update check_old_posts interval: {interval_error}")
                     
                     # Log changes for visibility
                     print(f"✓ Successfully connected to dashboard API!")
@@ -1190,8 +1329,12 @@ async def cleanup_old_solved_posts():
         import traceback
         traceback.print_exc()
 
-async def notify_support_channel_summary():
-    """Send a summary of all high priority posts to the support channel"""
+async def notify_support_channel_summary(ping_support=False):
+    """Send a paginated summary of all high priority posts to the support channel
+    
+    Args:
+        ping_support: If True, ping the support role. If False, don't ping (default: False)
+    """
     try:
         support_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
         if not support_channel_id:
@@ -1228,25 +1371,52 @@ async def notify_support_channel_summary():
                     print("✓ No high priority posts to notify about")
                     return
                 
-                # Build the message content
+                # Sort by recency/activity (most recent first)
+                # Use updatedAt if available, otherwise use createdAt
+                def get_sort_key(post):
+                    updated_at = post.get('updatedAt') or post.get('createdAt', '')
+                    if updated_at:
+                        try:
+                            # Try ISO format first (most common)
+                            if 'T' in updated_at:
+                                dt = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                            else:
+                                # Fallback to strptime
+                                dt = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                            return dt.timestamp()
+                        except:
+                            try:
+                                # Try common formats
+                                for fmt in ['%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S']:
+                                    try:
+                                        dt = datetime.strptime(updated_at, fmt)
+                                        return dt.timestamp()
+                                    except:
+                                        continue
+                            except:
+                                pass
+                    # If parsing fails, put at end (oldest)
+                    return 0
+                
+                high_priority_posts.sort(key=get_sort_key, reverse=True)
+                
+                # Build initial message (with optional ping)
                 support_role_id = BOT_SETTINGS.get('support_role_id')
-                # Note: support_role_id is stored as string to prevent JavaScript precision loss
-                message_content = f"<@&{support_role_id}>\n\n" if support_role_id else ""
-                message_content += "**High Priority Posts:**\n\n"
+                initial_message = ""
+                if ping_support and support_role_id:
+                    initial_message = f"<@&{support_role_id}>\n\n"
                 
-                # Add each post as a numbered list item
-                for i, post in enumerate(high_priority_posts[:10], 1):  # Limit to 10
-                    thread_id = post.get('postId')
-                    post_title = post.get('postTitle', 'Unknown Post')
-                    post_url = f"https://discord.com/channels/{DISCORD_GUILD_ID}/{thread_id}"
-                    message_content += f"{i}. [{post_title}]({post_url})\n"
+                # Create paginated view
+                view = HighPriorityPostsView(high_priority_posts, page_size=10)
+                embed = view.create_embed(DISCORD_GUILD_ID)
                 
-                if len(high_priority_posts) > 10:
-                    message_content += f"\n*... and {len(high_priority_posts) - 10} more*"
+                # Send the message with paginated embed
+                if initial_message:
+                    await support_channel.send(initial_message, embed=embed, view=view)
+                else:
+                    await support_channel.send(embed=embed, view=view)
                 
-                # Send the message
-                await support_channel.send(message_content)
-                print(f"✅ Sent high priority summary to support channel ({len(high_priority_posts)} posts)")
+                print(f"✅ Sent paginated high priority summary to support channel ({len(high_priority_posts)} posts, ping={ping_support})")
     
     except Exception as e:
         print(f"❌ Error sending support notification summary: {e}")
@@ -1349,8 +1519,8 @@ async def check_old_posts():
                 
                 if escalated_count > 0:
                     print(f"✅ Escalated {escalated_count} old post(s) to High Priority")
-                    # Send summary of all high priority posts to support channel
-                    await notify_support_channel_summary()
+                    # Send summary of all high priority posts to support channel (ping on new escalation)
+                    await notify_support_channel_summary(ping_support=True)
                 else:
                     print(f"✓ No old posts found needing escalation")
     
@@ -3498,8 +3668,8 @@ async def ping_high_priority_now(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     
     try:
-        # Send the summary
-        await notify_support_channel_summary()
+        # Send the summary (no ping for manual command - just viewing)
+        await notify_support_channel_summary(ping_support=False)
         
         support_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
         if support_channel_id:
@@ -4364,6 +4534,62 @@ async def mark_as_solve(interaction: discord.Interaction):
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
-# --- RUN THE BOT ---
+# --- RUN THE BOT WITH AUTO-RESTART ---
+async def run_bot_with_restart():
+    """Run the bot with automatic restart on crashes"""
+    max_retries = 10
+    retry_delay = 5  # Start with 5 seconds
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            print(f"🚀 Starting bot (attempt {retry_count + 1}/{max_retries})...")
+            await bot.start(DISCORD_BOT_TOKEN)
+        except KeyboardInterrupt:
+            print("\n⚠️ Bot stopped by user (KeyboardInterrupt)")
+            break
+        except Exception as e:
+            retry_count += 1
+            error_type = type(e).__name__
+            print(f"\n❌ Bot crashed: {error_type}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            
+            if retry_count < max_retries:
+                print(f"🔄 Attempting to restart in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                # Exponential backoff with max 60 seconds
+                retry_delay = min(retry_delay * 2, 60)
+            else:
+                print(f"❌ Max retries ({max_retries}) reached. Bot stopped.")
+                raise
+        else:
+            # If bot exits normally (shouldn't happen), restart
+            print("⚠️ Bot exited unexpectedly. Restarting...")
+            retry_count = 0
+            retry_delay = 5
+
+# Global exception handler for unhandled errors
+def handle_exception(loop, context):
+    """Handle unhandled exceptions in the event loop"""
+    exception = context.get('exception')
+    if exception:
+        print(f"⚠️ Unhandled exception in event loop: {type(exception).__name__}: {str(exception)}")
+        import traceback
+        traceback.print_exc()
+    else:
+        print(f"⚠️ Unhandled error in event loop: {context.get('message', 'Unknown error')}")
+
 if __name__ == "__main__":
-    bot.run(DISCORD_BOT_TOKEN)
+    # Set up global exception handler
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.set_exception_handler(handle_exception)
+    
+    try:
+        # Run bot with auto-restart
+        loop.run_until_complete(run_bot_with_restart())
+    except KeyboardInterrupt:
+        print("\n⚠️ Bot stopped by user")
+    finally:
+        loop.close()
