@@ -17,19 +17,48 @@ load_dotenv()
 
 # 1. LOAD ENVIRONMENT VARIABLES FROM .env FILE
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 SUPPORT_FORUM_CHANNEL_ID_STR = os.getenv('SUPPORT_FORUM_CHANNEL_ID')
 DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # Server ID for slash command sync
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
+
+# Load multiple Gemini API keys for rotation
+GEMINI_API_KEYS = []
+# Primary key
+primary_key = os.getenv('GEMINI_API_KEY')
+if primary_key:
+    GEMINI_API_KEYS.append(primary_key)
+
+# Additional keys (2-6)
+for i in range(2, 7):
+    key = os.getenv(f'GEMINI_API_KEY_{i}')
+    if key:
+        GEMINI_API_KEYS.append(key)
+
+# Also check for hardcoded keys from user
+hardcoded_keys = [
+    'AIzaSyBqjSehZEJABrV6NslAIHtVq1lRrZma5wQ',
+    'AIzaSyB3UOCzfUNyX5Wq3-5-oYLheKr4khzH0rU',
+    'AIzaSyCSQFduOyZBuwzisCnZzCFQccz5dECpeN4',
+    'AIzaSyBhy2P8l9o2I84VYecQk6BgXvkNiBBi7Cg',
+    'AIzaSyAZwOtFg1DhqfgQ872Qaz1fS_pgkT49Glo'
+]
+
+# Add hardcoded keys if not already in the list
+for key in hardcoded_keys:
+    if key not in GEMINI_API_KEYS:
+        GEMINI_API_KEYS.append(key)
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
     print("FATAL ERROR: 'DISCORD_BOT_TOKEN' not found in environment.")
     exit()
 
-if not GEMINI_API_KEY:
-    print("FATAL ERROR: 'GEMINI_API_KEY' not found in environment.")
+if not GEMINI_API_KEYS:
+    print("FATAL ERROR: No Gemini API keys found in environment.")
+    print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6")
     exit()
+
+print(f"✓ Loaded {len(GEMINI_API_KEYS)} Gemini API key(s) for rotation")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
@@ -47,8 +76,115 @@ except ValueError:
     print("FATAL ERROR: 'DISCORD_GUILD_ID' is not a valid number.")
     exit()
 
-# Configure the Gemini API
-genai.configure(api_key=GEMINI_API_KEY)
+# --- GEMINI API KEY ROTATION SYSTEM ---
+class GeminiKeyManager:
+    """Manages multiple Gemini API keys with rotation and rate limit handling"""
+    
+    def __init__(self, api_keys):
+        self.api_keys = api_keys
+        self.current_key_index = 0
+        self.key_usage_count = {key[:10] + '...': 0 for key in api_keys}  # Track usage per key
+        self.key_rate_limited = {key[:10] + '...': False for key in api_keys}  # Track rate limit status
+        self.key_rate_limit_time = {key[:10] + '...': None for key in api_keys}  # When rate limit occurred
+        print(f"✓ Initialized GeminiKeyManager with {len(api_keys)} key(s)")
+    
+    def get_current_key(self):
+        """Get the current active API key"""
+        return self.api_keys[self.current_key_index]
+    
+    def get_next_key(self):
+        """Get next available key (round-robin)"""
+        original_index = self.current_key_index
+        attempts = 0
+        
+        while attempts < len(self.api_keys):
+            self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+            key_short = self.api_keys[self.current_key_index][:10] + '...'
+            
+            # Skip rate-limited keys (unless they've been rate limited for more than 1 minute)
+            if self.key_rate_limited[key_short]:
+                limit_time = self.key_rate_limit_time[key_short]
+                if limit_time:
+                    time_since_limit = (datetime.now() - limit_time).total_seconds()
+                    if time_since_limit < 60:  # Still rate limited
+                        attempts += 1
+                        continue
+                    else:
+                        # Rate limit expired, reset
+                        self.key_rate_limited[key_short] = False
+                        self.key_rate_limit_time[key_short] = None
+                        print(f"🔄 Key {key_short} rate limit expired, using again")
+            
+            return self.api_keys[self.current_key_index]
+        
+        # All keys rate limited, use the one with longest wait
+        self.current_key_index = original_index
+        return self.api_keys[self.current_key_index]
+    
+    def mark_key_rate_limited(self, key):
+        """Mark a key as rate limited"""
+        key_short = key[:10] + '...'
+        self.key_rate_limited[key_short] = True
+        self.key_rate_limit_time[key_short] = datetime.now()
+        print(f"⚠️ Key {key_short} hit rate limit, switching to next key")
+    
+    def track_usage(self, key):
+        """Track that a key was used"""
+        key_short = key[:10] + '...'
+        self.key_usage_count[key_short] = self.key_usage_count.get(key_short, 0) + 1
+    
+    def get_usage_stats(self):
+        """Get usage statistics for all keys"""
+        return dict(self.key_usage_count)
+    
+    def create_model(self, model_name, **kwargs):
+        """Create a GenerativeModel with the current key"""
+        key = self.get_current_key()
+        self.track_usage(key)
+        
+        # Configure genai with current key
+        genai.configure(api_key=key)
+        
+        # Create and return model
+        return genai.GenerativeModel(model_name, **kwargs)
+    
+    def create_model_with_retry(self, model_name, **kwargs):
+        """Create a GenerativeModel with automatic key rotation on rate limit"""
+        max_attempts = len(self.api_keys)
+        attempts = 0
+        
+        while attempts < max_attempts:
+            try:
+                key = self.get_current_key()
+                self.track_usage(key)
+                
+                # Configure genai with current key
+                genai.configure(api_key=key)
+                
+                # Create model
+                return genai.GenerativeModel(model_name, **kwargs)
+            except Exception as e:
+                error_str = str(e).lower()
+                # Check if it's a rate limit error
+                if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str:
+                    key_used = self.get_current_key()
+                    self.mark_key_rate_limited(key_used)
+                    self.get_next_key()  # Switch to next key
+                    attempts += 1
+                    print(f"⚠️ Rate limit error on attempt {attempts}, trying next key...")
+                    continue
+                else:
+                    # Not a rate limit error, re-raise
+                    raise
+        
+        # All keys exhausted
+        raise Exception("All API keys are rate limited. Please wait before trying again.")
+
+# Initialize key manager
+gemini_key_manager = GeminiKeyManager(GEMINI_API_KEYS)
+
+# Configure with first key
+genai.configure(api_key=gemini_key_manager.get_current_key())
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -89,29 +225,53 @@ BOT_SETTINGS = {
     'last_updated': datetime.now().isoformat()
 }
 
-# --- GEMINI API RATE LIMITING (10 requests per minute) ---
+# --- GEMINI API RATE LIMITING (tracked per key now) ---
 from collections import deque
-gemini_api_calls = deque(maxlen=100)  # Track last 100 API calls
+
+# Track API calls per key (for monitoring)
+gemini_api_calls_by_key = {key[:10] + '...': deque(maxlen=100) for key in GEMINI_API_KEYS}
 
 async def check_rate_limit():
-    """Check if we can make a Gemini API call without hitting rate limit"""
-    now = datetime.now()
-    # Remove calls older than 1 minute
-    while gemini_api_calls and (now - gemini_api_calls[0]).total_seconds() > 60:
-        gemini_api_calls.popleft()
+    """Check if we can make a Gemini API call without hitting rate limit
+    Note: With key rotation, we check the current key's usage"""
+    current_key = gemini_key_manager.get_current_key()
+    key_short = current_key[:10] + '...'
     
-    # Check if we're at the limit (10 per minute)
-    if len(gemini_api_calls) >= 10:
-        oldest_call = gemini_api_calls[0]
-        wait_time = 60 - (now - oldest_call).total_seconds()
-        print(f"⚠️ RATE LIMIT: {len(gemini_api_calls)}/10 API calls in last minute. Waiting {wait_time:.1f}s...")
-        return False
+    if key_short not in gemini_api_calls_by_key:
+        gemini_api_calls_by_key[key_short] = deque(maxlen=100)
+    
+    api_calls = gemini_api_calls_by_key[key_short]
+    now = datetime.now()
+    
+    # Remove calls older than 1 minute
+    while api_calls and (now - api_calls[0]).total_seconds() > 60:
+        api_calls.popleft()
+    
+    # Check if we're at the limit (10 per minute per key)
+    if len(api_calls) >= 10:
+        # Try next key if available
+        next_key = gemini_key_manager.get_next_key()
+        if next_key != current_key:
+            print(f"⚠️ Current key at rate limit, rotating to next key...")
+            return True  # Can proceed with next key
+        else:
+            oldest_call = api_calls[0]
+            wait_time = 60 - (now - oldest_call).total_seconds()
+            print(f"⚠️ RATE LIMIT: {len(api_calls)}/10 API calls in last minute. Waiting {wait_time:.1f}s...")
+            return False
     return True
 
 def track_api_call():
     """Track that we made a Gemini API call"""
-    gemini_api_calls.append(datetime.now())
-    print(f"📊 Gemini API calls: {len(gemini_api_calls)}/10 in last minute")
+    current_key = gemini_key_manager.get_current_key()
+    key_short = current_key[:10] + '...'
+    
+    if key_short not in gemini_api_calls_by_key:
+        gemini_api_calls_by_key[key_short] = deque(maxlen=100)
+    
+    gemini_api_calls_by_key[key_short].append(datetime.now())
+    usage_stats = gemini_key_manager.get_usage_stats()
+    print(f"📊 Using key {key_short} | Key usage: {usage_stats}")
 
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
@@ -994,7 +1154,8 @@ async def generate_ai_response(query, context_entries, image_data=None):
         
         # Use vision model if we have images
         model_name = 'gemini-2.0-flash-exp' if image_data else 'gemini-2.5-flash'
-        model = genai.GenerativeModel(
+        # Use key manager for automatic rotation
+        model = gemini_key_manager.create_model_with_retry(
             model_name,
             system_instruction=system_instruction
         )
@@ -1049,7 +1210,8 @@ async def analyze_conversation(conversation_text):
             print(f"⚠️ Skipping RAG entry generation due to rate limit")
             return None
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Use key manager for automatic rotation
+        model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
         
         prompt = (
             "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
@@ -1113,7 +1275,8 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
             print(f"⚠️ Skipping satisfaction analysis due to rate limit")
             return {"satisfied": False, "reason": "Rate limit", "confidence": 0, "wants_human": False}
         
-        model = genai.GenerativeModel('gemini-2.5-flash')
+        # Use key manager for automatic rotation
+        model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
         
         prompt = (
             "Analyze the following user message(s) and determine if they are satisfied with the bot's response or need human support.\n\n"
@@ -1912,7 +2075,8 @@ async def on_thread_create(thread):
         # Ask Gemini what's in the image to enhance the query
         try:
             import google.generativeai as genai
-            vision_model = genai.GenerativeModel('gemini-2.0-flash-exp')
+            # Use key manager for automatic rotation
+            vision_model = gemini_key_manager.create_model_with_retry('gemini-2.0-flash-exp')
             image_analysis_prompt = "Describe what you see in this image. What issue or problem does it show? Be brief (2-3 sentences)."
             
             # Create content with images
@@ -2122,7 +2286,8 @@ async def on_thread_create(thread):
                 # Use custom system prompt as base if available
                 base_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
                 
-                model = genai.GenerativeModel('gemini-2.5-flash', system_instruction=base_instruction)
+                # Use key manager for automatic rotation
+                model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash', system_instruction=base_instruction)
                 
                 general_prompt = (
                     "Revolution Macro is a game automation tool.\n\n"
@@ -3717,7 +3882,7 @@ async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled
                 f"{status_emoji} Satisfaction analysis is now **{status_text}**!\n\n"
                 f"{'✅ The bot will automatically analyze user messages to detect satisfaction and escalate when needed.' if enabled else '❌ The bot will NOT automatically analyze satisfaction. Users can still click buttons to give feedback.'}\n\n"
                 f"💡 **Gemini API Impact**: This saves ~1 API call per user reply (10 RPM limit)\n"
-                f"📊 **Current rate**: {len(gemini_api_calls)}/10 calls in last minute",
+                f"📊 **Current rate**: {sum(len(calls) for calls in gemini_api_calls_by_key.values())} calls across {len(GEMINI_API_KEYS)} key(s)",
                 ephemeral=False
             )
             print(f"✓ Satisfaction analysis {status_text} by {interaction.user}")
@@ -3781,9 +3946,19 @@ async def status(interaction: discord.Interaction):
             inline=True
         )
         
+        # Calculate total API calls across all keys
+        total_calls = sum(len(calls) for calls in gemini_api_calls_by_key.values())
+        usage_stats = gemini_key_manager.get_usage_stats()
+        usage_text = f"**{total_calls}** calls total\n"
+        for key_short, count in list(usage_stats.items())[:3]:  # Show first 3 keys
+            calls_for_key = len(gemini_api_calls_by_key.get(key_short, deque()))
+            usage_text += f"{key_short}: {calls_for_key}/10, {count} total\n"
+        if len(usage_stats) > 3:
+            usage_text += f"... {len(usage_stats) - 3} more key(s)"
+        
         status_embed.add_field(
             name="🔥 Gemini API Rate",
-            value=f"**{len(gemini_api_calls)}/10** calls in last minute",
+            value=usage_text,
             inline=True
         )
         
@@ -3859,9 +4034,24 @@ async def api_info(interaction: discord.Interaction):
             inline=False
         )
         
+        # API keys info
+        keys_info = f"**Total Keys:** {len(GEMINI_API_KEYS)}\n"
+        usage_stats = gemini_key_manager.get_usage_stats()
+        for i, key in enumerate(GEMINI_API_KEYS, 1):
+            key_short = key[:10] + '...'
+            usage = usage_stats.get(key_short, 0)
+            current_indicator = " (current)" if i - 1 == gemini_key_manager.current_key_index else ""
+            keys_info += f"**Key {i}:** {key_short} - {usage} calls{current_indicator}\n"
+        
         api_embed.add_field(
-            name="🔑 Environment Variables",
-            value=f"**DISCORD_BOT_TOKEN:** {'✅ Set' if DISCORD_BOT_TOKEN else '❌ Missing'}\n**GEMINI_API_KEY:** {'✅ Set' if GEMINI_API_KEY else '❌ Missing'}",
+            name="🔑 Gemini API Keys",
+            value=keys_info,
+            inline=False
+        )
+        
+        api_embed.add_field(
+            name="🤖 Bot Token",
+            value=f"**DISCORD_BOT_TOKEN:** {'✅ Set' if DISCORD_BOT_TOKEN else '❌ Missing'}",
             inline=False
         )
         
