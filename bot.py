@@ -1160,110 +1160,148 @@ def build_user_context(query, context_entries):
     )
 
 async def generate_ai_response(query, context_entries, image_data=None):
-    try:
-        # Check rate limit before making API call
-        if not await check_rate_limit():
-            print(f"⚠️ Skipping AI response generation due to rate limit")
-            return "I'm experiencing high traffic right now. Please wait a moment or contact human support!"
-        
-        # Use API system prompt if available, otherwise use default
-        system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
-        
-        # Get AI settings from bot settings
-        temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
-        max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
-        
-        # Use vision model if we have images
-        model_name = 'gemini-2.0-flash-exp' if image_data else 'gemini-2.5-flash'
-        # Use key manager for automatic rotation
-        model = gemini_key_manager.create_model_with_retry(
-            model_name,
-            system_instruction=system_instruction
-        )
-        
-        if image_data:
-            print(f"🖼️ Using vision model with {len(image_data)} image(s)")
-        
-        # Configure generation settings
-        generation_config = genai.types.GenerationConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens
-        )
-        
-        # User context separated
-        user_context = build_user_context(query, context_entries)
-        
-        # Prepare content for Gemini (text + images if provided)
-        if image_data:
-            # Include images in the prompt for vision model
-            content_parts = []
-            for img in image_data:
-                content_parts.append(img)
-            content_parts.append(user_context)
-            prompt_content = content_parts
-        else:
-            prompt_content = user_context
-        
-        # Generate response with custom settings
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(
-            None,
-            lambda: model.generate_content(prompt_content, generation_config=generation_config)
-        )
-        track_api_call()  # Track successful API call
-        
-        # Clean up images from memory after use
-        if image_data:
-            for img in image_data:
-                img.close()  # Release image from memory
-            print(f"🗑️ Cleaned up {len(image_data)} image(s) from memory")
-        
-        return response.text
-    except Exception as e:
-        print(f"An error occurred with the Gemini API: {e}")
-        return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
+    """Generate an AI response using Gemini API with RAG context (with retry logic)"""
+    max_retries = 2  # Try twice (initial attempt + 1 retry)
+    
+    for attempt in range(max_retries):
+        try:
+            # Check rate limit before making API call
+            if not await check_rate_limit():
+                print(f"⚠️ Skipping AI response generation due to rate limit")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)  # Wait 1 second before retry
+                    continue
+                return "I'm experiencing high traffic right now. Please wait a moment or contact human support!"
+            
+            # Use API system prompt if available, otherwise use default
+            system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
+            
+            # Get AI settings from bot settings
+            temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
+            max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
+            
+            # Use vision model if we have images
+            model_name = 'gemini-2.0-flash-exp' if image_data else 'gemini-2.5-flash'
+            # Use key manager for automatic rotation
+            model = gemini_key_manager.create_model_with_retry(
+                model_name,
+                system_instruction=system_instruction
+            )
+            
+            if image_data:
+                print(f"🖼️ Using vision model with {len(image_data)} image(s)")
+            
+            # Configure generation settings
+            generation_config = genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=max_tokens
+            )
+            
+            # User context separated
+            user_context = build_user_context(query, context_entries)
+            
+            # Prepare content for Gemini (text + images if provided)
+            if image_data:
+                # Include images in the prompt for vision model
+                content_parts = []
+                for img in image_data:
+                    content_parts.append(img)
+                content_parts.append(user_context)
+                prompt_content = content_parts
+            else:
+                prompt_content = user_context
+            
+            # Generate response with custom settings
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: model.generate_content(prompt_content, generation_config=generation_config)
+            )
+            track_api_call()  # Track successful API call
+            
+            # Clean up images from memory after use
+            if image_data:
+                for img in image_data:
+                    img.close()  # Release image from memory
+                print(f"🗑️ Cleaned up {len(image_data)} image(s) from memory")
+            
+            return response.text
+            
+        except Exception as e:
+            error_str = str(e).lower()
+            is_rate_limit = 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str
+            
+            if attempt < max_retries - 1:
+                # Retry on transient errors
+                wait_time = 2 if is_rate_limit else 1  # Wait longer for rate limits
+                print(f"⚠️ API call failed (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"   Retrying in {wait_time} second(s)...")
+                await asyncio.sleep(wait_time)
+                continue
+            else:
+                # Final attempt failed
+                print(f"❌ API call failed after {max_retries} attempts: {e}")
+                import traceback
+                traceback.print_exc()
+                return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
+    
+    # Should never reach here, but just in case
+    return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
 
 async def analyze_conversation(conversation_text):
-    """Analyze a conversation and create a RAG entry from it"""
-    try:
-        # Check rate limit before making API call
-        if not await check_rate_limit():
-            print(f"⚠️ Skipping RAG entry generation due to rate limit")
-            return None
-        
-        # Use key manager for automatic rotation
-        model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
-        
-        prompt = (
-            "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
-            "- The 'title' should be a clear, concise summary of the problem (e.g., 'Fix for ... Error').\n"
-            "- The 'content' should be a detailed explanation of the solution.\n"
-            "- The 'keywords' should be an array of relevant search terms.\n\n"
-            f"Conversation:\n{conversation_text}\n\n"
-            "Return only a valid JSON object with this structure:\n"
-            '{\n'
-            '  "title": "string",\n'
-            '  "content": "string",\n'
-            '  "keywords": ["string1", "string2", ...]\n'
-            '}'
-        )
-        
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, model.generate_content, prompt)
-        
-        # Parse JSON response
-        response_text = response.text.strip()
-        # Try to extract JSON from response (handle markdown code blocks)
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        parsed = json.loads(response_text)
-        return parsed
-    except Exception as e:
-        print(f"Error analyzing conversation: {e}")
-        return None
+    """Analyze a conversation and create a RAG entry from it (with retry logic)"""
+    max_retries = 2  # Try twice (initial attempt + 1 retry)
+    
+    for attempt in range(max_retries):
+        try:
+            # Check rate limit before making API call
+            if not await check_rate_limit():
+                print(f"⚠️ Skipping RAG entry generation due to rate limit")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(1)
+                    continue
+                return None
+            
+            # Use key manager for automatic rotation
+            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
+            
+            prompt = (
+                "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
+                "- The 'title' should be a clear, concise summary of the problem (e.g., 'Fix for ... Error').\n"
+                "- The 'content' should be a detailed explanation of the solution.\n"
+                "- The 'keywords' should be an array of relevant search terms.\n\n"
+                f"Conversation:\n{conversation_text}\n\n"
+                "Return only a valid JSON object with this structure:\n"
+                '{\n'
+                '  "title": "string",\n'
+                '  "content": "string",\n'
+                '  "keywords": ["string1", "string2", ...]\n'
+                '}'
+            )
+            
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, model.generate_content, prompt)
+            
+            # Parse JSON response
+            response_text = response.text.strip()
+            # Try to extract JSON from response (handle markdown code blocks)
+            if "```json" in response_text:
+                response_text = response_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in response_text:
+                response_text = response_text.split("```")[1].split("```")[0].strip()
+            
+            parsed = json.loads(response_text)
+            return parsed
+            
+        except Exception as e:
+            if attempt < max_retries - 1:
+                print(f"⚠️ Error analyzing conversation (attempt {attempt + 1}/{max_retries}): {e}")
+                print(f"   Retrying in 1 second...")
+                await asyncio.sleep(1)
+                continue
+            else:
+                print(f"❌ Error analyzing conversation after {max_retries} attempts: {e}")
+                return None
 
 async def analyze_user_satisfaction(user_messages: list) -> dict:
     """Use AI to determine if user is satisfied or needs human support
