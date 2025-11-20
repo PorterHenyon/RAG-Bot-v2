@@ -320,10 +320,12 @@ class HighPriorityPostsView(discord.ui.View):
             color=0xE74C3C  # Red for high priority
         )
         
-        # Add posts to embed fields
+        # Build compact list of posts using markdown format
+        post_list = []
         for i, post in enumerate(page_posts, start=self.current_page * self.page_size + 1):
             thread_id = post.get('postId')
             post_title = post.get('postTitle', 'Unknown Post')
+            op_username = post.get('user', {}).get('username', 'Unknown')
             
             # Get last activity time
             updated_at = post.get('updatedAt') or post.get('createdAt', '')
@@ -357,13 +359,16 @@ class HighPriorityPostsView(discord.ui.View):
                     pass
             
             post_url = f"https://discord.com/channels/{guild_id}/{thread_id}"
-            # Truncate title if too long
-            display_title = post_title[:60] + "..." if len(post_title) > 60 else post_title
-            embed.add_field(
-                name=f"{i}. {display_title}{activity_info}",
-                value=f"[View Post]({post_url})",
-                inline=False
-            )
+            # Compact format: [Post title - OP Username](link)
+            post_list.append(f"{i}. [{post_title} - {op_username}]({post_url}){activity_info}")
+        
+        # Add all posts as a single field with markdown list
+        posts_text = "\n".join(post_list)
+        embed.add_field(
+            name="High Priority Posts",
+            value=posts_text or "No posts on this page",
+            inline=False
+        )
         
         embed.set_footer(text=f"Use the buttons below to navigate • Total: {len(self.posts)} posts")
         return embed
