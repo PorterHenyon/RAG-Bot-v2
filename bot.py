@@ -321,11 +321,17 @@ class HighPriorityPostsView(discord.ui.View):
         )
         
         # Build compact list of posts using markdown format
-        post_list = []
+        # Split into multiple fields if needed (Discord limit: 1024 chars per field value)
+        post_entries = []
         for i, post in enumerate(page_posts, start=self.current_page * self.page_size + 1):
             thread_id = post.get('postId')
             post_title = post.get('postTitle', 'Unknown Post')
             op_username = post.get('user', {}).get('username', 'Unknown')
+            
+            # Truncate title if too long to prevent field overflow
+            max_title_length = 80
+            if len(post_title) > max_title_length:
+                post_title = post_title[:max_title_length - 3] + "..."
             
             # Get last activity time
             updated_at = post.get('updatedAt') or post.get('createdAt', '')
@@ -360,15 +366,40 @@ class HighPriorityPostsView(discord.ui.View):
             
             post_url = f"https://discord.com/channels/{guild_id}/{thread_id}"
             # Compact format: [Post title - OP Username](link)
-            post_list.append(f"{i}. [{post_title} - {op_username}]({post_url}){activity_info}")
+            post_entries.append(f"{i}. [{post_title} - {op_username}]({post_url}){activity_info}")
         
-        # Add all posts as a single field with markdown list
-        posts_text = "\n".join(post_list)
-        embed.add_field(
-            name="High Priority Posts",
-            value=posts_text or "No posts on this page",
-            inline=False
-        )
+        # Split posts across multiple fields to stay under 1024 char limit per field
+        max_field_length = 1000  # Keep some buffer under 1024 limit
+        current_field_content = []
+        current_length = 0
+        field_number = 1
+        
+        for entry in post_entries:
+            entry_length = len(entry) + 1  # +1 for newline
+            
+            # If adding this entry would exceed limit, create a field and start new one
+            if current_length + entry_length > max_field_length and current_field_content:
+                field_name = f"High Priority Posts" if field_number == 1 else f"Posts (continued)"
+                embed.add_field(
+                    name=field_name,
+                    value="\n".join(current_field_content),
+                    inline=False
+                )
+                current_field_content = []
+                current_length = 0
+                field_number += 1
+            
+            current_field_content.append(entry)
+            current_length += entry_length
+        
+        # Add the last field if there's content
+        if current_field_content:
+            field_name = f"High Priority Posts" if field_number == 1 else f"Posts (continued)"
+            embed.add_field(
+                name=field_name,
+                value="\n".join(current_field_content) or "No posts on this page",
+                inline=False
+            )
         
         embed.set_footer(text=f"Use the buttons below to navigate • Total: {len(self.posts)} posts")
         return embed
