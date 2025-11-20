@@ -3756,16 +3756,20 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
         print(f"Error in toggle_auto_rag: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="list_high_priority_posts", description="List all current high priority posts (Admin only).")
+@bot.tree.command(name="list_high_priority_posts", description="Show paginated list of all high priority posts with navigation (Admin only).")
 async def list_high_priority_posts(interaction: discord.Interaction):
-    """List all posts currently marked as High Priority"""
+    """List all posts currently marked as High Priority with pagination"""
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
     await interaction.response.defer(ephemeral=False)
     
     try:
-        forum_api_url = DATA_API_URL.replace('/data', '/forum-posts')
+        if 'your-vercel-app' in DATA_API_URL:
+            await interaction.followup.send("⚠️ API not configured. Cannot fetch high priority posts.", ephemeral=False)
+            return
+        
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
         
         async with aiohttp.ClientSession() as session:
             headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
@@ -3787,41 +3791,46 @@ async def list_high_priority_posts(interaction: discord.Interaction):
                     )
                     return
                 
-                # Build embed with list of high priority posts
-                embed = discord.Embed(
-                    title=f"🚨 High Priority Posts ({len(high_priority_posts)})",
-                    description="These posts need immediate attention from the support team:",
-                    color=0xE74C3C
-                )
+                # Sort by recency/activity (most recent first)
+                # Use updatedAt if available, otherwise use createdAt
+                def get_sort_key(post):
+                    updated_at = post.get('updatedAt') or post.get('createdAt', '')
+                    if updated_at:
+                        try:
+                            # Try ISO format first (most common)
+                            if 'T' in updated_at:
+                                dt = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                            else:
+                                # Fallback to strptime
+                                dt = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                            return dt.timestamp()
+                        except:
+                            try:
+                                # Try common formats
+                                for fmt in ['%Y-%m-%dT%H:%M:%S.%fZ', '%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S']:
+                                    try:
+                                        dt = datetime.strptime(updated_at, fmt)
+                                        return dt.timestamp()
+                                    except:
+                                        continue
+                            except:
+                                pass
+                    # If parsing fails, put at end (oldest)
+                    return 0
                 
-                for i, post in enumerate(high_priority_posts[:10], 1):  # Limit to 10 posts
-                    thread_id = post.get('postId')
-                    post_title = post.get('postTitle', 'Unknown')
-                    user_name = post.get('user', {}).get('username', 'Unknown')
-                    
-                    embed.add_field(
-                        name=f"{i}. {post_title}",
-                        value=f"**User:** {user_name}\n[View Post](https://discord.com/channels/{DISCORD_GUILD_ID}/{thread_id})",
-                        inline=False
-                    )
+                high_priority_posts.sort(key=get_sort_key, reverse=True)
                 
-                if len(high_priority_posts) > 10:
-                    embed.set_footer(text=f"Showing 10 of {len(high_priority_posts)} high priority posts")
-                else:
-                    # Get notification channel info
-                    notif_channel_id = BOT_SETTINGS.get('support_notification_channel_id')
-                    if notif_channel_id:
-                        notif_channel_id = int(notif_channel_id) if isinstance(notif_channel_id, str) else notif_channel_id
-                        notif_channel = bot.get_channel(notif_channel_id)
-                        channel_name = f"#{notif_channel.name}" if notif_channel else "Not set"
-                    else:
-                        channel_name = "Not set"
-                    embed.set_footer(text=f"Support Notification Channel: {channel_name}")
+                # Create paginated view
+                view = HighPriorityPostsView(high_priority_posts, page_size=10)
+                embed = view.create_embed(interaction.guild_id)
                 
-                await interaction.followup.send(embed=embed, ephemeral=False)
+                await interaction.followup.send(embed=embed, view=view, ephemeral=False)
+                print(f"✓ High priority posts list shown by {interaction.user} ({len(high_priority_posts)} posts)")
                 
     except Exception as e:
         print(f"Error in list_high_priority_posts: {e}")
+        import traceback
+        traceback.print_exc()
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="ping_high_priority_now", description="Manually send high priority summary to notification channel (Admin only).")
