@@ -372,29 +372,28 @@ class HighPriorityPostsView(discord.ui.View):
         max_field_length = 1000  # Keep some buffer under 1024 limit
         current_field_content = []
         current_length = 0
-        field_number = 1
         
         for entry in post_entries:
             entry_length = len(entry) + 1  # +1 for newline
             
             # If adding this entry would exceed limit, create a field and start new one
             if current_length + entry_length > max_field_length and current_field_content:
-                field_name = f"High Priority Posts" if field_number == 1 else f"Posts (continued)"
+                # Only first field gets a name, continuation fields are empty (cleaner look)
                 embed.add_field(
-                    name=field_name,
+                    name="High Priority Posts",
                     value="\n".join(current_field_content),
                     inline=False
                 )
                 current_field_content = []
                 current_length = 0
-                field_number += 1
             
             current_field_content.append(entry)
             current_length += entry_length
         
         # Add the last field if there's content
         if current_field_content:
-            field_name = f"High Priority Posts" if field_number == 1 else f"Posts (continued)"
+            # Only show field name if this is the first/only field, otherwise leave empty
+            field_name = "High Priority Posts" if len(embed.fields) == 0 else ""
             embed.add_field(
                 name=field_name,
                 value="\n".join(current_field_content) or "No posts on this page",
