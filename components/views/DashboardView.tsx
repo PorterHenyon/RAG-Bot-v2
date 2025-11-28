@@ -1,6 +1,6 @@
 import React from 'react';
 import { useMockData } from '../../hooks/useMockData';
-import { PostStatus } from '../../types';
+import { PostStatus, ForumPost, Message } from '../../types';
 import { ArrowRightIcon, DatabaseIcon, ChevronDownIcon } from '../icons';
 
 const StatCard: React.FC<{ title: string; value: number; color: string }> = ({ title, value, color }) => (
@@ -28,11 +28,41 @@ const FlowArrow: React.FC<{ label?: string }> = ({ label }) => (
 
 const DashboardView: React.FC = () => {
   const { forumPosts } = useMockData();
+  
+  // Helper to check if a post was solved today
+  const isSolvedToday = (post: ForumPost): boolean => {
+    if (post.status !== PostStatus.Solved && post.status !== PostStatus.Closed) {
+      return false;
+    }
+    
+    // Check conversation messages for when it was marked as solved
+    const solvedMessages = post.conversation.filter((msg: Message) => 
+      msg.author === 'System' && 
+      (msg.content.toLowerCase().includes('solved') || msg.content.toLowerCase().includes('closed'))
+    );
+    
+    if (solvedMessages.length > 0) {
+      // Use the most recent solved message timestamp
+      const solvedTimestamp = new Date(solvedMessages[solvedMessages.length - 1].timestamp);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return solvedTimestamp >= today;
+    }
+    
+    // Fallback: if no system message, check if status is Solved/Closed and created today
+    // (less accurate but better than nothing)
+    const createdAt = new Date(post.createdAt);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return createdAt >= today && (post.status === PostStatus.Solved || post.status === PostStatus.Closed);
+  };
+  
   const stats = {
-    unsolved: forumPosts.filter(p => p.status === PostStatus.Unsolved).length,
-    inProgress: forumPosts.filter(p => [PostStatus.AIResponse, PostStatus.HumanSupport, PostStatus.HighPriority].includes(p.status)).length,
-    solved: forumPosts.filter(p => p.status === PostStatus.Solved).length,
-    closed: forumPosts.filter(p => p.status === PostStatus.Closed).length
+    unsolved: forumPosts.filter((p: ForumPost) => p.status === PostStatus.Unsolved).length,
+    inProgress: forumPosts.filter((p: ForumPost) => [PostStatus.AIResponse, PostStatus.HumanSupport, PostStatus.HighPriority].includes(p.status)).length,
+    solvedToday: forumPosts.filter((p: ForumPost) => isSolvedToday(p)).length,
+    // Total closed includes both Solved and Closed posts
+    totalClosed: forumPosts.filter((p: ForumPost) => p.status === PostStatus.Closed || p.status === PostStatus.Solved).length
   };
 
   return (
@@ -40,8 +70,8 @@ const DashboardView: React.FC = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <StatCard title="Unsolved Posts" value={stats.unsolved} color="text-blue-400" />
         <StatCard title="In Progress" value={stats.inProgress} color="text-purple-400" />
-        <StatCard title="Solved Today" value={stats.solved} color="text-green-400" />
-        <StatCard title="Total Closed" value={stats.closed} color="text-gray-400" />
+        <StatCard title="Solved Today" value={stats.solvedToday} color="text-green-400" />
+        <StatCard title="Total Closed" value={stats.totalClosed} color="text-gray-400" />
       </div>
 
       <div>

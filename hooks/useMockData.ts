@@ -343,9 +343,31 @@ export const useMockData = () => {
                     // Load bot settings
                     if (data.botSettings && typeof data.botSettings === 'object') {
                         setBotSettings(data.botSettings);
+                        // Also save to localStorage as backup
+                        try {
+                            localStorage.setItem('rag_bot_settings', JSON.stringify(data.botSettings));
+                        } catch (e) {
+                            console.error('Failed to save settings to localStorage:', e);
+                        }
                         console.log(`✓ Loaded bot settings from API`);
                     } else {
-                        console.log(`✓ Using default bot settings - will sync to API`);
+                        // Try to load from localStorage as fallback
+                        try {
+                            const stored = localStorage.getItem('rag_bot_settings');
+                            if (stored) {
+                                const parsed = JSON.parse(stored);
+                                if (parsed.systemPrompt) {
+                                    setBotSettings(parsed);
+                                    console.log(`✓ Loaded bot settings from localStorage (API had none)`);
+                                } else {
+                                    console.log(`✓ Using default bot settings - will sync to API`);
+                                }
+                            } else {
+                                console.log(`✓ Using default bot settings - will sync to API`);
+                            }
+                        } catch (e) {
+                            console.log(`✓ Using default bot settings - will sync to API`);
+                        }
                     }
                     // Load pending RAG entries - with detailed logging
                     console.log('🔍 API Response Keys:', Object.keys(data));
@@ -449,6 +471,13 @@ export const useMockData = () => {
         const timeoutId = setTimeout(() => {
             const syncData = async () => {
                 try {
+                    // Save bot settings to localStorage as backup
+                    try {
+                        localStorage.setItem('rag_bot_settings', JSON.stringify(botSettings));
+                    } catch (e) {
+                        console.error('Failed to save settings to localStorage:', e);
+                    }
+                    
                     console.log(`💾 Syncing to API: ${ragEntries.length} RAG entries, ${autoResponses.length} auto-responses, ${slashCommands.length} slash commands, ${pendingRagEntries.length} pending RAG, bot settings`);
                     await dataService.saveData(ragEntries, autoResponses, slashCommands, botSettings, pendingRagEntries);
                     console.log(`✓ Successfully synced to API`);

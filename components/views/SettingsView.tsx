@@ -1,10 +1,31 @@
 import React, { useState } from 'react';
 import { useMockData } from '../../hooks/useMockData';
 
+const SETTINGS_STORAGE_KEY = 'rag_bot_settings';
+
 const SettingsView: React.FC = () => {
     const { botSettings, setBotSettings } = useMockData();
     const [localPrompt, setLocalPrompt] = useState(botSettings.systemPrompt);
     const [saved, setSaved] = useState(false);
+
+    // Load settings from localStorage on mount
+    React.useEffect(() => {
+        try {
+            const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                if (parsed.systemPrompt && parsed.systemPrompt !== botSettings.systemPrompt) {
+                    setLocalPrompt(parsed.systemPrompt);
+                    setBotSettings({
+                        systemPrompt: parsed.systemPrompt,
+                        updatedAt: parsed.updatedAt || new Date().toISOString()
+                    });
+                }
+            }
+        } catch (e) {
+            console.error('Failed to load settings from localStorage:', e);
+        }
+    }, []);
 
     // Sync local prompt with botSettings when it changes
     React.useEffect(() => {
@@ -12,11 +33,20 @@ const SettingsView: React.FC = () => {
     }, [botSettings.systemPrompt]);
 
     const handleSave = () => {
-        // Update the bot settings with new prompt and current timestamp
-        setBotSettings({
+        const newSettings = {
             systemPrompt: localPrompt,
             updatedAt: new Date().toISOString()
-        });
+        };
+        
+        // Save to localStorage as backup
+        try {
+            localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(newSettings));
+        } catch (e) {
+            console.error('Failed to save settings to localStorage:', e);
+        }
+        
+        // Update the bot settings with new prompt and current timestamp
+        setBotSettings(newSettings);
         
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);
