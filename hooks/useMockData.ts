@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand, BotSettings, PendingRagEntry } from '../types';
 import { dataService } from '../services/dataService';
 
@@ -423,12 +423,13 @@ export const useMockData = () => {
         
         // Load immediately on mount
         loadForumPosts();
-        // Refresh forum posts every 5 seconds for faster updates
+        // Refresh forum posts every 30 seconds (reduced from 5s to save bandwidth)
+        // Only poll when tab is visible to save resources
         const interval = setInterval(() => {
-            if (isMounted) {
+            if (isMounted && !document.hidden) {
                 loadForumPosts();
             }
-        }, 5000);
+        }, 30000); // 30 seconds instead of 5
         return () => {
             isMounted = false;
             clearInterval(interval);
@@ -437,15 +438,47 @@ export const useMockData = () => {
 
     // Sync data to API whenever RAG entries, auto-responses, slash commands, or bot settings change (with debounce)
     // IMPORTANT: Only sync after initial load is complete to prevent overwriting API data
+    // Use refs to track previous values and only sync when data actually changes
+    const prevDataRef = useRef<{rag: number, auto: number, commands: number, pending: number, settings: string} | null>(null);
+    
     useEffect(() => {
         // Don't sync if we're still loading initial data from API
         if (isLoading) {
             return;
         }
         
-        // Debounce to prevent excessive API calls
+        // Check if data actually changed by comparing counts and settings hash
+        const currentData = {
+            rag: ragEntries.length,
+            auto: autoResponses.length,
+            commands: slashCommands.length,
+            pending: pendingRagEntries.length,
+            settings: JSON.stringify(botSettings)
+        };
+        
+        // Skip if data hasn't actually changed
+        if (prevDataRef.current && 
+            prevDataRef.current.rag === currentData.rag &&
+            prevDataRef.current.auto === currentData.auto &&
+            prevDataRef.current.commands === currentData.commands &&
+            prevDataRef.current.pending === currentData.pending &&
+            prevDataRef.current.settings === currentData.settings) {
+            return; // No changes, skip sync
+        }
+        
+        // Update ref for next comparison
+        prevDataRef.current = currentData;
+        
+        // Debounce to prevent excessive API calls - increased to 5 seconds
+        // Only sync when tab is visible to save bandwidth
         const timeoutId = setTimeout(() => {
             const syncData = async () => {
+                // Skip sync if tab is hidden to save bandwidth
+                if (document.hidden) {
+                    console.log('⏸ Skipping sync - tab is hidden');
+                    return;
+                }
+                
                 try {
                     // Save bot settings to localStorage as backup
                     try {
@@ -462,7 +495,7 @@ export const useMockData = () => {
                 }
             };
             syncData();
-        }, 1000); // 1 second debounce
+        }, 5000); // 5 second debounce (increased from 1s to reduce API calls)
         
         return () => clearTimeout(timeoutId);
     }, [ragEntries, autoResponses, slashCommands, botSettings, pendingRagEntries, isLoading]);

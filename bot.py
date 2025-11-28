@@ -1405,7 +1405,7 @@ async def get_unsolved_tag(forum_channel):
         return None
 
 # --- PERIODIC DATA SYNC ---
-@tasks.loop(hours=1)  # Sync every hour
+@tasks.loop(hours=2)  # Sync every 2 hours (reduced frequency to save bandwidth)
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
