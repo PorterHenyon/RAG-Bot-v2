@@ -1121,64 +1121,6 @@ SYSTEM_PROMPT = (
     "Remember: POST TITLE = Main clue. Answer directly. Be SHORT. Human support is backup."
 )
 
-async def download_images_for_gemini(attachments):
-    """Download images from Discord, prepare for Gemini, returns list of PIL Images"""
-    image_data = []
-    try:
-        import PIL.Image
-        import io
-        
-        for attachment in attachments:
-            # Only process images
-            if attachment.content_type and "image" in attachment.content_type:
-                try:
-                    print(f"📥 Downloading image: {attachment.filename}")
-                    
-                    # Download the image to memory with timeout
-                    image_bytes = await asyncio.wait_for(attachment.read(), timeout=10.0)
-                    
-                    # Validate image size (max 20MB)
-                    if len(image_bytes) > 20 * 1024 * 1024:
-                        print(f"⚠ Image {attachment.filename} too large ({len(image_bytes) / 1024 / 1024:.1f}MB), skipping")
-                        continue
-                    
-                    # Open with PIL (in memory, no disk I/O)
-                    image = PIL.Image.open(io.BytesIO(image_bytes))
-                    
-                    # Convert to RGB if needed (some formats like PNG with transparency)
-                    if image.mode in ('RGBA', 'LA', 'P'):
-                        # Create white background
-                        rgb_image = PIL.Image.new('RGB', image.size, (255, 255, 255))
-                        if image.mode == 'P':
-                            image = image.convert('RGBA')
-                        rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
-                        image = rgb_image
-                    elif image.mode != 'RGB':
-                        image = image.convert('RGB')
-                    
-                    # Gemini accepts PIL Image objects directly
-                    image_data.append(image)
-                    print(f"✅ Image prepared: {attachment.filename} ({image.size[0]}x{image.size[1]})")
-                except asyncio.TimeoutError:
-                    print(f"⚠ Timeout downloading image: {attachment.filename}")
-                    continue
-                except Exception as img_error:
-                    print(f"⚠ Error processing image {attachment.filename}: {img_error}")
-                    continue
-        
-        return image_data if image_data else None
-    
-    except Exception as e:
-        print(f"⚠ Error in download_images_for_gemini: {e}")
-        import traceback
-        traceback.print_exc()
-        # Clean up any images we did manage to load
-        for img in image_data:
-            try:
-                img.close()
-            except:
-                pass
-        return None
 
 def build_user_context(query, context_entries):
     """Build the user message with query and knowledge base context."""
@@ -1191,7 +1133,7 @@ def build_user_context(query, context_entries):
         f"User Question:\n{query}"
     )
 
-async def generate_ai_response(query, context_entries, image_data=None):
+async def generate_ai_response(query, context_entries):
     """Generate an AI response using Gemini API with RAG context (with retry logic)"""
     max_retries = 2  # Try twice (initial attempt + 1 retry)
     
@@ -1212,16 +1154,11 @@ async def generate_ai_response(query, context_entries, image_data=None):
             temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
             max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
             
-            # Use vision model if we have images
-            model_name = 'gemini-2.0-flash-exp' if image_data else 'gemini-2.5-flash'
             # Use key manager for automatic rotation
             model = gemini_key_manager.create_model_with_retry(
-                model_name,
+                'gemini-2.5-flash',
                 system_instruction=system_instruction
             )
-            
-            if image_data:
-                print(f"🖼️ Using vision model with {len(image_data)} image(s)")
             
             # Configure generation settings
             generation_config = genai.types.GenerationConfig(
@@ -1232,16 +1169,8 @@ async def generate_ai_response(query, context_entries, image_data=None):
             # User context separated
             user_context = build_user_context(query, context_entries)
             
-            # Prepare content for Gemini (text + images if provided)
-            if image_data:
-                # Include images in the prompt for vision model
-                content_parts = []
-                for img in image_data:
-                    content_parts.append(img)
-                content_parts.append(user_context)
-                prompt_content = content_parts
-            else:
-                prompt_content = user_context
+            # Prepare content for Gemini
+            prompt_content = user_context
             
             # Generate response with custom settings
             loop = asyncio.get_event_loop()
@@ -1250,12 +1179,6 @@ async def generate_ai_response(query, context_entries, image_data=None):
                 lambda: model.generate_content(prompt_content, generation_config=generation_config)
             )
             track_api_call()  # Track successful API call
-            
-            # Clean up images from memory after use
-            if image_data:
-                for img in image_data:
-                    img.close()  # Release image from memory
-                print(f"🗑️ Cleaned up {len(image_data)} image(s) from memory")
             
             return response.text
             
@@ -2180,47 +2103,7 @@ async def on_thread_create(thread):
     auto_response = get_auto_response(user_question)
     bot_response_text = None
     
-    # Download images if user attached them (for Gemini vision)
-    image_data = None
-    if has_attachments and "image" in attachment_types:
-        try:
-            print(f"🖼️ User attached {attachment_types.count('image')} image(s) - downloading for analysis...")
-            image_data = await download_images_for_gemini(initial_msg.attachments)
-            if image_data:
-                print(f"✅ Downloaded {len(image_data)} image(s) for Gemini vision analysis")
-            else:
-                print(f"⚠ Failed to download images, continuing without image analysis")
-        except Exception as e:
-            print(f"⚠ Error downloading images: {e}")
-            image_data = None  # Continue without images
-    
-    # If user uploaded image with NO text or very little text, enhance with image analysis
-    text_only = initial_msg.content.strip() if initial_msg.content else ""
-    if image_data and len(text_only) < 10:
-        print(f"📸 Image-only post detected (minimal text) - analyzing image to understand issue...")
-        # Ask Gemini what's in the image to enhance the query
-        try:
-            import google.generativeai as genai
-            # Use key manager for automatic rotation
-            vision_model = gemini_key_manager.create_model_with_retry('gemini-2.0-flash-exp')
-            image_analysis_prompt = "Describe what you see in this image. What issue or problem does it show? Be brief (2-3 sentences)."
-            
-            # Create content with images
-            content_parts = []
-            for img in image_data:
-                content_parts.append(img)
-            content_parts.append(image_analysis_prompt)
-            
-            loop = asyncio.get_event_loop()
-            analysis = await loop.run_in_executor(None, lambda: vision_model.generate_content(content_parts))
-            image_description = analysis.text
-            
-            # Enhance the user question with what we see in the image
-            user_question = f"{thread.name}\n{initial_message}\n\nWhat I see in the image: {image_description}"
-            print(f"🔍 Image analysis: {image_description[:100]}...")
-        except Exception as e:
-            print(f"⚠ Error analyzing image: {e}")
-            # Continue without image analysis - don't break the flow
+    # Note: Image processing has been removed - images are mentioned in the message but not analyzed
     
     # If user attached videos or non-image files, escalate to human
     needs_human_review = False
@@ -2250,12 +2133,6 @@ async def on_thread_create(thread):
         )
         human_escalation_embed.set_footer(text="Revolution Macro Support Team")
         await thread.send(embed=human_escalation_embed)
-        
-        # Clean up images if we downloaded any
-        if image_data:
-            for img in image_data:
-                img.close()
-            print(f"🗑️ Cleaned up {len(image_data)} image(s) from memory")
         
         # Update forum post status
         await update_forum_post_status(thread_id, 'Human Support')
@@ -2359,7 +2236,7 @@ async def on_thread_create(thread):
         if confident_docs:
             # Found matches in knowledge base - use top entries
             num_to_use = min(3, len(confident_docs))  # Use up to 3 best matches
-            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use], image_data)
+            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use])
             
             # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
@@ -2583,14 +2460,8 @@ async def on_thread_create(thread):
     except Exception as tag_error:
         print(f"⚠ Could not apply unsolved tag: {tag_error}")
     finally:
-        # Clean up images from memory if we downloaded any
-        if 'image_data' in locals() and image_data:
-            try:
-                for img in image_data:
-                    img.close()
-                print(f"🗑️ Final cleanup: Released {len(image_data)} image(s) from memory")
-            except Exception as cleanup_error:
-                print(f"⚠ Error cleaning up images: {cleanup_error}")
+        # Cleanup complete
+        pass
         
         # ALWAYS release the processing lock
         if thread.id in processing_threads:
