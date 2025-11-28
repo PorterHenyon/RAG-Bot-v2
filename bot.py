@@ -277,7 +277,8 @@ def track_api_call():
 # Track pending satisfaction analysis tasks per thread
 satisfaction_timers = {}  # {thread_id: asyncio.Task}
 # Track processed threads to avoid duplicate processing
-processed_threads = set()  # {thread_id}
+# Use dict with timestamps to enable cleanup of old entries
+processed_threads = {}  # {thread_id: timestamp}
 # Track threads currently being processed (lock to prevent race conditions)
 processing_threads = set()  # {thread_id}
 # Track threads escalated to human support (bot stops responding)
@@ -1130,22 +1131,53 @@ async def download_images_for_gemini(attachments):
         for attachment in attachments:
             # Only process images
             if attachment.content_type and "image" in attachment.content_type:
-                print(f"📥 Downloading image: {attachment.filename}")
-                
-                # Download the image to memory
-                image_bytes = await attachment.read()
-                
-                # Open with PIL (in memory, no disk I/O)
-                image = PIL.Image.open(io.BytesIO(image_bytes))
-                
-                # Gemini accepts PIL Image objects directly
-                image_data.append(image)
-                print(f"✅ Image prepared: {attachment.filename} ({image.size[0]}x{image.size[1]})")
+                try:
+                    print(f"📥 Downloading image: {attachment.filename}")
+                    
+                    # Download the image to memory with timeout
+                    image_bytes = await asyncio.wait_for(attachment.read(), timeout=10.0)
+                    
+                    # Validate image size (max 20MB)
+                    if len(image_bytes) > 20 * 1024 * 1024:
+                        print(f"⚠ Image {attachment.filename} too large ({len(image_bytes) / 1024 / 1024:.1f}MB), skipping")
+                        continue
+                    
+                    # Open with PIL (in memory, no disk I/O)
+                    image = PIL.Image.open(io.BytesIO(image_bytes))
+                    
+                    # Convert to RGB if needed (some formats like PNG with transparency)
+                    if image.mode in ('RGBA', 'LA', 'P'):
+                        # Create white background
+                        rgb_image = PIL.Image.new('RGB', image.size, (255, 255, 255))
+                        if image.mode == 'P':
+                            image = image.convert('RGBA')
+                        rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+                        image = rgb_image
+                    elif image.mode != 'RGB':
+                        image = image.convert('RGB')
+                    
+                    # Gemini accepts PIL Image objects directly
+                    image_data.append(image)
+                    print(f"✅ Image prepared: {attachment.filename} ({image.size[0]}x{image.size[1]})")
+                except asyncio.TimeoutError:
+                    print(f"⚠ Timeout downloading image: {attachment.filename}")
+                    continue
+                except Exception as img_error:
+                    print(f"⚠ Error processing image {attachment.filename}: {img_error}")
+                    continue
         
         return image_data if image_data else None
     
     except Exception as e:
-        print(f"⚠ Error downloading images: {e}")
+        print(f"⚠ Error in download_images_for_gemini: {e}")
+        import traceback
+        traceback.print_exc()
+        # Clean up any images we did manage to load
+        for img in image_data:
+            try:
+                img.close()
+            except:
+                pass
         return None
 
 def build_user_context(query, context_entries):
@@ -1461,6 +1493,24 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
+@tasks.loop(hours=6)  # Run every 6 hours
+async def cleanup_processed_threads():
+    """Background task to clean up old entries from processed_threads to prevent memory leak"""
+    try:
+        now = datetime.now()
+        # Remove entries older than 7 days
+        cutoff_time = 7 * 24 * 3600  # 7 days in seconds
+        threads_to_remove = [
+            thread_id for thread_id, timestamp in processed_threads.items()
+            if (now - timestamp).total_seconds() > cutoff_time
+        ]
+        for thread_id in threads_to_remove:
+            del processed_threads[thread_id]
+        if threads_to_remove:
+            print(f"🧹 Cleaned up {len(threads_to_remove)} old entries from processed_threads (kept {len(processed_threads)} recent entries)")
+    except Exception as e:
+        print(f"⚠ Error in cleanup_processed_threads task: {e}")
+
 @tasks.loop(hours=24)  # Run daily
 async def cleanup_old_solved_posts():
     """Background task to delete old solved/closed posts and posts open for 30+ days"""
@@ -1784,6 +1834,11 @@ async def on_ready():
         cleanup_old_solved_posts.start()
         print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
     
+    # Start cleanup task for processed_threads memory leak prevention
+    if not cleanup_processed_threads.is_running():
+        cleanup_processed_threads.start()
+        print("✓ Started background task: cleanup_processed_threads (runs every 6 hours)")
+    
     # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
     try:
@@ -2012,10 +2067,16 @@ async def on_thread_create(thread):
         print(f"🔒 Thread {thread.id} is ALREADY being processed, skipping duplicate")
         return
     
-    # Check if we've already fully processed this thread
+    # Check if we've already fully processed this thread (within last 24 hours)
     if thread.id in processed_threads:
-        print(f"⚠ Thread {thread.id} already processed, skipping duplicate event")
-        return
+        # Check if entry is old (more than 24 hours)
+        entry_time = processed_threads[thread.id]
+        if (datetime.now() - entry_time).total_seconds() > 86400:  # 24 hours
+            # Remove old entry
+            del processed_threads[thread.id]
+        else:
+            print(f"⚠ Thread {thread.id} already processed, skipping duplicate event")
+            return
     
     # LOCK THIS THREAD IMMEDIATELY (before any async operations that could cause race condition)
     processing_threads.add(thread.id)
@@ -2026,14 +2087,14 @@ async def on_thread_create(thread):
         bot_messages = [msg async for msg in thread.history(limit=10) if msg.author == bot.user]
         if bot_messages:
             print(f"⚠ Thread {thread.id} already has {len(bot_messages)} bot message(s), skipping duplicate processing")
-            processed_threads.add(thread.id)
+            processed_threads[thread.id] = datetime.now()
             processing_threads.remove(thread.id)  # Release lock
             return
     except Exception as check_error:
         print(f"⚠ Could not check for existing bot messages: {check_error}")
     
-    # Mark as processed to prevent future duplicates
-    processed_threads.add(thread.id)
+    # Mark as processed to prevent future duplicates (with timestamp for cleanup)
+    processed_threads[thread.id] = datetime.now()
 
     # Safely get owner information
     owner_name = "Unknown"
@@ -2122,10 +2183,16 @@ async def on_thread_create(thread):
     # Download images if user attached them (for Gemini vision)
     image_data = None
     if has_attachments and "image" in attachment_types:
-        print(f"🖼️ User attached {attachment_types.count('image')} image(s) - downloading for analysis...")
-        image_data = await download_images_for_gemini(initial_msg.attachments)
-        if image_data:
-            print(f"✅ Downloaded {len(image_data)} image(s) for Gemini vision analysis")
+        try:
+            print(f"🖼️ User attached {attachment_types.count('image')} image(s) - downloading for analysis...")
+            image_data = await download_images_for_gemini(initial_msg.attachments)
+            if image_data:
+                print(f"✅ Downloaded {len(image_data)} image(s) for Gemini vision analysis")
+            else:
+                print(f"⚠ Failed to download images, continuing without image analysis")
+        except Exception as e:
+            print(f"⚠ Error downloading images: {e}")
+            image_data = None  # Continue without images
     
     # If user uploaded image with NO text or very little text, enhance with image analysis
     text_only = initial_msg.content.strip() if initial_msg.content else ""
@@ -2153,6 +2220,7 @@ async def on_thread_create(thread):
             print(f"🔍 Image analysis: {image_description[:100]}...")
         except Exception as e:
             print(f"⚠ Error analyzing image: {e}")
+            # Continue without image analysis - don't break the flow
     
     # If user attached videos or non-image files, escalate to human
     needs_human_review = False
@@ -3214,7 +3282,7 @@ async def on_thread_delete(thread):
             satisfaction_timers[thread_id].cancel()
             del satisfaction_timers[thread_id]
         if thread_id in processed_threads:
-            processed_threads.remove(thread_id)
+            del processed_threads[thread_id]
         if thread_id in escalated_threads:
             escalated_threads.remove(thread_id)
         if thread_id in thread_response_type:
