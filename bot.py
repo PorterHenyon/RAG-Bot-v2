@@ -307,6 +307,8 @@ processing_threads = set()  # {thread_id}
 escalated_threads = set()  # {thread_id}
 # Track what type of response was given per thread (for satisfaction flow)
 thread_response_type = {}  # {thread_id: 'auto' | 'ai' | None}
+# Store images per thread for escalation (images are PIL Image objects)
+thread_images = {}  # {thread_id: [image_parts]}
 # Track threads manually closed with no_review (don't create RAG entries)
 no_review_threads = set()  # {thread_id}
 
@@ -466,11 +468,12 @@ class HighPriorityPostsView(discord.ui.View):
 class SatisfactionButtons(discord.ui.View):
     """Interactive buttons for user feedback on bot responses"""
     
-    def __init__(self, thread_id, conversation, response_type):
+    def __init__(self, thread_id, conversation, response_type='ai', image_parts=None):
         super().__init__(timeout=None)  # Buttons never expire
         self.thread_id = thread_id
         self.conversation = conversation
         self.response_type = response_type
+        self.image_parts = image_parts  # Store images for escalation
     
     @discord.ui.button(label="Yes, this solved my issue", style=discord.ButtonStyle.green, emoji="✅")
     async def solved_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -623,14 +626,37 @@ class SatisfactionButtons(discord.ui.View):
                 user_messages = [msg.get('content', '') for msg in self.conversation if msg.get('author') == 'User']
                 user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
                 
+                # Get images from thread storage or from button instance
+                escalation_images = None
+                if self.image_parts:
+                    escalation_images = self.image_parts
+                    print(f"🖼️ Using {len(escalation_images)} image(s) from button instance for AI escalation")
+                elif self.thread_id in thread_images:
+                    escalation_images = thread_images[self.thread_id]
+                    print(f"🖼️ Using {len(escalation_images)} image(s) from thread storage for AI escalation")
+                else:
+                    # Try to get images from thread messages
+                    try:
+                        thread_messages = [msg async for msg in thread.history(limit=5, oldest_first=True)]
+                        for msg in thread_messages:
+                            if msg.attachments:
+                                image_attachments = [a for a in msg.attachments if a.content_type and "image" in a.content_type]
+                                if image_attachments:
+                                    escalation_images = await download_images_for_gemini(image_attachments)
+                                    if escalation_images:
+                                        print(f"🖼️ Downloaded {len(escalation_images)} image(s) from thread for AI escalation")
+                                        break
+                    except Exception as img_fetch_error:
+                        print(f"⚠ Could not fetch images from thread: {img_fetch_error}")
+                
                 # Try to find RAG entries
                 relevant_docs = find_relevant_rag_entries(user_question)
                 
-                # Generate AI response (button handler doesn't have access to images)
+                # Generate AI response with images if available
                 if relevant_docs:
-                    ai_response = await generate_ai_response(user_question, relevant_docs[:2], None)
+                    ai_response = await generate_ai_response(user_question, relevant_docs[:2], escalation_images)
                 else:
-                    ai_response = await generate_ai_response(user_question, [], None)
+                    ai_response = await generate_ai_response(user_question, [], escalation_images)
                 
                 # Send AI response with buttons
                 ai_embed = discord.Embed(
@@ -645,8 +671,8 @@ class SatisfactionButtons(discord.ui.View):
                 )
                 ai_embed.set_footer(text="Revolution Macro AI")
                 
-                # Add new buttons for AI response
-                new_view = SatisfactionButtons(self.thread_id, self.conversation, 'ai')
+                # Add new buttons for AI response (pass images for further escalation)
+                new_view = SatisfactionButtons(self.thread_id, self.conversation, 'ai', escalation_images)
                 await thread.send(embed=ai_embed, view=new_view)
                 thread_response_type[self.thread_id] = 'ai'
                 
@@ -1208,6 +1234,9 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     max_retries = 2  # Try twice (initial attempt + 1 retry)
     
     for attempt in range(max_retries):
+        # Initialize model_name outside try block for error handling
+        model_name = 'gemini-1.5-flash'  # Default model (supports vision)
+        
         try:
             # Check rate limit before making API call
             if not await check_rate_limit():
@@ -1224,13 +1253,29 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
             max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
             
-            # Use vision model if we have images, otherwise use regular model
-            model_name = 'gemini-2.0-flash-exp' if image_parts else 'gemini-2.5-flash'
             # Use key manager for automatic rotation
-            model = gemini_key_manager.create_model_with_retry(
-                model_name,
-                system_instruction=system_instruction
-            )
+            model = None
+            try:
+                model = gemini_key_manager.create_model_with_retry(
+                    model_name,
+                    system_instruction=system_instruction
+                )
+            except Exception as model_error:
+                print(f"❌ Failed to create model '{model_name}': {model_error}")
+                # Try fallback model (only for vision, regular model should always work)
+                if image_parts:
+                    print(f"🔄 Trying fallback model 'gemini-1.5-pro' for vision...")
+                    try:
+                        model = gemini_key_manager.create_model_with_retry(
+                            'gemini-1.5-pro',
+                            system_instruction=system_instruction
+                        )
+                        model_name = 'gemini-1.5-pro'  # Update for logging
+                    except Exception as fallback_error:
+                        print(f"❌ Fallback model also failed: {fallback_error}")
+                        raise  # Re-raise if fallback also fails
+                else:
+                    raise  # Re-raise if no fallback available
             
             if image_parts:
                 print(f"🖼️ Using vision model with {len(image_parts)} image(s)")
@@ -1277,11 +1322,17 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         except Exception as e:
             error_str = str(e).lower()
             is_rate_limit = 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str
+            is_auth_error = 'api key' in error_str or 'authentication' in error_str or 'permission' in error_str or '403' in error_str
+            is_model_error = 'model' in error_str or 'not found' in error_str or 'invalid' in error_str
             
             if attempt < max_retries - 1:
                 # Retry on transient errors
                 wait_time = 2 if is_rate_limit else 1  # Wait longer for rate limits
                 print(f"⚠️ API call failed (attempt {attempt + 1}/{max_retries}): {e}")
+                if is_auth_error:
+                    print(f"   ⚠️ Authentication error - check API keys")
+                elif is_model_error and image_parts:
+                    print(f"   ⚠️ Model error - will try fallback model on retry")
                 print(f"   Retrying in {wait_time} second(s)...")
                 await asyncio.sleep(wait_time)
                 continue
@@ -1290,7 +1341,12 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"❌ API call failed after {max_retries} attempts: {e}")
                 import traceback
                 traceback.print_exc()
-                return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
+                if is_auth_error:
+                    return "I'm having trouble authenticating with my AI service. Please contact support - they'll help you right away!"
+                elif is_model_error:
+                    return "I'm having trouble accessing the AI model. A human support agent will help you shortly."
+                else:
+                    return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
     
     # Should never reach here, but just in case
     return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
@@ -1510,7 +1566,7 @@ async def before_sync_task():
 # --- BOT EVENTS ---
 @tasks.loop(hours=6)  # Run every 6 hours
 async def cleanup_processed_threads():
-    """Background task to clean up old entries from processed_threads to prevent memory leak"""
+    """Background task to clean up old entries from processed_threads and thread_images to prevent memory leak"""
     try:
         now = datetime.now()
         # Remove entries older than 7 days
@@ -1521,8 +1577,17 @@ async def cleanup_processed_threads():
         ]
         for thread_id in threads_to_remove:
             del processed_threads[thread_id]
+            # Also clean up stored images
+            if thread_id in thread_images:
+                # Close PIL images before deleting to free memory
+                for img in thread_images[thread_id]:
+                    try:
+                        img.close()
+                    except:
+                        pass
+                del thread_images[thread_id]
         if threads_to_remove:
-            print(f"🧹 Cleaned up {len(threads_to_remove)} old entries from processed_threads (kept {len(processed_threads)} recent entries)")
+            print(f"🧹 Cleaned up {len(threads_to_remove)} old entries from processed_threads and thread_images (kept {len(processed_threads)} recent entries)")
     except Exception as e:
         print(f"⚠ Error in cleanup_processed_threads task: {e}")
 
@@ -2140,11 +2205,31 @@ async def on_thread_create(thread):
     # Wait a moment for Discord to process the thread
     await asyncio.sleep(1)
     
-    # Get the initial message from thread history
-    history = [message async for message in thread.history(limit=1, oldest_first=True)]
-    if not history:
-        print(f"⚠ No initial message found in thread {thread.id}")
-        return
+    # Get the initial message from thread history (with retry)
+    history = []
+    retry_count = 0
+    max_retries = 3
+    while not history and retry_count < max_retries:
+        try:
+            history = [message async for message in thread.history(limit=1, oldest_first=True)]
+            if not history:
+                retry_count += 1
+                if retry_count < max_retries:
+                    print(f"⚠ No initial message found in thread {thread.id}, retrying ({retry_count}/{max_retries})...")
+                    await asyncio.sleep(2)  # Wait longer for Discord to process
+                else:
+                    print(f"❌ No initial message found in thread {thread.id} after {max_retries} attempts")
+                    processing_threads.remove(thread.id)  # Release lock
+                    return
+        except Exception as history_error:
+            retry_count += 1
+            print(f"⚠ Error fetching thread history (attempt {retry_count}/{max_retries}): {history_error}")
+            if retry_count < max_retries:
+                await asyncio.sleep(2)
+            else:
+                print(f"❌ Failed to fetch thread history after {max_retries} attempts")
+                processing_threads.remove(thread.id)  # Release lock
+                return
 
     initial_msg = history[0]
     initial_message = initial_msg.content
@@ -2271,8 +2356,13 @@ async def on_thread_create(thread):
             }
         ]
         
-        # Add satisfaction buttons
-        button_view = SatisfactionButtons(thread_id, conversation, 'auto')
+        # Store images for potential escalation
+        if image_parts:
+            thread_images[thread_id] = image_parts
+            print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id} (for escalation if needed)")
+        
+        # Add satisfaction buttons (pass images for escalation)
+        button_view = SatisfactionButtons(thread_id, conversation, 'auto', image_parts)
         await thread.send(embed=auto_embed, view=button_view)
         bot_response_text = auto_response
         thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
@@ -2369,8 +2459,13 @@ async def on_thread_create(thread):
                 }
             ]
             
-            # Add satisfaction buttons
-            button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+            # Store images for potential escalation
+            if image_parts:
+                thread_images[thread_id] = image_parts
+                print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
+            
+            # Add satisfaction buttons (pass images for escalation)
+            button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
             await thread.send(embed=ai_embed, view=button_view)
             thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
             
@@ -2436,8 +2531,13 @@ async def on_thread_create(thread):
                     }
                 ]
                 
-                # Add satisfaction buttons
-                button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+                # Store images for potential escalation
+                if image_parts:
+                    thread_images[thread_id] = image_parts
+                    print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
+                
+                # Add satisfaction buttons (pass images for escalation)
+                button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
                 await thread.send(embed=general_ai_embed, view=button_view)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
                 print(f"💡 Responded to '{thread.name}' with Revolution Macro AI assistance (no specific RAG match).")
@@ -2468,8 +2568,12 @@ async def on_thread_create(thread):
                     }
                 ]
                 
-                # Add satisfaction buttons
-                button_view = SatisfactionButtons(thread_id, conversation, 'ai')
+                # Store images for potential escalation (even for fallback)
+                if image_parts:
+                    thread_images[thread_id] = image_parts
+                
+                # Add satisfaction buttons (pass images for escalation)
+                button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
                 await thread.send(embed=fallback_embed, view=button_view)
                 thread_response_type[thread_id] = 'ai'  # Track as AI attempt
                 print(f"⚠ Sent fallback response for '{thread.name}' (AI generation failed).")
