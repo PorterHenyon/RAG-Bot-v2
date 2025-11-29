@@ -626,28 +626,9 @@ class SatisfactionButtons(discord.ui.View):
                 user_messages = [msg.get('content', '') for msg in self.conversation if msg.get('author') == 'User']
                 user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
                 
-                # Get images from thread storage or from button instance
+                # DISABLED: Image processing - skip images to avoid AI connection issues
                 escalation_images = None
-                if self.image_parts:
-                    escalation_images = self.image_parts
-                    print(f"🖼️ Using {len(escalation_images)} image(s) from button instance for AI escalation")
-                elif self.thread_id in thread_images:
-                    escalation_images = thread_images[self.thread_id]
-                    print(f"🖼️ Using {len(escalation_images)} image(s) from thread storage for AI escalation")
-                else:
-                    # Try to get images from thread messages
-                    try:
-                        thread_messages = [msg async for msg in thread.history(limit=5, oldest_first=True)]
-                        for msg in thread_messages:
-                            if msg.attachments:
-                                image_attachments = [a for a in msg.attachments if a.content_type and "image" in a.content_type]
-                                if image_attachments:
-                                    escalation_images = await download_images_for_gemini(image_attachments)
-                                    if escalation_images:
-                                        print(f"🖼️ Downloaded {len(escalation_images)} image(s) from thread for AI escalation")
-                                        break
-                    except Exception as img_fetch_error:
-                        print(f"⚠ Could not fetch images from thread: {img_fetch_error}")
+                print(f"🖼️ Skipping image processing (disabled)")
                 
                 # Try to find RAG entries
                 relevant_docs = find_relevant_rag_entries(user_question)
@@ -1250,15 +1231,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
             max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
             
-            # Use the most reliable model names - gemini-pro works for everything
-            # Try models in order of reliability
-            models_to_try = []
-            if image_parts:
-                # For vision, try these in order
-                models_to_try = ['gemini-1.5-pro', 'gemini-pro']
-            else:
-                # For text-only, use gemini-pro (most stable)
-                models_to_try = ['gemini-pro']
+            # Always use gemini-pro for text-only (most stable, no image processing)
+            # DISABLED: Image processing to avoid connection issues
+            models_to_try = ['gemini-pro']
+            image_parts = None  # Force no images
             
             model = None
             model_name = None
@@ -1296,16 +1272,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             # User context separated
             user_context = build_user_context(query, context_entries)
             
-            # Prepare content for Gemini (text + images if provided)
-            if image_parts:
-                # Include images in the prompt for vision model
-                content_parts = []
-                for img in image_parts:
-                    content_parts.append(img)
-                content_parts.append(user_context)
-                prompt_content = content_parts
-            else:
-                prompt_content = user_context
+            # Always use text-only (images disabled)
+            prompt_content = user_context
             
             # Generate response with custom settings
             loop = asyncio.get_event_loop()
@@ -2293,19 +2261,11 @@ async def on_thread_create(thread):
     auto_response = get_auto_response(user_question)
     bot_response_text = None
     
-    # Download and process images if user attached them (for Gemini vision)
+    # DISABLED: Image processing - skip images to avoid AI connection issues
     image_parts = None
     if has_attachments and "image" in attachment_types:
-        try:
-            print(f"🖼️ User attached {attachment_types.count('image')} image(s) - downloading for analysis...")
-            image_parts = await download_images_for_gemini(initial_msg.attachments)
-            if image_parts:
-                print(f"✅ Downloaded {len(image_parts)} image(s) for Gemini vision analysis")
-            else:
-                print(f"⚠ Failed to download images, continuing without image analysis")
-        except Exception as e:
-            print(f"⚠ Error downloading images: {e}")
-            image_parts = None  # Continue without images
+        print(f"🖼️ User attached {attachment_types.count('image')} image(s) - skipping image analysis (disabled)")
+        # image_parts = None  # Don't process images
     
     # If user attached videos or non-image files, escalate to human
     needs_human_review = False
