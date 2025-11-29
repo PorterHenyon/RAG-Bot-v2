@@ -1234,9 +1234,6 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     max_retries = 2  # Try twice (initial attempt + 1 retry)
     
     for attempt in range(max_retries):
-        # Initialize model_name outside try block for error handling
-        model_name = 'gemini-1.5-flash'  # Default model (supports vision)
-        
         try:
             # Check rate limit before making API call
             if not await check_rate_limit():
@@ -1253,29 +1250,39 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
             max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
             
-            # Use key manager for automatic rotation
+            # Use the most reliable model names - gemini-pro works for everything
+            # Try models in order of reliability
+            models_to_try = []
+            if image_parts:
+                # For vision, try these in order
+                models_to_try = ['gemini-1.5-pro', 'gemini-pro']
+            else:
+                # For text-only, use gemini-pro (most stable)
+                models_to_try = ['gemini-pro']
+            
             model = None
-            try:
-                model = gemini_key_manager.create_model_with_retry(
-                    model_name,
-                    system_instruction=system_instruction
-                )
-            except Exception as model_error:
-                print(f"❌ Failed to create model '{model_name}': {model_error}")
-                # Try fallback model (only for vision, regular model should always work)
-                if image_parts:
-                    print(f"🔄 Trying fallback model 'gemini-1.5-pro' for vision...")
-                    try:
-                        model = gemini_key_manager.create_model_with_retry(
-                            'gemini-1.5-pro',
-                            system_instruction=system_instruction
-                        )
-                        model_name = 'gemini-1.5-pro'  # Update for logging
-                    except Exception as fallback_error:
-                        print(f"❌ Fallback model also failed: {fallback_error}")
-                        raise  # Re-raise if fallback also fails
-                else:
-                    raise  # Re-raise if no fallback available
+            model_name = None
+            last_error = None
+            
+            for model_name in models_to_try:
+                try:
+                    print(f"🔧 Creating model '{model_name}'...")
+                    model = gemini_key_manager.create_model_with_retry(
+                        model_name,
+                        system_instruction=system_instruction
+                    )
+                    print(f"✅ Successfully created model '{model_name}'")
+                    break  # Success, exit loop
+                except Exception as model_error:
+                    last_error = model_error
+                    print(f"❌ Failed to create model '{model_name}': {model_error}")
+                    if model_name == models_to_try[-1]:
+                        # Last model failed, raise error
+                        raise
+                    continue  # Try next model
+            
+            if not model:
+                raise last_error or Exception("Failed to create any model")
             
             if image_parts:
                 print(f"🖼️ Using vision model with {len(image_parts)} image(s)")
@@ -1321,9 +1328,12 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             
         except Exception as e:
             error_str = str(e).lower()
+            error_type = type(e).__name__
+            full_error = str(e)
+            
+            # More specific error detection
             is_rate_limit = 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str
-            is_auth_error = 'api key' in error_str or 'authentication' in error_str or 'permission' in error_str or '403' in error_str
-            is_model_error = 'model' in error_str or 'not found' in error_str or 'invalid' in error_str
+            is_auth_error = 'api key' in error_str or 'authentication' in error_str or 'permission' in error_str or '403' in error_str or 'invalid api key' in error_str
             
             if attempt < max_retries - 1:
                 # Retry on transient errors
@@ -1331,22 +1341,25 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"⚠️ API call failed (attempt {attempt + 1}/{max_retries}): {e}")
                 if is_auth_error:
                     print(f"   ⚠️ Authentication error - check API keys")
-                elif is_model_error and image_parts:
-                    print(f"   ⚠️ Model error - will try fallback model on retry")
+                elif is_rate_limit:
+                    print(f"   ⚠️ Rate limit - waiting before retry")
                 print(f"   Retrying in {wait_time} second(s)...")
                 await asyncio.sleep(wait_time)
                 continue
             else:
-                # Final attempt failed
+                # Final attempt failed - just return a helpful message and log the error
                 print(f"❌ API call failed after {max_retries} attempts: {e}")
                 import traceback
                 traceback.print_exc()
+                
+                # Return helpful error messages
                 if is_auth_error:
                     return "I'm having trouble authenticating with my AI service. Please contact support - they'll help you right away!"
-                elif is_model_error:
-                    return "I'm having trouble accessing the AI model. A human support agent will help you shortly."
+                elif is_rate_limit:
+                    return "I'm experiencing high traffic right now. Please wait a moment or contact human support!"
                 else:
-                    return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
+                    # For any other error, just say we'll get human help
+                    return "I'm having some technical difficulties. A human support agent will help you shortly."
     
     # Should never reach here, but just in case
     return "I'm sorry, I'm having trouble connecting to my AI brain right now. A human will be with you shortly."
