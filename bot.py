@@ -86,14 +86,18 @@ class GeminiKeyManager:
         self.key_usage_count = {key[:10] + '...': 0 for key in api_keys}  # Track usage per key
         self.key_rate_limited = {key[:10] + '...': False for key in api_keys}  # Track rate limit status
         self.key_rate_limit_time = {key[:10] + '...': None for key in api_keys}  # When rate limit occurred
-        print(f"✓ Initialized GeminiKeyManager with {len(api_keys)} key(s)")
+        self.calls_per_key = 5  # Rotate after this many calls per key (proactive rotation)
+        self.current_key_calls = 0  # Track calls on current key
+        print(f"✓ Initialized GeminiKeyManager with {len(api_keys)} key(s) for rotation")
+        if len(api_keys) > 1:
+            print(f"   🔄 Keys will rotate every {self.calls_per_key} calls to distribute load evenly")
     
     def get_current_key(self):
         """Get the current active API key"""
         return self.api_keys[self.current_key_index]
     
-    def get_next_key(self):
-        """Get next available key (round-robin)"""
+    def rotate_key(self):
+        """Proactively rotate to next available key (round-robin)"""
         original_index = self.current_key_index
         attempts = 0
         
@@ -115,11 +119,19 @@ class GeminiKeyManager:
                         self.key_rate_limit_time[key_short] = None
                         print(f"🔄 Key {key_short} rate limit expired, using again")
             
+            # Reset call counter for new key
+            self.current_key_calls = 0
+            old_key = self.api_keys[original_index][:10] + '...'
+            print(f"🔄 Rotated from key {old_key} to key {key_short} (proactive rotation)")
             return self.api_keys[self.current_key_index]
         
         # All keys rate limited, use the one with longest wait
         self.current_key_index = original_index
         return self.api_keys[self.current_key_index]
+    
+    def get_next_key(self):
+        """Get next available key (round-robin) - same as rotate_key for compatibility"""
+        return self.rotate_key()
     
     def mark_key_rate_limited(self, key):
         """Mark a key as rate limited"""
@@ -129,37 +141,45 @@ class GeminiKeyManager:
         print(f"⚠️ Key {key_short} hit rate limit, switching to next key")
     
     def track_usage(self, key):
-        """Track that a key was used"""
+        """Track that a key was used and rotate if needed"""
         key_short = key[:10] + '...'
         self.key_usage_count[key_short] = self.key_usage_count.get(key_short, 0) + 1
+        self.current_key_calls += 1
+        
+        # Proactive rotation: rotate after N calls to distribute load evenly
+        if len(self.api_keys) > 1 and self.current_key_calls >= self.calls_per_key:
+            self.rotate_key()
     
     def get_usage_stats(self):
         """Get usage statistics for all keys"""
         return dict(self.key_usage_count)
     
     def create_model(self, model_name, **kwargs):
-        """Create a GenerativeModel with the current key"""
+        """Create a GenerativeModel with the current key (with proactive rotation)"""
         key = self.get_current_key()
-        self.track_usage(key)
+        self.track_usage(key)  # This will rotate if needed
         
-        # Configure genai with current key
-        genai.configure(api_key=key)
+        # Configure genai with current key (may have rotated)
+        current_key = self.get_current_key()
+        genai.configure(api_key=current_key)
         
         # Create and return model
         return genai.GenerativeModel(model_name, **kwargs)
     
     def create_model_with_retry(self, model_name, **kwargs):
-        """Create a GenerativeModel with automatic key rotation on rate limit"""
+        """Create a GenerativeModel with automatic key rotation on rate limit and proactive rotation"""
         max_attempts = len(self.api_keys)
         attempts = 0
         
         while attempts < max_attempts:
             try:
+                # Get current key and track usage (this may rotate proactively)
                 key = self.get_current_key()
-                self.track_usage(key)
+                self.track_usage(key)  # This rotates after N calls
                 
-                # Configure genai with current key
-                genai.configure(api_key=key)
+                # Get key again in case it rotated
+                current_key = self.get_current_key()
+                genai.configure(api_key=current_key)
                 
                 # Create model
                 return genai.GenerativeModel(model_name, **kwargs)
@@ -169,9 +189,9 @@ class GeminiKeyManager:
                 if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str:
                     key_used = self.get_current_key()
                     self.mark_key_rate_limited(key_used)
-                    self.get_next_key()  # Switch to next key
+                    self.rotate_key()  # Switch to next key
                     attempts += 1
-                    print(f"⚠️ Rate limit error on attempt {attempts}, trying next key...")
+                    print(f"⚠️ Rate limit error on attempt {attempts}, rotating to next key...")
                     continue
                 else:
                     # Not a rate limit error, re-raise
@@ -271,7 +291,9 @@ def track_api_call():
     
     gemini_api_calls_by_key[key_short].append(datetime.now())
     usage_stats = gemini_key_manager.get_usage_stats()
-    print(f"📊 Using key {key_short} | Key usage: {usage_stats}")
+    total_keys = len(gemini_key_manager.api_keys)
+    current_index = gemini_key_manager.current_key_index
+    print(f"📊 Using key {key_short} ({current_index + 1}/{total_keys}) | Calls on this key: {gemini_key_manager.current_key_calls}/{gemini_key_manager.calls_per_key} | Total usage: {usage_stats}")
 
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
@@ -604,7 +626,7 @@ class SatisfactionButtons(discord.ui.View):
                 # Try to find RAG entries
                 relevant_docs = find_relevant_rag_entries(user_question)
                 
-                # Generate AI response (no images in button handler)
+                # Generate AI response (button handler doesn't have access to images)
                 if relevant_docs:
                     ai_response = await generate_ai_response(user_question, relevant_docs[:2], None)
                 else:
@@ -1133,7 +1155,55 @@ def build_user_context(query, context_entries):
         f"User Question:\n{query}"
     )
 
-async def generate_ai_response(query, context_entries):
+async def download_images_for_gemini(attachments):
+    """Download images from Discord attachments and prepare for Gemini vision model"""
+    image_parts = []
+    try:
+        for attachment in attachments:
+            # Only process images
+            if attachment.content_type and "image" in attachment.content_type:
+                try:
+                    print(f"📥 Downloading image: {attachment.filename}")
+                    
+                    # Download the image with timeout
+                    image_bytes = await asyncio.wait_for(attachment.read(), timeout=10.0)
+                    
+                    # Validate image size (max 20MB)
+                    if len(image_bytes) > 20 * 1024 * 1024:
+                        print(f"⚠ Image {attachment.filename} too large ({len(image_bytes) / 1024 / 1024:.1f}MB), skipping")
+                        continue
+                    
+                    # Gemini accepts image bytes directly
+                    import PIL.Image
+                    import io
+                    image = PIL.Image.open(io.BytesIO(image_bytes))
+                    
+                    # Convert to RGB if needed
+                    if image.mode in ('RGBA', 'LA', 'P'):
+                        rgb_image = PIL.Image.new('RGB', image.size, (255, 255, 255))
+                        if image.mode == 'P':
+                            image = image.convert('RGBA')
+                        rgb_image.paste(image, mask=image.split()[-1] if image.mode in ('RGBA', 'LA') else None)
+                        image = rgb_image
+                    elif image.mode != 'RGB':
+                        image = image.convert('RGB')
+                    
+                    image_parts.append(image)
+                    print(f"✅ Image prepared: {attachment.filename} ({image.size[0]}x{image.size[1]})")
+                except asyncio.TimeoutError:
+                    print(f"⚠ Timeout downloading image: {attachment.filename}")
+                    continue
+                except Exception as img_error:
+                    print(f"⚠ Error processing image {attachment.filename}: {img_error}")
+                    continue
+        
+        return image_parts if image_parts else None
+    
+    except Exception as e:
+        print(f"⚠ Error in download_images_for_gemini: {e}")
+        return None
+
+async def generate_ai_response(query, context_entries, image_parts=None):
     """Generate an AI response using Gemini API with RAG context (with retry logic)"""
     max_retries = 2  # Try twice (initial attempt + 1 retry)
     
@@ -1154,11 +1224,16 @@ async def generate_ai_response(query, context_entries):
             temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
             max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
             
+            # Use vision model if we have images, otherwise use regular model
+            model_name = 'gemini-2.0-flash-exp' if image_parts else 'gemini-2.5-flash'
             # Use key manager for automatic rotation
             model = gemini_key_manager.create_model_with_retry(
-                'gemini-2.5-flash',
+                model_name,
                 system_instruction=system_instruction
             )
+            
+            if image_parts:
+                print(f"🖼️ Using vision model with {len(image_parts)} image(s)")
             
             # Configure generation settings
             generation_config = genai.types.GenerationConfig(
@@ -1169,8 +1244,16 @@ async def generate_ai_response(query, context_entries):
             # User context separated
             user_context = build_user_context(query, context_entries)
             
-            # Prepare content for Gemini
-            prompt_content = user_context
+            # Prepare content for Gemini (text + images if provided)
+            if image_parts:
+                # Include images in the prompt for vision model
+                content_parts = []
+                for img in image_parts:
+                    content_parts.append(img)
+                content_parts.append(user_context)
+                prompt_content = content_parts
+            else:
+                prompt_content = user_context
             
             # Generate response with custom settings
             loop = asyncio.get_event_loop()
@@ -1179,6 +1262,15 @@ async def generate_ai_response(query, context_entries):
                 lambda: model.generate_content(prompt_content, generation_config=generation_config)
             )
             track_api_call()  # Track successful API call
+            
+            # Clean up images from memory after use
+            if image_parts:
+                for img in image_parts:
+                    try:
+                        img.close()
+                    except:
+                        pass
+                print(f"🗑️ Cleaned up {len(image_parts)} image(s) from memory")
             
             return response.text
             
@@ -2103,7 +2195,19 @@ async def on_thread_create(thread):
     auto_response = get_auto_response(user_question)
     bot_response_text = None
     
-    # Note: Image processing has been removed - images are mentioned in the message but not analyzed
+    # Download and process images if user attached them (for Gemini vision)
+    image_parts = None
+    if has_attachments and "image" in attachment_types:
+        try:
+            print(f"🖼️ User attached {attachment_types.count('image')} image(s) - downloading for analysis...")
+            image_parts = await download_images_for_gemini(initial_msg.attachments)
+            if image_parts:
+                print(f"✅ Downloaded {len(image_parts)} image(s) for Gemini vision analysis")
+            else:
+                print(f"⚠ Failed to download images, continuing without image analysis")
+        except Exception as e:
+            print(f"⚠ Error downloading images: {e}")
+            image_parts = None  # Continue without images
     
     # If user attached videos or non-image files, escalate to human
     needs_human_review = False
@@ -2236,7 +2340,7 @@ async def on_thread_create(thread):
         if confident_docs:
             # Found matches in knowledge base - use top entries
             num_to_use = min(3, len(confident_docs))  # Use up to 3 best matches
-            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use])
+            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use], image_parts)
             
             # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
@@ -2286,36 +2390,24 @@ async def on_thread_create(thread):
                 
                 context_info = "\n".join(auto_response_context) if auto_response_context else "No additional context available."
                 
-                # Generate AI response with general Revolution Macro context
-                # Use custom system prompt as base if available
-                base_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
+                # Create a simple context entry from auto-responses for generate_ai_response
+                general_context_entry = {
+                    'title': 'Revolution Macro General Information',
+                    'content': (
+                        "Revolution Macro is a game automation tool.\n\n"
+                        "FEATURES:\n"
+                        "- Auto farming/gathering\n"
+                        "- Smart navigation\n"
+                        "- Auto-deposit\n"
+                        "- License system\n\n"
+                        f"Additional context:\n{context_info}"
+                    ),
+                    'keywords': ['revolution', 'macro', 'general', 'help']
+                }
                 
-                # Use key manager for automatic rotation
-                model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash', system_instruction=base_instruction)
-                
-                general_prompt = (
-                    "Revolution Macro is a game automation tool.\n\n"
-                    
-                    "FEATURES:\n"
-                    "- Auto farming/gathering\n"
-                    "- Smart navigation\n"
-                    "- Auto-deposit\n"
-                    "- License system\n\n"
-                    
-                    f"USER'S QUESTION:\n{user_question}\n\n"
-                    
-                    "ANSWER RULES:\n"
-                    "1. Use SIMPLE words\n"
-                    "2. Keep it SHORT (3 sentences MAXIMUM)\n"
-                    "3. Use numbered steps if needed\n"
-                    "4. NO long explanations\n\n"
-                    
-                    "If you're not sure, keep it simple and suggest they wait for support team."
-                )
-                
-                loop = asyncio.get_event_loop()
-                ai_response = await loop.run_in_executor(None, model.generate_content, general_prompt)
-                bot_response_text = ai_response.text
+                # Use generate_ai_response to ensure images are processed correctly
+                # Pass image_parts so vision model is used if images are present
+                bot_response_text = await generate_ai_response(user_question, [general_context_entry], image_parts)
                 
                 # Send general AI response (SHORTER, SIMPLER)
                 general_ai_embed = discord.Embed(
@@ -2460,8 +2552,17 @@ async def on_thread_create(thread):
     except Exception as tag_error:
         print(f"⚠ Could not apply unsolved tag: {tag_error}")
     finally:
-        # Cleanup complete
-        pass
+        # Clean up images from memory if we downloaded any
+        if 'image_parts' in locals() and image_parts:
+            try:
+                for img in image_parts:
+                    try:
+                        img.close()
+                    except:
+                        pass
+                print(f"🗑️ Final cleanup: Released {len(image_parts)} image(s) from memory")
+            except Exception as cleanup_error:
+                print(f"⚠ Error cleaning up images: {cleanup_error}")
         
         # ALWAYS release the processing lock
         if thread.id in processing_threads:
@@ -2856,7 +2957,8 @@ async def on_message(message):
                                                     # Try to find RAG entries
                                                     relevant_docs = find_relevant_rag_entries(user_question)
                                                     
-                                                    # Generate AI response (ALWAYS, with or without RAG) - no images in on_message handler
+                                                    # Generate AI response (ALWAYS, with or without RAG)
+                                                    # Note: on_message handler doesn't have access to original images
                                                     if relevant_docs:
                                                         print(f"📚 Found {len(relevant_docs)} RAG entries for AI response")
                                                         ai_response = await generate_ai_response(user_question, relevant_docs[:2], None)
@@ -4334,7 +4436,7 @@ async def ask(interaction: discord.Interaction, question: str):
         relevant_docs = find_relevant_rag_entries(question)
         
         if relevant_docs:
-            # Generate AI response (no images in /ask command)
+            # Generate AI response (/ask command doesn't have access to images)
             ai_response = await generate_ai_response(question, relevant_docs[:2], None)
             
             embed = discord.Embed(
