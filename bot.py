@@ -1278,9 +1278,12 @@ async def download_images_for_gemini(attachments):
         return None
 
 async def generate_ai_response(query, context_entries, image_parts=None):
-    """Generate an AI response using Gemini API with RAG context - tries ALL keys and ALL models"""
-    # DISABLED: Image processing to avoid connection issues
+    """Generate an AI response using Gemini API with knowledge base context - SIMPLIFIED"""
+    # DISABLED: Image processing
     image_parts = None
+    
+    # USE ONLY USER'S API KEY - NO ROTATION, NO COMPLEXITY
+    api_key = 'AIzaSyBA_hw61J5d5bQozxf-X3LHj3O8IxpmmnI'
     
     # Use API system prompt if available, otherwise use default
     system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
@@ -1289,113 +1292,92 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try ALL models in order of reliability - use the most common/stable names
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'models/gemini-1.5-flash', 'models/gemini-1.5-pro']
+    # Try models in order - gemini-1.5-flash is most reliable
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
     
-    # Try EVERY key with EVERY model - brute force until one works
-    all_keys = GEMINI_API_KEYS
-    print(f"🔄 AI Response Generation Starting...")
-    print(f"   Keys available: {len(all_keys)}")
-    print(f"   Models to try: {len(models_to_try)}")
-    print(f"   Total combinations: {len(all_keys) * len(models_to_try)}")
+    # Log knowledge base usage
+    if context_entries:
+        print(f"📚 Using {len(context_entries)} knowledge base entries:")
+        for entry in context_entries[:2]:
+            print(f"   - {entry.get('title', 'Unknown')}")
+    else:
+        print(f"⚠️ No knowledge base entries provided - using AI general knowledge")
     
-    if not all_keys:
-        print(f"❌ NO API KEYS AVAILABLE!")
-        return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
+    print(f"🤖 Generating AI response with key {api_key[:15]}...")
     
     for model_name in models_to_try:
-        for key_index, api_key in enumerate(all_keys):
+        try:
+            print(f"🔧 Trying model '{model_name}'...")
+            
+            # Configure with the API key
+            genai.configure(api_key=api_key)
+            
+            # Create model - try with system_instruction first
             try:
-                key_short = api_key[:10] + '...' if len(api_key) > 10 else api_key[:5] + '...'
-                attempt_num = (models_to_try.index(model_name) * len(all_keys)) + key_index + 1
-                total_attempts = len(all_keys) * len(models_to_try)
-                print(f"🔧 Attempt {attempt_num}/{total_attempts}: Model '{model_name}' with key {key_short}...")
-                
-                # Configure with this specific key
-                genai.configure(api_key=api_key)
-                
-                # Create model with this key - try without system_instruction first if it fails
-                try:
-                    model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
-                except Exception as model_create_error:
-                    # Try without system_instruction
-                    print(f"   ⚠️ Failed with system_instruction, trying without...")
-                    model = genai.GenerativeModel(model_name)
-                
-                # Configure generation settings
-                generation_config = genai.types.GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens
-                )
-                
-                # Build user context
-                user_context = build_user_context(query, context_entries)
-                
-                # Generate response
-                print(f"💬 Generating AI response...")
-                loop = asyncio.get_event_loop()
-                
-                # Try generating with timeout
-                try:
-                    response = await asyncio.wait_for(
-                        loop.run_in_executor(
-                            None,
-                            lambda: model.generate_content(user_context, generation_config=generation_config)
-                        ),
-                        timeout=30.0  # 30 second timeout
-                    )
-                except asyncio.TimeoutError:
-                    print(f"   ⚠️ Timeout generating response, trying next combination...")
-                    continue
-                
-                # SUCCESS! Extract response text
-                track_api_call()
-                try:
-                    response_text = response.text
-                except AttributeError:
-                    # Try alternative ways to get text
-                    try:
-                        response_text = str(response)
-                    except:
-                        response_text = str(response.candidates[0].content.parts[0].text) if hasattr(response, 'candidates') else "Response received but couldn't extract text"
-                
-                print(f"✅ SUCCESS! Got response from model '{model_name}' with key {key_short}")
-                print(f"   Response length: {len(response_text)} characters")
-                if len(response_text) > 0:
-                    return response_text
-                else:
-                    print(f"   ⚠️ Empty response, trying next combination...")
-                    continue
-                
+                model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
             except Exception as e:
-                error_str = str(e).lower()
-                error_msg = str(e)
-                key_short = api_key[:10] + '...'
+                # Try without system_instruction
+                print(f"   ⚠️ Trying without system_instruction: {str(e)[:100]}")
+                model = genai.GenerativeModel(model_name)
+            
+            # Configure generation settings
+            generation_config = genai.types.GenerationConfig(
+                temperature=temperature,
+                max_output_tokens=max_tokens
+            )
+            
+            # Build user context WITH KNOWLEDGE BASE
+            user_context = build_user_context(query, context_entries)
+            
+            # Generate response
+            print(f"💬 Calling Gemini API with knowledge base context...")
+            loop = asyncio.get_event_loop()
+            
+            response = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: model.generate_content(user_context, generation_config=generation_config)
+                ),
+                timeout=30.0
+            )
+            
+            # SUCCESS! Get response text
+            track_api_call()
+            response_text = response.text if hasattr(response, 'text') else str(response)
+            
+            if response_text and len(response_text.strip()) > 0:
+                print(f"✅ SUCCESS! Got {len(response_text)} character response from '{model_name}'")
+                if context_entries:
+                    print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
+                return response_text
+            else:
+                print(f"   ⚠️ Empty response from '{model_name}', trying next model...")
+                continue
                 
-                # Check error type
-                is_rate_limit = 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str
-                is_auth_error = 'api key' in error_str or 'authentication' in error_str or 'permission' in error_str or '403' in error_str or 'invalid' in error_str
-                is_model_error = 'model' in error_str and ('not found' in error_str or 'invalid' in error_str or 'does not exist' in error_str)
-                
-                if is_rate_limit:
-                    print(f"   ⚠️ Key {key_short} rate limited, trying next key...")
-                elif is_auth_error:
-                    print(f"   ⚠️ Key {key_short} auth error: {error_msg[:100]}")
-                elif is_model_error:
-                    print(f"   ⚠️ Model '{model_name}' not found, trying next model...")
-                    break  # Skip other keys for this model, try next model
-                else:
-                    print(f"   ⚠️ Error with key {key_short}: {error_msg[:100]}")
-                
-                # Continue to next key/model combination
+        except asyncio.TimeoutError:
+            print(f"   ⚠️ Timeout with '{model_name}', trying next model...")
+            continue
+        except Exception as e:
+            error_msg = str(e).lower()
+            print(f"   ❌ '{model_name}' failed: {str(e)[:150]}")
+            
+            # If it's a model error, try next model. Otherwise, might be key issue
+            if 'model' in error_msg and ('not found' in error_msg or 'invalid' in error_msg):
+                print(f"   ⚠️ Model '{model_name}' not available, trying next...")
+                continue
+            elif 'api key' in error_msg or 'auth' in error_msg or '403' in error_msg:
+                print(f"   ❌ API KEY ERROR! Check your key at https://aistudio.google.com/")
+                print(f"   Full error: {str(e)}")
+                # Still try next model in case it's model-specific
+                continue
+            else:
+                # Other error, try next model
                 continue
     
-    # If we get here, ALL combinations failed
-    print(f"❌ ALL {len(all_keys) * len(models_to_try)} key/model combinations FAILED!")
-    print(f"   Keys tried: {len(all_keys)}")
-    print(f"   Models tried: {', '.join(models_to_try)}")
-    print(f"   Check your API keys in .env file and verify they're valid at https://aistudio.google.com/")
-    print(f"   Also check bot console logs above for specific error messages")
+    # All models failed
+    print(f"❌ ALL MODELS FAILED!")
+    print(f"   Check your API key: {api_key[:20]}...")
+    print(f"   Verify it's valid at https://aistudio.google.com/")
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
 async def analyze_conversation(conversation_text):
