@@ -4587,37 +4587,33 @@ async def ask(interaction: discord.Interaction, question: str):
             await interaction.followup.send(embed=embed, ephemeral=False)
             return
         
-        # Find relevant RAG entries
+        # No auto-response found - use AI directly (even if no RAG entries)
+        # Find relevant RAG entries (use them if available, but still use AI if none found)
         relevant_docs = find_relevant_rag_entries(question)
         
+        # Generate AI response (/ask command doesn't have access to images)
+        # Use RAG entries if available, otherwise use empty list (AI will still respond)
+        ai_response = await generate_ai_response(question, relevant_docs[:2] if relevant_docs else [], None)
+        
+        embed = discord.Embed(
+            title="✅ AI Response",
+            description=ai_response,
+            color=0x2ECC71
+        )
+        
+        # Add knowledge base references only if we have them
         if relevant_docs:
-            # Generate AI response (/ask command doesn't have access to images)
-            ai_response = await generate_ai_response(question, relevant_docs[:2], None)
-            
-            embed = discord.Embed(
-                title="✅ AI Response",
-                description=ai_response,
-                color=0x2ECC71
-            )
-            
-            # Add knowledge base references
             doc_titles = [doc.get('title', 'Unknown') for doc in relevant_docs[:2]]
             embed.add_field(
                 name="📚 Knowledge Base References",
                 value="\n".join([f"• {title}" for title in doc_titles]),
                 inline=False
             )
-            
             embed.set_footer(text=f"Based on {len(relevant_docs)} knowledge base entries")
-            await interaction.followup.send(embed=embed, ephemeral=False)
         else:
-            embed = discord.Embed(
-                title="⚠️ No Match Found",
-                description="I couldn't find any relevant information in my knowledge base for this question.",
-                color=0xE67E22
-            )
-            embed.set_footer(text="Try rephrasing or adding keywords")
-            await interaction.followup.send(embed=embed, ephemeral=False)
+            embed.set_footer(text="AI-generated response")
+        
+        await interaction.followup.send(embed=embed, ephemeral=False)
             
     except Exception as e:
         print(f"Error in /ask command: {e}")
