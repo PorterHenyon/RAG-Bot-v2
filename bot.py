@@ -21,23 +21,13 @@ SUPPORT_FORUM_CHANNEL_ID_STR = os.getenv('SUPPORT_FORUM_CHANNEL_ID')
 DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # Server ID for slash command sync
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
 
-# Load multiple Gemini API keys for rotation
-GEMINI_API_KEYS = []
-# Primary key
-primary_key = os.getenv('GEMINI_API_KEY')
-if primary_key:
-    GEMINI_API_KEYS.append(primary_key)
+# Use ONLY the user's specific API key - no rotation, no complexity
+GEMINI_API_KEYS = ['AIzaSyBA_hw61J5d5bQozxf-X3LHj3O8IxpmmnI']
 
-# Additional keys (2-6)
-for i in range(2, 7):
-    key = os.getenv(f'GEMINI_API_KEY_{i}')
-    if key:
-        GEMINI_API_KEYS.append(key)
-
-# Use the user's specific API key
-user_api_key = 'AIzaSyBA_hw61J5d5bQozxf-X3LHj3O8IxpmmnI'
-if user_api_key not in GEMINI_API_KEYS:
-    GEMINI_API_KEYS.append(user_api_key)
+# Also check env var as fallback
+env_key = os.getenv('GEMINI_API_KEY')
+if env_key and env_key not in GEMINI_API_KEYS:
+    GEMINI_API_KEYS.append(env_key)
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
