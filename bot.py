@@ -178,6 +178,12 @@ class GeminiKeyManager:
                     attempts += 1
                     print(f"⚠️ Rate limit error on attempt {attempts}, rotating to next key...")
                     continue
+                elif 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
+                    # API key is leaked/invalid - this won't be fixed by rotating
+                    print(f"❌ CRITICAL: API key is leaked or invalid!")
+                    print(f"   You MUST generate a NEW API key at https://aistudio.google.com/app/apikey")
+                    print(f"   Then update GEMINI_API_KEY in your .env file")
+                    raise Exception(f"API key is leaked/invalid. Get a new key from https://aistudio.google.com/app/apikey")
                 else:
                     # Not a rate limit error, re-raise
                     raise
@@ -1316,8 +1322,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try models in order - gemini-1.5-flash is most reliable
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+    # Try models in order - gemini-2.5-flash is most reliable
+    models_to_try = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']
     
     # Log knowledge base usage
     if context_entries:
@@ -1337,11 +1343,26 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             
             # Use key manager to create model (handles rotation automatically)
             try:
-                model = gemini_key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
+                # Try with system_instruction first
+                try:
+                    model = gemini_key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
+                except Exception as e:
+                    error_str = str(e).lower()
+                    # If it's a leaked key error, don't try without system_instruction - it won't help
+                    if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
+                        raise  # Re-raise to show the error
+                    # Try without system_instruction for other errors
+                    print(f"   ⚠️ Trying without system_instruction: {str(e)[:100]}")
+                    model = gemini_key_manager.create_model_with_retry(model_name)
             except Exception as e:
-                # Try without system_instruction
-                print(f"   ⚠️ Trying without system_instruction: {str(e)[:100]}")
-                model = gemini_key_manager.create_model_with_retry(model_name)
+                error_str = str(e).lower()
+                # If it's a leaked key, fail immediately with clear message
+                if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
+                    print(f"   ❌ API KEY IS LEAKED/INVALID!")
+                    print(f"   📝 You MUST get a NEW key: https://aistudio.google.com/app/apikey")
+                    print(f"   Then update GEMINI_API_KEY in your .env file and restart the bot")
+                    raise  # Re-raise to stop trying other models
+                raise  # Re-raise other errors
             
             # Configure generation settings
             generation_config = genai.types.GenerationConfig(
@@ -1388,8 +1409,18 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             if 'model' in error_msg and ('not found' in error_msg or 'invalid' in error_msg):
                 print(f"   ⚠️ Model '{model_name}' not available, trying next...")
                 continue
-            elif 'api key' in error_msg or 'auth' in error_msg or '403' in error_msg:
-                print(f"   ❌ API KEY ERROR! Check your key at https://aistudio.google.com/")
+            elif 'api key' in error_msg or 'auth' in error_msg or '403' in error_msg or 'permission denied' in error_msg or 'leaked' in error_msg:
+                print(f"   ❌ API KEY ERROR!")
+                if 'leaked' in error_msg:
+                    print(f"   ⚠️ Your API key was reported as leaked. You need to generate a NEW API key.")
+                    print(f"   📝 Steps:")
+                    print(f"      1. Go to https://aistudio.google.com/app/apikey")
+                    print(f"      2. Delete the old key (if visible)")
+                    print(f"      3. Create a NEW API key")
+                    print(f"      4. Update GEMINI_API_KEY in your .env file")
+                    print(f"      5. Restart the bot")
+                else:
+                    print(f"   Check your key at https://aistudio.google.com/")
                 print(f"   Full error: {str(e)}")
                 # Still try next model in case it's model-specific
                 continue
@@ -1399,9 +1430,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     
     # All models failed
     print(f"❌ ALL MODELS FAILED!")
-    current_key_short = gemini_key_manager.get_current_key()[:20]
-    print(f"   Check your API key: {current_key_short}...")
-    print(f"   Verify it's valid at https://aistudio.google.com/")
+    try:
+        current_key_short = gemini_key_manager.get_current_key()[:20] if gemini_key_manager.get_current_key() else "N/A"
+    except:
+        current_key_short = "N/A"
+    print(f"   API key used: {current_key_short}...")
+    print(f"   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
+    print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
+    print(f"   Then update GEMINI_API_KEY in your .env file and restart the bot.")
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
 async def analyze_conversation(conversation_text):
@@ -1419,7 +1455,7 @@ async def analyze_conversation(conversation_text):
                 return None
             
             # Use key manager for automatic rotation
-            model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
+            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
             
             prompt = (
                 "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
@@ -1491,7 +1527,7 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
             return {"satisfied": False, "reason": "Rate limit", "confidence": 0, "wants_human": False}
         
         # Use key manager for automatic rotation
-        model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
+        model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
         
         prompt = (
             "Analyze the following user message(s) and determine if they are satisfied with the bot's response or need human support.\n\n"
