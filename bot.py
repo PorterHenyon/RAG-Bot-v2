@@ -1342,27 +1342,37 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             print(f"🔧 Trying model '{model_name}'...")
             
             # Use key manager to create model (handles rotation automatically)
+            # Try with system_instruction first, fallback to without if needed
+            model = None
+            model_error = None
+            
             try:
-                # Try with system_instruction first
-                try:
-                    model = gemini_key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
-                except Exception as e:
-                    error_str = str(e).lower()
-                    # If it's a leaked key error, don't try without system_instruction - it won't help
-                    if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
-                        raise  # Re-raise to show the error
-                    # Try without system_instruction for other errors
-                    print(f"   ⚠️ Trying without system_instruction: {str(e)[:100]}")
-                    model = gemini_key_manager.create_model_with_retry(model_name)
+                model = gemini_key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
+                print(f"   ✓ Model created with system_instruction")
             except Exception as e:
                 error_str = str(e).lower()
-                # If it's a leaked key, fail immediately with clear message
+                model_error = e
+                
+                # If it's a leaked key error, don't try without system_instruction - it won't help
                 if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
                     print(f"   ❌ API KEY IS LEAKED/INVALID!")
                     print(f"   📝 You MUST get a NEW key: https://aistudio.google.com/app/apikey")
                     print(f"   Then update GEMINI_API_KEY in your .env file and restart the bot")
+                    print(f"   Full error: {str(e)}")
                     raise  # Re-raise to stop trying other models
-                raise  # Re-raise other errors
+                
+                # Try without system_instruction for other errors
+                print(f"   ⚠️ Failed with system_instruction: {str(e)[:150]}")
+                print(f"   Trying without system_instruction...")
+                try:
+                    model = gemini_key_manager.create_model_with_retry(model_name)
+                    print(f"   ✓ Model created without system_instruction")
+                except Exception as e2:
+                    print(f"   ❌ Also failed without system_instruction: {str(e2)[:150]}")
+                    raise e2  # Re-raise the second error
+            
+            if model is None:
+                raise Exception(f"Failed to create model: {model_error}")
             
             # Configure generation settings
             generation_config = genai.types.GenerationConfig(
@@ -1377,33 +1387,49 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             print(f"💬 Calling Gemini API with knowledge base context...")
             loop = asyncio.get_event_loop()
             
+            # Define function outside lambda to avoid closure issues
+            def generate_sync():
+                return model.generate_content(user_context, generation_config=generation_config)
+            
             response = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: model.generate_content(user_context, generation_config=generation_config)
-                ),
+                loop.run_in_executor(None, generate_sync),
                 timeout=30.0
             )
             
             # SUCCESS! Get response text
             track_api_call()
-            response_text = response.text if hasattr(response, 'text') else str(response)
             
-            if response_text and len(response_text.strip()) > 0:
-                print(f"✅ SUCCESS! Got {len(response_text)} character response from '{model_name}'")
-                if context_entries:
-                    print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
-                return response_text
-            else:
+            # Check if response has text attribute
+            if not hasattr(response, 'text'):
+                print(f"   ⚠️ Response object missing 'text' attribute: {type(response)}")
+                print(f"   Response object: {response}")
+                continue
+            
+            response_text = response.text
+            
+            # Check if response is empty
+            if not response_text or len(response_text.strip()) == 0:
                 print(f"   ⚠️ Empty response from '{model_name}', trying next model...")
                 continue
+            
+            # Success!
+            print(f"✅ SUCCESS! Got {len(response_text)} character response from '{model_name}'")
+            if context_entries:
+                print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
+            return response_text
                 
         except asyncio.TimeoutError:
             print(f"   ⚠️ Timeout with '{model_name}', trying next model...")
             continue
         except Exception as e:
             error_msg = str(e).lower()
-            print(f"   ❌ '{model_name}' failed: {str(e)[:150]}")
+            error_type = type(e).__name__
+            print(f"   ❌ '{model_name}' failed: {error_type}: {str(e)[:200]}")
+            
+            # Print full traceback for debugging
+            import traceback
+            print(f"   Full error details:")
+            traceback.print_exc()
             
             # If it's a model error, try next model. Otherwise, might be key issue
             if 'model' in error_msg and ('not found' in error_msg or 'invalid' in error_msg):
@@ -1426,6 +1452,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 continue
             else:
                 # Other error, try next model
+                print(f"   ⚠️ Unknown error type, trying next model...")
                 continue
     
     # All models failed
