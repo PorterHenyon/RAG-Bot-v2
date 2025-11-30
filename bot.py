@@ -478,7 +478,17 @@ class SatisfactionButtons(discord.ui.View):
     @discord.ui.button(label="Yes, this solved my issue", style=discord.ButtonStyle.green, emoji="✅")
     async def solved_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle when user confirms issue is solved"""
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except discord.errors.InteractionResponded:
+            # Already responded, ignore
+            pass
+        except Exception as e:
+            print(f"⚠ Error deferring interaction: {e}")
+            try:
+                await interaction.response.send_message("Processing...", ephemeral=True)
+            except:
+                pass
         
         thread = interaction.channel
         print(f"✅ User clicked SOLVED button for thread {self.thread_id}")
@@ -606,7 +616,17 @@ class SatisfactionButtons(discord.ui.View):
     @discord.ui.button(label="No, my issue isn't resolved", style=discord.ButtonStyle.red, emoji="❌")
     async def not_solved_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """Handle when user says issue is not resolved"""
-        await interaction.response.defer()
+        try:
+            await interaction.response.defer()
+        except discord.errors.InteractionResponded:
+            # Already responded, ignore
+            pass
+        except Exception as e:
+            print(f"⚠ Error deferring interaction: {e}")
+            try:
+                await interaction.response.send_message("Processing...", ephemeral=True)
+            except:
+                pass
         
         thread = interaction.channel
         print(f"❌ User clicked NOT SOLVED button for thread {self.thread_id}")
