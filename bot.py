@@ -621,58 +621,81 @@ class SatisfactionButtons(discord.ui.View):
             item.disabled = True
         await interaction.message.edit(view=self)
         
-        # Check escalation path based on response type
-        if self.response_type == 'auto':
-            # Auto-response didn't help, try AI
-            print(f"🔄 ESCALATION PATH: Auto → AI (user clicked not solved after auto-response)")
+        # ALWAYS try AI when user clicks "not solved" - regardless of previous response type
+        print(f"🔄 User clicked NOT SOLVED - generating AI response...")
+        
+        try:
+            # Get user's question from conversation
+            user_messages = [msg.get('content', '') for msg in self.conversation if msg.get('author') == 'User']
+            user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
             
-            try:
-                # Get user's question from conversation
-                user_messages = [msg.get('content', '') for msg in self.conversation if msg.get('author') == 'User']
-                user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
-                
-                # DISABLED: Image processing - skip images to avoid AI connection issues
-                escalation_images = None
-                print(f"🖼️ Skipping image processing (disabled)")
-                
-                # Try to find RAG entries
-                relevant_docs = find_relevant_rag_entries(user_question)
-                
-                # Generate AI response with images if available
-                if relevant_docs:
-                    ai_response = await generate_ai_response(user_question, relevant_docs[:2], escalation_images)
-                else:
-                    ai_response = await generate_ai_response(user_question, [], escalation_images)
-                
-                # Send AI response with buttons
-                ai_embed = discord.Embed(
-                    title="💡 Let Me Try Again",
-                    description=ai_response,
-                    color=0x5865F2
-                )
-                ai_embed.add_field(
-                    name="💬 Better?",
-                    value="Let me know if this helps!",
-                    inline=False
-                )
-                ai_embed.set_footer(text="Revolution Macro AI")
-                
-                # Add new buttons for AI response (pass images for further escalation)
-                new_view = SatisfactionButtons(self.thread_id, self.conversation, 'ai', escalation_images)
-                await thread.send(embed=ai_embed, view=new_view)
-                thread_response_type[self.thread_id] = 'ai'
-                
-                await update_forum_post_status(self.thread_id, 'AI Response')
-                print(f"✅ Sent AI follow-up response to thread {self.thread_id}")
-                
-            except Exception as ai_error:
-                print(f"❌ Error generating AI follow-up: {ai_error}")
-                # Escalate to human on error
+            if not user_question or user_question.strip() == "":
+                # Fallback: try to get thread name or last message
+                try:
+                    if hasattr(thread, 'name') and thread.name:
+                        user_question = thread.name
+                    else:
+                        user_question = "Help with this issue"
+                except:
+                    user_question = "Help with this issue"
+            
+            print(f"📝 User question for AI: '{user_question[:100]}...'")
+            
+            # DISABLED: Image processing - skip images to avoid AI connection issues
+            escalation_images = None
+            print(f"🖼️ Skipping image processing (disabled)")
+            
+            # ALWAYS try to find RAG entries and use them
+            relevant_docs = find_relevant_rag_entries(user_question)
+            print(f"📚 Found {len(relevant_docs)} relevant knowledge base entries")
+            
+            # Generate AI response - ALWAYS use knowledge base if available
+            ai_response = await generate_ai_response(user_question, relevant_docs[:2] if relevant_docs else [], escalation_images)
+            
+            # Check if AI actually returned a response or just an error message
+            if not ai_response or "having trouble connecting" in ai_response.lower() or "human support agent" in ai_response.lower():
+                print(f"❌ AI failed to generate response, escalating to human")
                 user_who_clicked = interaction.user if hasattr(interaction, 'user') else None
                 await self._escalate_to_human(thread, user_who_clicked)
-        else:
-            # AI response didn't help (or was already AI), escalate to human
-            print(f"⚠ ESCALATION PATH: → Human (user clicked not solved after AI response)")
+                return
+            
+            # Send AI response with buttons
+            ai_embed = discord.Embed(
+                title="💡 Let Me Try Again",
+                description=ai_response,
+                color=0x5865F2
+            )
+            ai_embed.add_field(
+                name="💬 Better?",
+                value="Let me know if this helps!",
+                inline=False
+            )
+            
+            # Add knowledge base references if we used them
+            if relevant_docs:
+                doc_titles = [doc.get('title', 'Unknown') for doc in relevant_docs[:2]]
+                ai_embed.add_field(
+                    name="📚 Knowledge Base References",
+                    value="\n".join([f"• {title}" for title in doc_titles]),
+                    inline=False
+                )
+                ai_embed.set_footer(text=f"Revolution Macro AI • Based on {len(relevant_docs)} knowledge base entries")
+            else:
+                ai_embed.set_footer(text="Revolution Macro AI")
+            
+            # Add new buttons for AI response
+            new_view = SatisfactionButtons(self.thread_id, self.conversation, 'ai', escalation_images)
+            await thread.send(embed=ai_embed, view=new_view)
+            thread_response_type[self.thread_id] = 'ai'
+            
+            await update_forum_post_status(self.thread_id, 'AI Response')
+            print(f"✅ Sent AI follow-up response to thread {self.thread_id}")
+            
+        except Exception as ai_error:
+            print(f"❌ Error generating AI follow-up: {ai_error}")
+            import traceback
+            traceback.print_exc()
+            # Escalate to human on error
             user_who_clicked = interaction.user if hasattr(interaction, 'user') else None
             await self._escalate_to_human(thread, user_who_clicked)
     
