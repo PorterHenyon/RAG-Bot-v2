@@ -1337,10 +1337,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                     break  # Success, exit loop
                 except Exception as model_error:
                     last_error = model_error
-                    print(f"❌ Failed to create model '{model_name}': {model_error}")
+                    error_msg = str(model_error)
+                    print(f"❌ Failed to create model '{model_name}': {error_msg}")
+                    print(f"   Error type: {type(model_error).__name__}")
                     if model_name == models_to_try[-1]:
-                        # Last model failed, raise error
+                        # Last model failed, raise error with details
+                        print(f"   All models failed. Last error: {error_msg}")
                         raise
+                    print(f"   Trying next model...")
                     continue  # Try next model
             
             if not model:
