@@ -1317,9 +1317,9 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
             max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
             
-            # Always use gemini-pro for text-only (most stable, no image processing)
+            # Try multiple model names - gemini-pro might not exist, try alternatives
             # DISABLED: Image processing to avoid connection issues
-            models_to_try = ['gemini-pro']
+            models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
             image_parts = None  # Force no images
             
             model = None
@@ -1401,8 +1401,11 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 await asyncio.sleep(wait_time)
                 continue
             else:
-                # Final attempt failed - just return a helpful message and log the error
-                print(f"❌ API call failed after {max_retries} attempts: {e}")
+                # Final attempt failed - log the FULL error details
+                print(f"❌ API call failed after {max_retries} attempts")
+                print(f"   Error type: {error_type}")
+                print(f"   Error message: {full_error}")
+                print(f"   Model attempted: {model_name if model_name else 'None'}")
                 import traceback
                 traceback.print_exc()
                 
@@ -1412,6 +1415,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 elif is_rate_limit:
                     return "I'm experiencing high traffic right now. Please wait a moment or contact human support!"
                 else:
+                    # Log the actual error for debugging
+                    print(f"   ⚠️ Generic error - check logs above for details")
                     # For any other error, just say we'll get human help
                     return "I'm having some technical difficulties. A human support agent will help you shortly."
     
