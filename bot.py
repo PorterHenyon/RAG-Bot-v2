@@ -784,7 +784,11 @@ async def update_forum_post_status(thread_id, status):
                             'action': 'update',
                             'post': current_post
                         }
-                        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                        headers = {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json',
+                            'Accept-Encoding': 'gzip, deflate'
+                        }
                         async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as update_resp:
                             if update_resp.status == 200:
                                 print(f"✅ Updated forum post status to '{status}' for thread {thread_id}")
@@ -831,8 +835,12 @@ async def save_bot_settings_to_api():
                 print(f"🔍 DEBUG: support_notification_channel_id = {BOT_SETTINGS.get('support_notification_channel_id')}")
                 print(f"🔍 DEBUG: systemPrompt included = {bool(full_bot_settings.get('systemPrompt'))}")
                 
-                # Save back to API
-                headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                # Save back to API with compression
+                headers = {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'Accept-Encoding': 'gzip, deflate'
+                }
                 async with session.post(DATA_API_URL, json=current_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
                     if save_response.status == 200:
                         print(f"✅ Saved bot settings to API (persisted)")
@@ -873,7 +881,9 @@ async def fetch_data_from_api():
     
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{DATA_API_URL}", timeout=aiohttp.ClientTimeout(total=10)) as response:
+            # Use compression headers to reduce transfer size
+        headers = {'Accept-Encoding': 'gzip, deflate', 'Accept': 'application/json'}
+        async with session.get(f"{DATA_API_URL}", headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
                     new_rag = data.get('ragEntries', [])
@@ -1586,7 +1596,7 @@ async def get_unsolved_tag(forum_channel):
         return None
 
 # --- PERIODIC DATA SYNC ---
-@tasks.loop(hours=2)  # Sync every 2 hours (reduced frequency to save bandwidth)
+@tasks.loop(hours=6)  # Sync every 6 hours (reduced frequency to save bandwidth and stay within Vercel limits)
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
@@ -2087,9 +2097,11 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
             }
         }
         
+        # Use compression to reduce transfer size
         headers = {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate'
         }
         
         async with aiohttp.ClientSession() as session:
