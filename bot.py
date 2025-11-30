@@ -1411,7 +1411,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     
     # If we get here, ALL combinations failed
     print(f"❌ ALL {len(all_keys) * len(models_to_try)} key/model combinations FAILED!")
-    print(f"   Check your API keys and model availability")
+    print(f"   Keys tried: {len(all_keys)}")
+    print(f"   Models tried: {', '.join(models_to_try)}")
+    print(f"   Check your API keys in .env file and verify they're valid at https://aistudio.google.com/")
+    print(f"   Also check bot console logs above for specific error messages")
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
 async def analyze_conversation(conversation_text):
