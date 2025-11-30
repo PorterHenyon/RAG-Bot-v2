@@ -34,19 +34,10 @@ for i in range(2, 7):
     if key:
         GEMINI_API_KEYS.append(key)
 
-# Also check for hardcoded keys from user
-hardcoded_keys = [
-    'AIzaSyBqjSehZEJABrV6NslAIHtVq1lRrZma5wQ',
-    'AIzaSyB3UOCzfUNyX5Wq3-5-oYLheKr4khzH0rU',
-    'AIzaSyCSQFduOyZBuwzisCnZzCFQccz5dECpeN4',
-    'AIzaSyBhy2P8l9o2I84VYecQk6BgXvkNiBBi7Cg',
-    'AIzaSyAZwOtFg1DhqfgQ872Qaz1fS_pgkT49Glo'
-]
-
-# Add hardcoded keys if not already in the list
-for key in hardcoded_keys:
-    if key not in GEMINI_API_KEYS:
-        GEMINI_API_KEYS.append(key)
+# Use the user's specific API key
+user_api_key = 'AIzaSyBA_hw61J5d5bQozxf-X3LHj3O8IxpmmnI'
+if user_api_key not in GEMINI_API_KEYS:
+    GEMINI_API_KEYS.append(user_api_key)
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
