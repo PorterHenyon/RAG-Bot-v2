@@ -880,10 +880,10 @@ async def fetch_data_from_api():
     print(f"🔗 Attempting to fetch data from: {DATA_API_URL}")
     
     try:
-        async with aiohttp.ClientSession() as session:
-            # Use compression headers to reduce transfer size
+        # Use compression headers to reduce transfer size
         headers = {'Accept-Encoding': 'gzip, deflate', 'Accept': 'application/json'}
-        async with session.get(f"{DATA_API_URL}", headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{DATA_API_URL}", headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as response:
                 if response.status == 200:
                     data = await response.json()
                     new_rag = data.get('ragEntries', [])
