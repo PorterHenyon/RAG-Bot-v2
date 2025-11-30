@@ -1308,24 +1308,38 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try ALL models in order of reliability
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+    # Try ALL models in order of reliability - use the most common/stable names
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro', 'models/gemini-1.5-flash', 'models/gemini-1.5-pro']
     
     # Try EVERY key with EVERY model - brute force until one works
     all_keys = GEMINI_API_KEYS
-    print(f"🔄 Trying {len(all_keys)} key(s) with {len(models_to_try)} model(s) = {len(all_keys) * len(models_to_try)} combinations...")
+    print(f"🔄 AI Response Generation Starting...")
+    print(f"   Keys available: {len(all_keys)}")
+    print(f"   Models to try: {len(models_to_try)}")
+    print(f"   Total combinations: {len(all_keys) * len(models_to_try)}")
+    
+    if not all_keys:
+        print(f"❌ NO API KEYS AVAILABLE!")
+        return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
     
     for model_name in models_to_try:
         for key_index, api_key in enumerate(all_keys):
             try:
-                key_short = api_key[:10] + '...'
-                print(f"🔧 Attempt {key_index + 1}/{len(all_keys)}: Model '{model_name}' with key {key_short}...")
+                key_short = api_key[:10] + '...' if len(api_key) > 10 else api_key[:5] + '...'
+                attempt_num = (models_to_try.index(model_name) * len(all_keys)) + key_index + 1
+                total_attempts = len(all_keys) * len(models_to_try)
+                print(f"🔧 Attempt {attempt_num}/{total_attempts}: Model '{model_name}' with key {key_short}...")
                 
                 # Configure with this specific key
                 genai.configure(api_key=api_key)
                 
-                # Create model with this key
-                model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
+                # Create model with this key - try without system_instruction first if it fails
+                try:
+                    model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
+                except Exception as model_create_error:
+                    # Try without system_instruction
+                    print(f"   ⚠️ Failed with system_instruction, trying without...")
+                    model = genai.GenerativeModel(model_name)
                 
                 # Configure generation settings
                 generation_config = genai.types.GenerationConfig(
@@ -1337,7 +1351,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 user_context = build_user_context(query, context_entries)
                 
                 # Generate response
-                print(f"💬 Generating AI response with model '{model_name}' and key {key_short}...")
+                print(f"💬 Generating AI response...")
                 loop = asyncio.get_event_loop()
                 response = await loop.run_in_executor(
                     None,
@@ -1346,8 +1360,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 
                 # SUCCESS! Track the call and return
                 track_api_call()
+                response_text = response.text if hasattr(response, 'text') else str(response)
                 print(f"✅ SUCCESS! Got response from model '{model_name}' with key {key_short}")
-                return response.text
+                print(f"   Response length: {len(response_text)} characters")
+                return response_text
                 
             except Exception as e:
                 error_str = str(e).lower()
