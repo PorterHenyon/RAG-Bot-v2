@@ -1052,7 +1052,8 @@ async def fetch_context(msg):
 
 # --- CORE BOT LOGIC (MIRRORS PLAYGROUND) ---
 def get_auto_response(query: str) -> str | None:
-    """Check if query matches any auto-response triggers"""
+    """Check if query matches any auto-response triggers - uses word boundary matching to avoid false positives"""
+    import re
     query_lower = query.lower()
     
     # Debug: Log what we're checking
@@ -1061,16 +1062,29 @@ def get_auto_response(query: str) -> str | None:
     
     for auto_response in AUTO_RESPONSES:
         trigger_keywords = auto_response.get('triggerKeywords', [])
+        matched_keywords = []
+        
         for keyword in trigger_keywords:
-            if keyword.lower() in query_lower:
-                response_text = auto_response.get('responseText')
-                print(f"✓ Auto-response matched: '{auto_response.get('name', 'Unknown')}' (keyword: '{keyword}')")
-                return response_text
+            keyword_lower = keyword.lower()
+            # Use word boundary matching to avoid false positives
+            # Match whole words only, not substrings
+            # Pattern: word boundary, then keyword, then word boundary (or end of string)
+            pattern = r'\b' + re.escape(keyword_lower) + r'\b'
+            if re.search(pattern, query_lower):
+                matched_keywords.append(keyword)
+        
+        # Only match if at least one keyword was found as a whole word
+        if matched_keywords:
+            response_text = auto_response.get('responseText')
+            print(f"✓ Auto-response matched: '{auto_response.get('name', 'Unknown')}' (keywords: {matched_keywords})")
+            print(f"   Query was: '{query[:100]}...'")
+            return response_text
     
     # Debug: Log what we checked if no match
     if AUTO_RESPONSES:
         all_keywords = [kw for auto in AUTO_RESPONSES for kw in auto.get('triggerKeywords', [])]
         print(f"ℹ No auto-response match. Checked {len(AUTO_RESPONSES)} auto-responses with {len(all_keywords)} total keywords.")
+        print(f"   Query was: '{query[:100]}...'")
     
     return None
 
