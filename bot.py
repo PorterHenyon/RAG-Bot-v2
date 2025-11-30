@@ -21,13 +21,17 @@ SUPPORT_FORUM_CHANNEL_ID_STR = os.getenv('SUPPORT_FORUM_CHANNEL_ID')
 DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # Server ID for slash command sync
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
 
-# Use ONLY the user's specific API key - no rotation, no complexity
-GEMINI_API_KEYS = ['AIzaSyBA_hw61J5d5bQozxf-X3LHj3O8IxpmmnI']
-
-# Also check env var as fallback
+# Load API keys from environment variable
+GEMINI_API_KEYS = []
 env_key = os.getenv('GEMINI_API_KEY')
-if env_key and env_key not in GEMINI_API_KEYS:
+if env_key:
     GEMINI_API_KEYS.append(env_key)
+
+# Also check for additional keys (GEMINI_API_KEY_2 through GEMINI_API_KEY_6)
+for i in range(2, 7):
+    additional_key = os.getenv(f'GEMINI_API_KEY_{i}')
+    if additional_key and additional_key not in GEMINI_API_KEYS:
+        GEMINI_API_KEYS.append(additional_key)
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
@@ -1305,9 +1309,6 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     # DISABLED: Image processing
     image_parts = None
     
-    # USE ONLY USER'S API KEY - NO ROTATION, NO COMPLEXITY
-    api_key = 'AIzaSyBA_hw61J5d5bQozxf-X3LHj3O8IxpmmnI'
-    
     # Use API system prompt if available, otherwise use default
     system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
     
@@ -1326,22 +1327,21 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     else:
         print(f"⚠️ No knowledge base entries provided - using AI general knowledge")
     
-    print(f"🤖 Generating AI response with key {api_key[:15]}...")
+    # Use key manager for automatic rotation
+    current_key = gemini_key_manager.get_current_key()
+    print(f"🤖 Generating AI response with key {current_key[:15]}...")
     
     for model_name in models_to_try:
         try:
             print(f"🔧 Trying model '{model_name}'...")
             
-            # Configure with the API key
-            genai.configure(api_key=api_key)
-            
-            # Create model - try with system_instruction first
+            # Use key manager to create model (handles rotation automatically)
             try:
-                model = genai.GenerativeModel(model_name, system_instruction=system_instruction)
+                model = gemini_key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
             except Exception as e:
                 # Try without system_instruction
                 print(f"   ⚠️ Trying without system_instruction: {str(e)[:100]}")
-                model = genai.GenerativeModel(model_name)
+                model = gemini_key_manager.create_model_with_retry(model_name)
             
             # Configure generation settings
             generation_config = genai.types.GenerationConfig(
@@ -1399,7 +1399,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     
     # All models failed
     print(f"❌ ALL MODELS FAILED!")
-    print(f"   Check your API key: {api_key[:20]}...")
+    current_key_short = gemini_key_manager.get_current_key()[:20]
+    print(f"   Check your API key: {current_key_short}...")
     print(f"   Verify it's valid at https://aistudio.google.com/")
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
@@ -1418,7 +1419,7 @@ async def analyze_conversation(conversation_text):
                 return None
             
             # Use key manager for automatic rotation
-            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
+            model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
             
             prompt = (
                 "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
@@ -1490,7 +1491,7 @@ async def analyze_user_satisfaction(user_messages: list) -> dict:
             return {"satisfied": False, "reason": "Rate limit", "confidence": 0, "wants_human": False}
         
         # Use key manager for automatic rotation
-        model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
+        model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
         
         prompt = (
             "Analyze the following user message(s) and determine if they are satisfied with the bot's response or need human support.\n\n"
