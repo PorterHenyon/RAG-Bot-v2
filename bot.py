@@ -494,9 +494,13 @@ class SatisfactionButtons(discord.ui.View):
         print(f"✅ User clicked SOLVED button for thread {self.thread_id}")
         
         # Disable all buttons
-        for item in self.children:
-            item.disabled = True
-        await interaction.message.edit(view=self)
+        try:
+            for item in self.children:
+                item.disabled = True
+            await interaction.message.edit(view=self)
+        except Exception as edit_error:
+            print(f"⚠ Could not disable buttons: {edit_error}")
+            # Continue anyway - buttons might already be disabled
         
         # Send confirmation embed
         confirm_embed = discord.Embed(
