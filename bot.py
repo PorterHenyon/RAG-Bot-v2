@@ -1353,17 +1353,38 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 # Generate response
                 print(f"💬 Generating AI response...")
                 loop = asyncio.get_event_loop()
-                response = await loop.run_in_executor(
-                    None,
-                    lambda: model.generate_content(user_context, generation_config=generation_config)
-                )
                 
-                # SUCCESS! Track the call and return
+                # Try generating with timeout
+                try:
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(
+                            None,
+                            lambda: model.generate_content(user_context, generation_config=generation_config)
+                        ),
+                        timeout=30.0  # 30 second timeout
+                    )
+                except asyncio.TimeoutError:
+                    print(f"   ⚠️ Timeout generating response, trying next combination...")
+                    continue
+                
+                # SUCCESS! Extract response text
                 track_api_call()
-                response_text = response.text if hasattr(response, 'text') else str(response)
+                try:
+                    response_text = response.text
+                except AttributeError:
+                    # Try alternative ways to get text
+                    try:
+                        response_text = str(response)
+                    except:
+                        response_text = str(response.candidates[0].content.parts[0].text) if hasattr(response, 'candidates') else "Response received but couldn't extract text"
+                
                 print(f"✅ SUCCESS! Got response from model '{model_name}' with key {key_short}")
                 print(f"   Response length: {len(response_text)} characters")
-                return response_text
+                if len(response_text) > 0:
+                    return response_text
+                else:
+                    print(f"   ⚠️ Empty response, trying next combination...")
+                    continue
                 
             except Exception as e:
                 error_str = str(e).lower()
