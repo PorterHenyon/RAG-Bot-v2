@@ -302,6 +302,8 @@ thread_response_type = {}  # {thread_id: 'auto' | 'ai' | None}
 thread_images = {}  # {thread_id: [image_parts]}
 # Track threads manually closed with no_review (don't create RAG entries)
 no_review_threads = set()  # {thread_id}
+# Track how many times "not solved" has been clicked per thread (to prevent duplicate "Let Me Try Again" responses)
+not_solved_retry_count = {}  # {thread_id: count}
 
 # REMOVED: No local storage - all data in Vercel KV API only
 
@@ -631,8 +633,19 @@ class SatisfactionButtons(discord.ui.View):
             item.disabled = True
         await interaction.message.edit(view=self)
         
-        # ALWAYS try AI when user clicks "not solved" - regardless of previous response type
-        print(f"🔄 User clicked NOT SOLVED - generating AI response...")
+        # Track retry attempts - if we've already tried once, escalate to human
+        current_retry_count = not_solved_retry_count.get(self.thread_id, 0)
+        not_solved_retry_count[self.thread_id] = current_retry_count + 1
+        
+        # If this is the second time clicking "not solved", escalate to human instead of trying again
+        if current_retry_count >= 1:
+            print(f"🔄 User clicked NOT SOLVED for the second time - escalating to human support")
+            user_who_clicked = interaction.user if hasattr(interaction, 'user') else None
+            await self._escalate_to_human(thread, user_who_clicked)
+            return
+        
+        # First time clicking "not solved" - try AI response
+        print(f"🔄 User clicked NOT SOLVED - generating AI response (attempt {current_retry_count + 1})...")
         
         try:
             # Get user's question from conversation
@@ -1456,15 +1469,36 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 continue
     
     # All models failed
+    print(f"\n{'='*60}")
     print(f"❌ ALL MODELS FAILED!")
+    print(f"{'='*60}")
     try:
         current_key_short = gemini_key_manager.get_current_key()[:20] if gemini_key_manager.get_current_key() else "N/A"
-    except:
+    except Exception as e:
+        print(f"   ERROR getting key: {e}")
         current_key_short = "N/A"
     print(f"   API key used: {current_key_short}...")
+    print(f"   Query attempted: {query[:100]}")
+    print(f"   Context entries: {len(context_entries)}")
     print(f"   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
     print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
     print(f"   Then update GEMINI_API_KEY in your .env file and restart the bot.")
+    print(f"{'='*60}\n")
+    
+    # Try one final direct test to see if API works at all
+    try:
+        print("🔍 Running final diagnostic test...")
+        test_key = gemini_key_manager.get_current_key()
+        genai.configure(api_key=test_key)
+        test_model = genai.GenerativeModel('gemini-2.5-flash')
+        test_response = test_model.generate_content("Say hello")
+        print(f"   ✓ Direct API test SUCCEEDED: {test_response.text[:50]}")
+        print(f"   ⚠️ This means the API works, but something in generate_ai_response failed")
+    except Exception as test_error:
+        print(f"   ✗ Direct API test FAILED: {test_error}")
+        import traceback
+        traceback.print_exc()
+    
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
 async def analyze_conversation(conversation_text):
