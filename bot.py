@@ -4667,7 +4667,7 @@ async def ask(interaction: discord.Interaction, question: str):
         return
     
     try:
-        # Check auto-responses first
+        # Step 1: Check auto-responses first
         auto_response = get_auto_response(question)
         
         if auto_response:
@@ -4680,13 +4680,54 @@ async def ask(interaction: discord.Interaction, question: str):
             await interaction.followup.send(embed=embed, ephemeral=False)
             return
         
-        # No auto-response found - use AI directly (even if no RAG entries)
-        # Find relevant RAG entries (use them if available, but still use AI if none found)
-        relevant_docs = find_relevant_rag_entries(question)
+        # Step 2: No auto-response found - use RAG knowledgebase
+        # Find relevant RAG entries with scoring
+        query_words = set(question.lower().split())
+        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
+        query_words = {word for word in query_words if word not in stopwords}
+        
+        scored_entries = []
+        for entry in RAG_DATABASE:
+            score = 0
+            entry_title = entry.get('title', '').lower()
+            entry_content = entry.get('content', '').lower()
+            entry_keywords = ' '.join(entry.get('keywords', [])).lower()
+            
+            # Weighted scoring (same as dashboard):
+            # - Title match: 5 points (highest priority)
+            # - Keyword match: 3 points (high priority)
+            # - Content match: 1 point (lower priority)
+            for word in query_words:
+                if word in entry_title:
+                    score += 5
+                if word in entry_keywords:
+                    score += 3
+                if word in entry_content:
+                    score += 1
+            
+            if score > 0:
+                scored_entries.append({'entry': entry, 'score': score})
+        
+        # Sort by score (highest first)
+        scored_entries.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Filter by confidence threshold (5 = at least a title match)
+        SCORE_THRESHOLD = 5
+        relevant_docs = [item['entry'] for item in scored_entries if item['score'] >= SCORE_THRESHOLD]
+        
+        # Log for debugging
+        if scored_entries:
+            top_score = scored_entries[0]['score']
+            print(f"📊 /ask: Found {len(scored_entries)} RAG entries (top score: {top_score}), {len(relevant_docs)} above threshold")
+        else:
+            print(f"⚠ /ask: No RAG entries matched query: '{question[:50]}...'")
+        
+        # Step 3: Generate AI response using RAG knowledgebase if available
+        # Use top 2 RAG entries if we have confident matches
+        rag_context = relevant_docs[:2] if relevant_docs else []
         
         # Generate AI response (/ask command doesn't have access to images)
-        # Use RAG entries if available, otherwise use empty list (AI will still respond)
-        ai_response = await generate_ai_response(question, relevant_docs[:2] if relevant_docs else [], None)
+        ai_response = await generate_ai_response(question, rag_context, None)
         
         embed = discord.Embed(
             title="✅ AI Response",
@@ -4694,7 +4735,7 @@ async def ask(interaction: discord.Interaction, question: str):
             color=0x2ECC71
         )
         
-        # Add knowledge base references only if we have them
+        # Add knowledge base references if we have them
         if relevant_docs:
             doc_titles = [doc.get('title', 'Unknown') for doc in relevant_docs[:2]]
             embed.add_field(
@@ -4704,7 +4745,7 @@ async def ask(interaction: discord.Interaction, question: str):
             )
             embed.set_footer(text=f"Based on {len(relevant_docs)} knowledge base entries")
         else:
-            embed.set_footer(text="AI-generated response")
+            embed.set_footer(text="AI-generated response (no confident RAG matches found)")
         
         await interaction.followup.send(embed=embed, ephemeral=False)
             
