@@ -345,6 +345,14 @@ IGNORE = "!"  # Messages starting with this prefix are ignored
 STAFF_ROLE_ID = 1422106035337826315  # Staff role that can use bot commands
 BOT_PERMISSIONS_ROLE_ID = 1439854362900959404  # Role that gives permissions for bot slash commands
 OWNER_USER_ID = 614865086804394012  # Bot owner - full access to all commands
+FRIEND_SERVER_ID = 1221433387772805260  # Friend's server - ONLY /ask command allowed, everyone can use it
+
+# --- IMPORTANT FOR FUTURE DEVELOPERS ---
+# When adding new commands, you MUST add this check at the start of your command handler:
+#   if is_friend_server(interaction):
+#       await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+#       return
+# This ensures the friend's server ONLY gets /ask, even when new features are added.
 
 # --- DATA STORAGE (Synced from Dashboard) ---
 RAG_DATABASE = []
@@ -3623,6 +3631,9 @@ async def on_message(message):
 @bot.tree.command(name="stop", description="Stops the bot gracefully (Admin only).")
 async def stop(interaction: discord.Interaction):
     """Stop the bot - requires admin or bot permissions role"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4899,15 +4910,23 @@ def is_owner_or_admin(interaction: discord.Interaction) -> bool:
     user_roles = [role.id for role in interaction.user.roles]
     return BOT_PERMISSIONS_ROLE_ID in user_roles
 
+def is_friend_server(interaction: discord.Interaction) -> bool:
+    """Check if the command is being used in the friend's server (where only /ask is allowed)"""
+    if not interaction.guild:
+        return False
+    return interaction.guild.id == FRIEND_SERVER_ID
+
 @bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
 async def ask(interaction: discord.Interaction, question: str):
     """Staff command to query the RAG knowledge base"""
     await interaction.response.defer(ephemeral=False)
     
-    # Check if user has staff role or admin
-    if not has_staff_role(interaction):
-        await interaction.followup.send("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
-        return
+    # On friend's server, allow everyone to use /ask (no permission check)
+    # On other servers, require staff role or admin
+    if not is_friend_server(interaction):
+        if not has_staff_role(interaction):
+            await interaction.followup.send("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+            return
     
     try:
         # Step 1: Check auto-responses first
