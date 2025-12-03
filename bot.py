@@ -825,9 +825,15 @@ class SatisfactionButtons(discord.ui.View):
                 return
             
             # Send AI response with buttons
+            # Truncate description if too long (Discord limit is 4096 characters)
+            max_description_length = 4096
+            truncated_response = ai_response
+            if len(ai_response) > max_description_length:
+                truncated_response = ai_response[:max_description_length-3] + "..."
+            
             ai_embed = discord.Embed(
                 title="💡 Let Me Try Again",
-                description=ai_response,
+                description=truncated_response,
                 color=0x5865F2
             )
             ai_embed.add_field(
@@ -2259,11 +2265,31 @@ async def on_ready():
         synced = await bot.tree.sync(guild=guild)
         print(f'✓ Slash commands synced to main guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
         
-        # Also sync commands to friend's server so /ask is available there
-        print(f'🔄 Syncing slash commands to friend\'s guild {FRIEND_SERVER_ID}...')
-        bot.tree.copy_global_to(guild=friend_guild)
+        # CRITICAL: Only sync /ask to friend's server - clear all other commands first
+        print(f'🔄 Clearing all commands from friend\'s guild {FRIEND_SERVER_ID}...')
+        bot.tree.clear_commands(guild=friend_guild)
+        await bot.tree.sync(guild=friend_guild)  # Clear existing commands
+        
+        # Now manually add ONLY /ask command to friend's server
+        print(f'🔄 Adding ONLY /ask command to friend\'s guild {FRIEND_SERVER_ID}...')
+        # Create a temporary command tree with only /ask
+        friend_tree = app_commands.CommandTree(bot)
+        
+        # Copy only the /ask command
+        @friend_tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base")
+        async def ask_friend(interaction: discord.Interaction, question: str):
+            """Ask command for friend's server - everyone can use it"""
+            await ask(interaction, question)  # Call the main ask function
+        
+        # Sync only this command to friend's server
+        bot.tree = friend_tree
         synced_friend = await bot.tree.sync(guild=friend_guild)
-        print(f'✓ Slash commands synced to friend\'s guild {FRIEND_SERVER_ID} ({len(synced_friend)} commands).')
+        print(f'✓ Only /ask command synced to friend\'s guild {FRIEND_SERVER_ID} ({len(synced_friend)} commands).')
+        
+        # Restore the main command tree
+        # Re-register all commands (they're already registered, just need to restore tree)
+        bot.tree = app_commands.CommandTree(bot)
+        # Commands are already registered via decorators, so they'll be available on next sync
         print(f'   Commands are now available in the server!')
         print(f'   💡 If you see duplicates, use /fix_duplicate_commands')
         print(f'   ⚠ NOTE: If you don\'t see commands, re-invite bot with "applications.commands" scope!')
@@ -3399,9 +3425,15 @@ async def on_message(message):
                                                     print(f"✅ AI response generated ({len(ai_response)} chars)")
                                                     
                                                     # Send the AI response
+                                                    # Truncate description if too long (Discord limit is 4096 characters)
+                                                    max_description_length = 4096
+                                                    truncated_response = ai_response
+                                                    if len(ai_response) > max_description_length:
+                                                        truncated_response = ai_response[:max_description_length-3] + "..."
+                                                    
                                                     ai_embed = discord.Embed(
                                                         title="💡 Let Me Try Again",
-                                                        description=ai_response,
+                                                        description=truncated_response,
                                                         color=0x5865F2
                                                     )
                                                     ai_embed.add_field(
@@ -5073,9 +5105,15 @@ async def ask(interaction: discord.Interaction, question: str):
         # Generate AI response (/ask command doesn't have access to images)
         ai_response = await generate_ai_response(question, rag_context, None)
         
+        # Truncate description if too long (Discord limit is 4096 characters)
+        max_description_length = 4096
+        truncated_response = ai_response[:max_description_length] if len(ai_response) > max_description_length else ai_response
+        if len(ai_response) > max_description_length:
+            truncated_response = truncated_response[:max_description_length-3] + "..."
+        
         embed = discord.Embed(
             title="✅ AI Response",
-            description=ai_response,
+            description=truncated_response,
             color=0x2ECC71
         )
         
