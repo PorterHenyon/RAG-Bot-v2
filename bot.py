@@ -1469,8 +1469,9 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try models in order - gemini-2.5-flash is most reliable
-    models_to_try = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']
+    # Try models in order - use correct model names to avoid 404 errors
+    # Updated model names (as of 2025): gemini-1.5-flash, gemini-1.5-pro, gemini-pro
+    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
     
     # Log knowledge base usage
     if context_entries:
@@ -1530,8 +1531,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             # Build user context WITH KNOWLEDGE BASE
             user_context = build_user_context(query, context_entries)
             
-            # Generate response
-            print(f"💬 Calling Gemini API with knowledge base context...")
+            # Generate response - log which key is being used
+            current_key = gemini_key_manager.get_current_key()
+            key_short = current_key[:15] + '...'
+            print(f"💬 Calling Gemini API with key {key_short} and model {model_name}...")
             loop = asyncio.get_event_loop()
             
             # Define function outside lambda to avoid closure issues
@@ -1547,8 +1550,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             track_api_call()
             
             # Mark the current key as successful (API call succeeded)
-            current_key = gemini_key_manager.get_current_key()
             gemini_key_manager.mark_key_success(current_key)
+            print(f"✅ API call succeeded with key {key_short}")
             
             # Check if response has text attribute
             if not hasattr(response, 'text'):
@@ -1655,7 +1658,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         print("🔍 Running final diagnostic test...")
         test_key = gemini_key_manager.get_current_key()
         genai.configure(api_key=test_key)
-        test_model = genai.GenerativeModel('gemini-2.5-flash')
+        test_model = genai.GenerativeModel('gemini-1.5-flash')
         test_response = test_model.generate_content("Say hello")
         print(f"   ✓ Direct API test SUCCEEDED: {test_response.text[:50]}")
         print(f"   ⚠️ This means the API works, but something in generate_ai_response failed")
@@ -1681,7 +1684,7 @@ async def analyze_conversation(conversation_text):
                 return None
             
             # Use key manager for automatic rotation
-            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
+            model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
             
             prompt = (
                 "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
@@ -4636,6 +4639,70 @@ async def check_rag_entries(interaction: discord.Interaction):
         
     except Exception as e:
         print(f"Error in check_rag_entries: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
+
+@bot.tree.command(name="check_api_keys", description="Show detailed API key usage and health statistics (Admin only).")
+async def check_api_keys(interaction: discord.Interaction):
+    """Show detailed API key statistics"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        usage_stats = gemini_key_manager.get_usage_stats()
+        total_keys = len(gemini_key_manager.api_keys)
+        current_key = gemini_key_manager.get_current_key()
+        
+        key_embed = discord.Embed(
+            title="🔑 API Key Statistics",
+            description=f"**{total_keys}** keys loaded | Current: `{current_key[:20]}...`",
+            color=0x5865F2
+        )
+        
+        # Show stats for each key
+        for i, (key_short, stats) in enumerate(usage_stats.items(), 1):
+            total_calls = stats.get('total_calls', 0)
+            success_calls = stats.get('successful_calls', 0)
+            errors = stats.get('errors', 0)
+            success_rate = stats.get('success_rate', 0)
+            health_score = stats.get('health_score', 0)
+            rate_limited = "🔴 RATE LIMITED" if stats.get('rate_limited', False) else "🟢 Active"
+            
+            # Get recent calls from rate limit tracker
+            recent_calls = len(gemini_api_calls_by_key.get(key_short, deque()))
+            
+            status_icon = "✅" if success_rate > 80 else "⚠️" if success_rate > 50 else "❌"
+            
+            key_embed.add_field(
+                name=f"{status_icon} Key {i}: {key_short}",
+                value=(
+                    f"**Status:** {rate_limited}\n"
+                    f"**Total Calls:** {total_calls} ({recent_calls} in last min)\n"
+                    f"**Success Rate:** {success_rate:.1f}% ({success_calls} success, {errors} errors)\n"
+                    f"**Health Score:** {health_score:.0f}"
+                ),
+                inline=True
+            )
+        
+        # Add warning if all keys are from same account
+        if total_keys > 1:
+            key_embed.add_field(
+                name="⚠️ Important Note",
+                value=(
+                    "If all keys are from the **same Google account**, they share the same quota/rate limits.\n"
+                    "For true load distribution, use keys from **different Google accounts**."
+                ),
+                inline=False
+            )
+        
+        await interaction.followup.send(embed=key_embed, ephemeral=False)
+        print(f"check_api_keys command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in check_api_keys: {e}")
+        import traceback
+        traceback.print_exc()
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
 
 @bot.tree.command(name="check_auto_entries", description="List all loaded auto-responses (Admin only).")
