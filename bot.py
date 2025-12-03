@@ -258,6 +258,7 @@ class GeminiKeyManager:
         max_attempts = len(self.api_keys) * 2  # Try each key up to 2 times
         attempts = 0
         last_key_used = None
+        tried_keys = []  # Track which keys we've tried
         
         while attempts < max_attempts:
             try:
@@ -267,12 +268,25 @@ class GeminiKeyManager:
                 
                 # Get key again in case it rotated
                 current_key = self.get_current_key()
+                key_short = current_key[:15] + '...'
+                
+                # Skip if we've already tried this key recently (avoid infinite loops)
+                if current_key in tried_keys and attempts > len(self.api_keys):
+                    print(f"⚠️ Already tried key {key_short}, forcing rotation...")
+                    self.rotate_key(force_round_robin=True)
+                    current_key = self.get_current_key()
+                    key_short = current_key[:15] + '...'
+                
+                tried_keys.append(current_key)
                 genai.configure(api_key=current_key)
+                
+                print(f"🔑 Attempt {attempts + 1}/{max_attempts}: Trying key {key_short} for model {model_name}")
                 
                 # Create model - if this succeeds, mark key as successful
                 model = genai.GenerativeModel(model_name, **kwargs)
                 # Mark success (we'll mark it again when the actual API call succeeds)
                 last_key_used = current_key
+                print(f"✅ Successfully created model with key {key_short}")
                 return model
             except Exception as e:
                 error_str = str(e).lower()
@@ -297,13 +311,19 @@ class GeminiKeyManager:
                         raise Exception(f"API key is leaked/invalid. Get a new key from https://aistudio.google.com/app/apikey")
                     continue
                 else:
-                    # Other error - mark it but don't rotate (might be transient)
+                    # Other error - mark it and try next key (might be transient or key-specific)
                     self.mark_key_error(key_used, is_rate_limit=False)
-                    # Re-raise non-rate-limit errors
-                    raise
+                    attempts += 1
+                    print(f"⚠️ Error on attempt {attempts} with key {key_used[:15]}...: {str(e)[:100]}")
+                    # Try next key instead of failing immediately
+                    self.rotate_key(force_round_robin=True)
+                    if attempts >= max_attempts:
+                        # If we've tried all keys, re-raise the last error
+                        raise
+                    continue
         
         # All keys exhausted
-        raise Exception("All API keys are rate limited. Please wait before trying again.")
+        raise Exception("All API keys exhausted. Please wait before trying again.")
 
 # Initialize key manager
 gemini_key_manager = GeminiKeyManager(GEMINI_API_KEYS)
@@ -1605,15 +1625,29 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     print(f"{'='*60}")
     try:
         current_key_short = gemini_key_manager.get_current_key()[:20] if gemini_key_manager.get_current_key() else "N/A"
+        total_keys = len(gemini_key_manager.api_keys)
+        usage_stats = gemini_key_manager.get_usage_stats()
+        
+        print(f"   Total API keys loaded: {total_keys}")
+        print(f"   Current key: {current_key_short}...")
+        print(f"   Query attempted: {query[:100]}")
+        print(f"   Context entries: {len(context_entries)}")
+        
+        # Show key health status
+        print(f"\n   Key Health Status:")
+        for key_short, stats in usage_stats.items():
+            rate_limited = "🔴 RATE LIMITED" if stats.get('rate_limited', False) else "🟢 OK"
+            success_rate = stats.get('success_rate', 0)
+            total_calls = stats.get('total_calls', 0)
+            print(f"     {key_short}: {rate_limited} | {total_calls} calls | {success_rate:.0f}% success")
+        
+        print(f"\n   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
+        print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
+        print(f"   Then update GEMINI_API_KEY in Railway environment variables and restart the bot.")
     except Exception as e:
-        print(f"   ERROR getting key: {e}")
-        current_key_short = "N/A"
-    print(f"   API key used: {current_key_short}...")
-    print(f"   Query attempted: {query[:100]}")
-    print(f"   Context entries: {len(context_entries)}")
-    print(f"   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
-    print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
-    print(f"   Then update GEMINI_API_KEY in your .env file and restart the bot.")
+        print(f"   ERROR getting key info: {e}")
+        import traceback
+        traceback.print_exc()
     print(f"{'='*60}\n")
     
     # Try one final direct test to see if API works at all
