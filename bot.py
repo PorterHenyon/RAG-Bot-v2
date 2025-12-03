@@ -2250,13 +2250,20 @@ async def on_ready():
         # DON'T clear commands on every startup - this causes CommandNotFound errors
         # Only sync commands to update any changes
         guild = discord.Object(id=DISCORD_GUILD_ID)
+        friend_guild = discord.Object(id=FRIEND_SERVER_ID)
         
-        print(f'🔄 Syncing slash commands to guild {DISCORD_GUILD_ID}...')
+        print(f'🔄 Syncing slash commands to main guild {DISCORD_GUILD_ID}...')
         
         # Sync commands to specific guild for instant availability
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
-        print(f'✓ Slash commands synced to guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
+        print(f'✓ Slash commands synced to main guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
+        
+        # Also sync commands to friend's server so /ask is available there
+        print(f'🔄 Syncing slash commands to friend\'s guild {FRIEND_SERVER_ID}...')
+        bot.tree.copy_global_to(guild=friend_guild)
+        synced_friend = await bot.tree.sync(guild=friend_guild)
+        print(f'✓ Slash commands synced to friend\'s guild {FRIEND_SERVER_ID} ({len(synced_friend)} commands).')
         print(f'   Commands are now available in the server!')
         print(f'   💡 If you see duplicates, use /fix_duplicate_commands')
         print(f'   ⚠ NOTE: If you don\'t see commands, re-invite bot with "applications.commands" scope!')
