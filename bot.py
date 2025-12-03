@@ -1469,9 +1469,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try models in order - use correct model names to avoid 404 errors
-    # Updated model names (as of 2025): gemini-1.5-flash, gemini-1.5-pro, gemini-pro
-    models_to_try = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro']
+    # Try models in order - gemini-2.5-flash is most reliable
+    models_to_try = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']
     
     # Log knowledge base usage
     if context_entries:
@@ -1658,7 +1657,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         print("🔍 Running final diagnostic test...")
         test_key = gemini_key_manager.get_current_key()
         genai.configure(api_key=test_key)
-        test_model = genai.GenerativeModel('gemini-1.5-flash')
+        test_model = genai.GenerativeModel('gemini-2.5-flash')
         test_response = test_model.generate_content("Say hello")
         print(f"   ✓ Direct API test SUCCEEDED: {test_response.text[:50]}")
         print(f"   ⚠️ This means the API works, but something in generate_ai_response failed")
@@ -1684,7 +1683,7 @@ async def analyze_conversation(conversation_text):
                 return None
             
             # Use key manager for automatic rotation
-            model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
+            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
             
             prompt = (
                 "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
