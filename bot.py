@@ -3694,6 +3694,9 @@ async def on_thread_delete(thread):
 
 @bot.tree.command(name="reload", description="Reloads data from dashboard (Admin only).")
 async def reload(interaction: discord.Interaction):
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     # Check permissions
@@ -3711,6 +3714,9 @@ async def reload(interaction: discord.Interaction):
 @bot.tree.command(name="fix_duplicate_commands", description="Clear ALL slash commands and re-sync (fixes duplicates) (Admin only).")
 async def fix_duplicate_commands(interaction: discord.Interaction):
     """Clear all slash commands (global + guild) and re-sync to fix duplicates"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3753,6 +3759,9 @@ async def fix_duplicate_commands(interaction: discord.Interaction):
 @bot.tree.command(name="set_forums_id", description="Set the support forum channel ID for the bot to monitor (Admin only).")
 async def set_forums_id(interaction: discord.Interaction, channel_id: str):
     """Set the forum channel ID and save to settings file"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3814,6 +3823,9 @@ async def set_forums_id(interaction: discord.Interaction, channel_id: str):
 @bot.tree.command(name="set_ignore_post_id", description="Set a post ID to ignore (like rules post). Bot won't respond to it (Admin only).")
 async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
     """Add a post ID to the ignore list"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3857,6 +3869,9 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
 @bot.tree.command(name="set_unsolved_tag_id", description="Set the Discord tag ID for 'Unsolved' posts (Admin only).")
 async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
     """Set the unsolved tag ID"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3891,6 +3906,9 @@ async def set_unsolved_tag_id(interaction: discord.Interaction, tag_id: str):
 @bot.tree.command(name="set_solved_tag_id", description="Set the Discord tag ID for 'Solved' posts (Admin only).")
 async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
     """Set the solved tag ID"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3925,6 +3943,9 @@ async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
 @bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
 async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int):
     """Set the satisfaction analysis delay"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3955,6 +3976,9 @@ async def set_satisfaction_delay(interaction: discord.Interaction, seconds: int)
 @bot.tree.command(name="set_temperature", description="Set the AI temperature (0.0-2.0) for response generation (Admin only).")
 async def set_temperature(interaction: discord.Interaction, temperature: float):
     """Set the AI temperature"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -3987,6 +4011,9 @@ async def set_temperature(interaction: discord.Interaction, temperature: float):
 @bot.tree.command(name="set_max_tokens", description="Set the maximum tokens for AI responses (Admin only).")
 async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
     """Set the maximum tokens for AI responses"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4018,6 +4045,9 @@ async def set_max_tokens(interaction: discord.Interaction, max_tokens: int):
 @bot.tree.command(name="set_post_inactivity_time", description="Set hours before old posts escalate to High Priority (Admin only).")
 async def set_post_inactivity_time(interaction: discord.Interaction, hours: int):
     """Set the post inactivity threshold for auto-escalation"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4049,6 +4079,9 @@ async def set_post_inactivity_time(interaction: discord.Interaction, hours: int)
 @bot.tree.command(name="set_ping_high_priority_interval", description="Set how often to check for high priority posts in hours (Admin only).")
 async def set_ping_high_priority_interval(interaction: discord.Interaction, hours: float):
     """Set the interval for checking old posts that need escalation"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4101,6 +4134,9 @@ async def set_ping_high_priority_interval(interaction: discord.Interaction, hour
 @bot.tree.command(name="set_support_role", description="Set the role to ping for high priority posts (Admin only).")
 async def set_support_role(interaction: discord.Interaction, role: discord.Role):
     """Set the support role to ping for high priority posts"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4138,6 +4174,9 @@ async def set_support_role(interaction: discord.Interaction, role: discord.Role)
 @bot.tree.command(name="set_support_notification_channel", description="Set channel for high priority notifications (Admin only).")
 async def set_support_notification_channel(interaction: discord.Interaction, channel: discord.TextChannel):
     """Set the channel for high priority post notifications"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4167,6 +4206,9 @@ async def set_support_notification_channel(interaction: discord.Interaction, cha
 @bot.tree.command(name="set_high_priority_channel_id", description="Set high priority notification channel by ID (Admin only).")
 async def set_high_priority_channel_id(interaction: discord.Interaction, channel_id: str):
     """Set the high priority notification channel by ID"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4220,6 +4262,9 @@ async def set_high_priority_channel_id(interaction: discord.Interaction, channel
 @bot.tree.command(name="set_solved_post_retention", description="Set days to keep solved posts before auto-deletion (Admin only).")
 async def set_solved_post_retention(interaction: discord.Interaction, days: int):
     """Set how long to keep solved/closed posts before automatic deletion"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4252,6 +4297,9 @@ async def set_solved_post_retention(interaction: discord.Interaction, days: int)
 @bot.tree.command(name="toggle_auto_rag", description="Enable/disable automatic RAG entry creation from solved threads (Admin only).")
 async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
     """Toggle automatic RAG entry creation from solved threads"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4285,6 +4333,9 @@ async def toggle_auto_rag(interaction: discord.Interaction, enabled: bool):
 @bot.tree.command(name="list_high_priority_posts", description="Show paginated list of all high priority posts with navigation (Admin only).")
 async def list_high_priority_posts(interaction: discord.Interaction):
     """List all posts currently marked as High Priority with pagination"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4362,6 +4413,9 @@ async def list_high_priority_posts(interaction: discord.Interaction):
 @bot.tree.command(name="ping_high_priority_now", description="Manually send high priority summary to notification channel (Admin only).")
 async def ping_high_priority_now(interaction: discord.Interaction):
     """Manually trigger a high priority posts summary notification"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4399,6 +4453,9 @@ async def ping_high_priority_now(interaction: discord.Interaction):
 @bot.tree.command(name="toggle_satisfaction_analysis", description="Enable/disable automatic satisfaction analysis (saves Gemini API calls!) (Admin only).")
 async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled: bool):
     """Toggle automatic satisfaction analysis to save API rate limits"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4430,6 +4487,9 @@ async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled
 @bot.tree.command(name="status", description="Check bot status and current configuration (Admin only).")
 async def status(interaction: discord.Interaction):
     """Show bot status and configuration"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4539,6 +4599,9 @@ async def status(interaction: discord.Interaction):
 @bot.tree.command(name="api_info", description="View sensitive API configuration (Private, Admin only).")
 async def api_info(interaction: discord.Interaction):
     """Show sensitive API and configuration details (private)"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4614,6 +4677,9 @@ async def api_info(interaction: discord.Interaction):
 @bot.tree.command(name="check_rag_entries", description="List all loaded RAG knowledge base entries (Admin only).")
 async def check_rag_entries(interaction: discord.Interaction):
     """Show all RAG entries"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4654,6 +4720,9 @@ async def check_rag_entries(interaction: discord.Interaction):
 @bot.tree.command(name="check_api_keys", description="Show detailed API key usage and health statistics (Admin only).")
 async def check_api_keys(interaction: discord.Interaction):
     """Show detailed API key statistics"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4718,6 +4787,9 @@ async def check_api_keys(interaction: discord.Interaction):
 @bot.tree.command(name="check_auto_entries", description="List all loaded auto-responses (Admin only).")
 async def check_auto_entries(interaction: discord.Interaction):
     """Show all auto-responses"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -4760,6 +4832,9 @@ async def check_auto_entries(interaction: discord.Interaction):
 @bot.tree.command(name="export_data", description="Download backup of all RAG entries and auto-responses (Admin only).")
 async def export_data(interaction: discord.Interaction):
     """Export all data as downloadable JSON file"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
@@ -5020,6 +5095,9 @@ async def ask(interaction: discord.Interaction, question: str):
 @bot.tree.command(name="mark_as_solve_no_review", description="Mark thread as solved and lock it WITHOUT creating a RAG entry (Staff only).")
 async def mark_as_solve_no_review(interaction: discord.Interaction):
     """Mark thread as solved and lock it without creating RAG entry"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     await interaction.response.defer(ephemeral=False)
     
     # Check if user has staff role or admin
@@ -5135,6 +5213,9 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
 @bot.tree.command(name="mark_as_solve", description="Mark thread as solved and send conversation to analyzer (Staff only).")
 async def mark_as_solve(interaction: discord.Interaction):
     """Mark a thread as solved and analyze the conversation for RAG entry creation"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
     # Check if user has staff role or admin
     if not has_staff_role(interaction):
         await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
