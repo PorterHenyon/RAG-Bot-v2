@@ -2253,7 +2253,7 @@ async def on_ready():
     # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
     try:
-        # ROBUST APPROACH: Use two separate command trees for different guilds
+        # ULTRA-SIMPLE APPROACH: Sync separately to each guild
         guild = discord.Object(id=DISCORD_GUILD_ID)
         friend_guild = discord.Object(id=FRIEND_SERVER_ID)
         
@@ -2261,38 +2261,38 @@ async def on_ready():
         print(f'🔄 Syncing ALL commands to main guild {DISCORD_GUILD_ID}...')
         bot.tree.copy_global_to(guild=guild)
         synced_main = await bot.tree.sync(guild=guild)
-        print(f'✓ {len(synced_main)} commands synced to main guild: {", ".join([c.name for c in synced_main[:5]])}{"..." if len(synced_main) > 5 else ""}')
+        print(f'✓ {len(synced_main)} commands synced to main guild')
         
-        # 2. Clear all commands from friend's guild first
-        print(f'🔄 Clearing commands from friend\'s guild {FRIEND_SERVER_ID}...')
-        bot.tree.clear_commands(guild=friend_guild)
-        await bot.tree.sync(guild=friend_guild)
-        print(f'✓ Cleared all commands from friend\'s guild')
+        # 2. For friend's guild: Copy all globally, then manually clear non-ask commands
+        print(f'🔄 Setting up friend\'s guild {FRIEND_SERVER_ID}...')
         
-        # 3. Add ONLY the /ask command to friend's guild
-        print(f'🔄 Adding ONLY /ask to friend\'s guild {FRIEND_SERVER_ID}...')
+        # First, copy all global commands to friend guild
+        bot.tree.copy_global_to(guild=friend_guild)
         
-        # Create the ask command specifically for friend's guild
-        @app_commands.command(name="ask", description="Ask the bot a question using the RAG knowledge base")
-        @app_commands.describe(question="The question you want to ask")
-        async def ask_friend_server(interaction: discord.Interaction, question: str):
-            """Ask command - available to everyone on friend's server"""
-            # Call the main ask function logic
-            await ask(interaction, question)
+        # Get all commands that were copied
+        all_commands = bot.tree.get_commands(guild=friend_guild)
+        print(f'   Copied {len(all_commands)} commands to friend guild')
         
-        # Add it to friend's guild
-        bot.tree.add_command(ask_friend_server, guild=friend_guild)
+        # Remove everything except /ask
+        for cmd in all_commands:
+            if cmd.name != "ask":
+                bot.tree.remove_command(cmd.name, guild=friend_guild)
+                print(f'   Removed /{cmd.name} from friend guild')
+        
+        # Now sync only the remaining command(s)
         synced_friend = await bot.tree.sync(guild=friend_guild)
-        print(f'✓ {len(synced_friend)} command synced to friend\'s guild: {[c.name for c in synced_friend]}')
+        print(f'✓ {len(synced_friend)} command(s) synced to friend\'s guild: {[c.name for c in synced_friend]}')
         
-        if len(synced_friend) != 1 or synced_friend[0].name != "ask":
-            print(f'⚠ WARNING: Expected only /ask on friend\'s server, but got: {[c.name for c in synced_friend]}')
+        if len(synced_friend) == 1 and synced_friend[0].name == "ask":
+            print(f'✅ SUCCESS: Only /ask on friend\'s server!')
+        else:
+            print(f'⚠ Unexpected commands on friend server: {[c.name for c in synced_friend]}')
         
         print(f'\n✅ Command sync complete!')
-        print(f'   • Main guild ({DISCORD_GUILD_ID}): {len(synced_main)} commands')
-        print(f'   • Friend\'s guild ({FRIEND_SERVER_ID}): {len(synced_friend)} command(s)')
+        print(f'   • Main guild: {len(synced_main)} commands')
+        print(f'   • Friend guild: {len(synced_friend)} command(s)')
     except Exception as e:
-        print(f'⚠ Failed to sync commands: {e}')
+        print(f'❌ Failed to sync commands: {e}')
         import traceback
         traceback.print_exc()
     
