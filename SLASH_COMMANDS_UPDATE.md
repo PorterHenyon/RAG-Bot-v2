@@ -56,21 +56,36 @@ Found 3 solved post(s) matching your search:
 
 ### 3. ✅ New Command: `/translate`
 
-**Description**: Translate the most recent message in the channel into English
+**Description**: Translate messages with smart language detection and bidirectional translation
 
-**Parameters**: None
+**Parameters**:
+- `message_id` (optional): The ID of a specific message to translate (right-click message → Copy ID)
+- `target_language` (optional): Target language (e.g., "Spanish", "French", "Portuguese")
 
 **How it works**:
-1. Finds the most recent non-bot message in the channel
-2. Uses Google Gemini AI to translate it to English
-3. Shows both original and translated text in an embed
-4. Includes a link to jump to the original message
+1. **Smart Detection Mode** (no target language specified):
+   - If message is in English → translates to common language based on context
+   - If message is NOT in English → translates to English
+2. **Direct Translation Mode** (target language specified):
+   - Translates to the specified language regardless of source
+3. Can target specific message by ID or use most recent message
+4. Shows both original and translated text in an embed
+5. Includes link to jump to the original message
 
 **Example Usage**:
 ```
 /translate
+(Translates most recent message)
+
+/translate message_id:1234567890
+(Translates specific message by ID)
+
+/translate target_language:Spanish
+(Translates most recent message to Spanish)
+
+/translate message_id:1234567890 target_language:French
+(Translates specific message to French)
 ```
-(Use this immediately after someone posts a message in a non-English language)
 
 **Who can use it**: Staff role or Administrator
 
@@ -78,19 +93,24 @@ Found 3 solved post(s) matching your search:
 ```
 🌐 Translation
 
-Original Message:
+Original Message (from UserName):
 ```
 Mein Makro funktioniert nicht mehr nach dem Update
 ```
 
 Translation:
 ```
+[Detected: German → English]
 My macro doesn't work anymore after the update
 ```
 
 [Jump to Original Message](discord link)
 Translated by Staff Name
 ```
+
+**Permission Requirements**:
+- The bot needs **Read Message History** permission
+- If you get a 403 error, ask an admin to grant this permission
 
 ---
 

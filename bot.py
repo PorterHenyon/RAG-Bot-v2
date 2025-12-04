@@ -5593,9 +5593,13 @@ async def search(interaction: discord.Interaction, query: str):
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred while searching: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="translate", description="Translate the message you're replying to into English (Staff only).")
-async def translate(interaction: discord.Interaction):
-    """Translate a message that is being replied to"""
+@bot.tree.command(name="translate", description="Translate a message. Smart detection: non-English→English, English→target language (Staff only).")
+@app_commands.describe(
+    message_id="Optional: ID of message to translate (right-click message → Copy ID). If empty, uses most recent message.",
+    target_language="Optional: Target language (e.g., 'Spanish', 'French'). If empty, auto-detects direction."
+)
+async def translate(interaction: discord.Interaction, message_id: str = None, target_language: str = None):
+    """Translate a message with smart language detection"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
         return
@@ -5608,44 +5612,81 @@ async def translate(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     
     try:
-        # Check if this command is being used as a reply
-        # We need to check the message that triggered this interaction
-        # Since slash commands don't have a direct reply context, we'll need to get the latest message
         channel = interaction.channel
-        
-        # Get recent messages to find what the user might be replying to
-        messages = []
-        async for msg in channel.history(limit=5):
-            messages.append(msg)
-        
-        # Find the most recent non-bot message before the command
         target_message = None
-        for msg in messages:
-            if msg.author.id != bot.user.id and not msg.content.startswith('/'):
-                target_message = msg
-                break
+        
+        # If message_id provided, fetch that specific message
+        if message_id:
+            try:
+                target_message = await channel.fetch_message(int(message_id))
+            except discord.NotFound:
+                await interaction.followup.send("❌ Message not found. Make sure the message ID is correct and from this channel.", ephemeral=True)
+                return
+            except discord.Forbidden:
+                await interaction.followup.send("❌ I don't have permission to read messages in this channel. Please grant the bot **Read Message History** permission.", ephemeral=True)
+                return
+            except ValueError:
+                await interaction.followup.send("❌ Invalid message ID. Please provide a valid numeric message ID.", ephemeral=True)
+                return
+        else:
+            # Get recent messages to find what the user might want to translate
+            try:
+                messages = []
+                async for msg in channel.history(limit=10):
+                    messages.append(msg)
+                
+                # Find the most recent non-bot, non-command message
+                for msg in messages:
+                    if msg.author.id != bot.user.id and not msg.content.startswith('/'):
+                        target_message = msg
+                        break
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    "❌ I don't have permission to read message history in this channel.\n\n"
+                    "**Fix:** Give the bot the **Read Message History** permission, or provide a message ID:\n"
+                    "`/translate message_id:123456789`",
+                    ephemeral=True
+                )
+                return
         
         if not target_message:
             await interaction.followup.send(
-                "❌ Could not find a message to translate. Please use this command right after the message you want to translate.",
+                "❌ Could not find a message to translate.\n\n"
+                "**Options:**\n"
+                "1. Use this command right after the message you want to translate\n"
+                "2. Provide the message ID: `/translate message_id:123456789`\n"
+                "(Right-click message → Copy ID)",
                 ephemeral=True
             )
             return
         
         if not target_message.content:
-            await interaction.followup.send(
-                "❌ The message has no text content to translate.",
-                ephemeral=True
-            )
+            await interaction.followup.send("❌ The message has no text content to translate.", ephemeral=True)
             return
         
-        # Use Gemini to translate the message
-        prompt = f"""Translate the following message into English. If it's already in English, respond with "[Already in English]" followed by the original text.
+        # Use Gemini to detect language and translate appropriately
+        if target_language:
+            # User specified target language
+            prompt = f"""Translate the following message into {target_language}.
 
 Message to translate:
 {target_message.content}
 
 Provide ONLY the translation, no explanations or additional text."""
+        else:
+            # Auto-detect and translate smartly
+            prompt = f"""Detect the language of this message and translate it intelligently:
+- If the message is in English, translate it to the most appropriate common language based on context (Spanish, Portuguese, French, German, etc.)
+- If the message is NOT in English, translate it to English
+
+After translation, indicate the detected source language in brackets.
+
+Message to translate:
+{target_message.content}
+
+Format your response as:
+[Detected: SOURCE_LANGUAGE → TARGET_LANGUAGE]
+TRANSLATION_HERE"""
         
         model = genai.GenerativeModel('gemini-1.5-flash')
         response = model.generate_content(
@@ -5664,8 +5705,9 @@ Provide ONLY the translation, no explanations or additional text."""
             color=discord.Color.blue()
         )
         
+        # Show original author and message
         embed.add_field(
-            name="Original Message",
+            name=f"Original Message (from {target_message.author.display_name})",
             value=f"```{target_message.content[:1000]}```",
             inline=False
         )
@@ -5684,6 +5726,16 @@ Provide ONLY the translation, no explanations or additional text."""
         await interaction.followup.send(embed=embed, ephemeral=False)
         print(f"🌐 Translation completed by {interaction.user} for message from {target_message.author}")
         
+    except discord.Forbidden as e:
+        await interaction.followup.send(
+            "❌ **Permission Error**: I don't have access to read messages in this channel.\n\n"
+            "**Required Permissions:**\n"
+            "• Read Message History\n"
+            "• View Channel\n\n"
+            "Please ask an administrator to grant these permissions to the bot.",
+            ephemeral=True
+        )
+        print(f"Permission error in translate command: {e}")
     except Exception as e:
         print(f"Error in translate command: {e}")
         import traceback
