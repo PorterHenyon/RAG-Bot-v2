@@ -59,7 +59,7 @@ Found 3 solved post(s) matching your search:
 **Description**: Translate messages with smart language detection and bidirectional translation
 
 **Parameters**:
-- `message_id` (optional): The ID of a specific message to translate (right-click message → Copy ID)
+- `message_id` **(REQUIRED)**: The ID of the message to translate (right-click message → Copy ID)
 - `target_language` (optional): Target language (e.g., "Spanish", "French", "Portuguese")
 
 **How it works**:
@@ -68,23 +68,26 @@ Found 3 solved post(s) matching your search:
    - If message is NOT in English → translates to English
 2. **Direct Translation Mode** (target language specified):
    - Translates to the specified language regardless of source
-3. Can target specific message by ID or use most recent message
+3. Uses message ID directly - **NO "Read Message History" permission needed!**
 4. Shows both original and translated text in an embed
 5. Includes link to jump to the original message
 
+**How to Get Message ID**:
+1. Enable Developer Mode in Discord:
+   - User Settings → Advanced → Developer Mode (toggle ON)
+2. Right-click any message → Copy ID
+3. Use that ID in the command
+
 **Example Usage**:
 ```
-/translate
-(Translates most recent message)
+/translate message_id:1234567890123456789
+(Auto-detects language and translates)
 
-/translate message_id:1234567890
-(Translates specific message by ID)
+/translate message_id:1234567890123456789 target_language:Spanish
+(Translates to Spanish)
 
-/translate target_language:Spanish
-(Translates most recent message to Spanish)
-
-/translate message_id:1234567890 target_language:French
-(Translates specific message to French)
+/translate message_id:1234567890123456789 target_language:French
+(Translates to French)
 ```
 
 **Who can use it**: Staff role or Administrator
@@ -108,9 +111,11 @@ My macro doesn't work anymore after the update
 Translated by Staff Name
 ```
 
-**Permission Requirements**:
-- The bot needs **Read Message History** permission
-- If you get a 403 error, ask an admin to grant this permission
+**Why Message ID is Required**:
+- Avoids permission issues with reading message history
+- Works reliably in all channels
+- More precise - you pick exactly which message to translate
+- No ambiguity about which message you want translated
 
 ---
 

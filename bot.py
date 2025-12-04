@@ -5595,10 +5595,10 @@ async def search(interaction: discord.Interaction, query: str):
 
 @bot.tree.command(name="translate", description="Translate a message. Smart detection: non-English→English, English→target language (Staff only).")
 @app_commands.describe(
-    message_id="Optional: ID of message to translate (right-click message → Copy ID). If empty, uses most recent message.",
+    message_id="REQUIRED: ID of message to translate (right-click message → Copy ID)",
     target_language="Optional: Target language (e.g., 'Spanish', 'French'). If empty, auto-detects direction."
 )
-async def translate(interaction: discord.Interaction, message_id: str = None, target_language: str = None):
+async def translate(interaction: discord.Interaction, message_id: str, target_language: str = None):
     """Translate a message with smart language detection"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
@@ -5615,53 +5615,54 @@ async def translate(interaction: discord.Interaction, message_id: str = None, ta
         channel = interaction.channel
         target_message = None
         
-        # If message_id provided, fetch that specific message
-        if message_id:
-            try:
-                target_message = await channel.fetch_message(int(message_id))
-            except discord.NotFound:
-                await interaction.followup.send("❌ Message not found. Make sure the message ID is correct and from this channel.", ephemeral=True)
-                return
-            except discord.Forbidden:
-                await interaction.followup.send("❌ I don't have permission to read messages in this channel. Please grant the bot **Read Message History** permission.", ephemeral=True)
-                return
-            except ValueError:
-                await interaction.followup.send("❌ Invalid message ID. Please provide a valid numeric message ID.", ephemeral=True)
-                return
-        else:
-            # Get recent messages to find what the user might want to translate
-            try:
-                messages = []
-                async for msg in channel.history(limit=10):
-                    messages.append(msg)
-                
-                # Find the most recent non-bot, non-command message
-                for msg in messages:
-                    if msg.author.id != bot.user.id and not msg.content.startswith('/'):
-                        target_message = msg
-                        break
-            except discord.Forbidden:
-                await interaction.followup.send(
-                    "❌ I don't have permission to read message history in this channel.\n\n"
-                    "**Fix:** Give the bot the **Read Message History** permission, or provide a message ID:\n"
-                    "`/translate message_id:123456789`",
-                    ephemeral=True
-                )
-                return
-        
-        if not target_message:
+        # Fetch the specific message by ID
+        try:
+            target_message = await channel.fetch_message(int(message_id))
+        except discord.NotFound:
             await interaction.followup.send(
-                "❌ Could not find a message to translate.\n\n"
-                "**Options:**\n"
-                "1. Use this command right after the message you want to translate\n"
-                "2. Provide the message ID: `/translate message_id:123456789`\n"
-                "(Right-click message → Copy ID)",
+                "❌ Message not found. Make sure:\n"
+                "• The message ID is correct\n"
+                "• The message is in this channel\n"
+                "• The message hasn't been deleted\n\n"
+                "**How to get message ID:**\n"
+                "1. Enable Developer Mode (User Settings → Advanced → Developer Mode)\n"
+                "2. Right-click the message → Copy ID",
+                ephemeral=True
+            )
+            return
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "❌ **Permission Error**: I can't read messages in this channel.\n\n"
+                "**Required Bot Permissions:**\n"
+                "✅ View Channel\n"
+                "✅ Read Message History\n"
+                "✅ Send Messages\n\n"
+                "**To Fix:**\n"
+                "Ask an administrator to check the bot's role permissions or channel overrides.",
+                ephemeral=True
+            )
+            return
+        except ValueError:
+            await interaction.followup.send(
+                "❌ Invalid message ID format. The message ID should be a long number.\n\n"
+                "**Example:** `/translate message_id:1234567890123456789`",
+                ephemeral=True
+            )
+            return
+        except Exception as e:
+            await interaction.followup.send(
+                f"❌ Error fetching message: {str(e)}\n\n"
+                "Make sure you're providing a valid message ID from this channel.",
                 ephemeral=True
             )
             return
         
         if not target_message.content:
-            await interaction.followup.send("❌ The message has no text content to translate.", ephemeral=True)
+            await interaction.followup.send(
+                "❌ This message has no text content to translate.\n"
+                "(Images, embeds, and attachments cannot be translated)",
+                ephemeral=True
+            )
             return
         
         # Use Gemini to detect language and translate appropriately
