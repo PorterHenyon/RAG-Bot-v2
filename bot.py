@@ -2253,50 +2253,48 @@ async def on_ready():
     # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
     try:
-        # DON'T clear commands on every startup - this causes CommandNotFound errors
-        # Only sync commands to update any changes
+        # ROBUST APPROACH: Use two separate command trees for different guilds
         guild = discord.Object(id=DISCORD_GUILD_ID)
         friend_guild = discord.Object(id=FRIEND_SERVER_ID)
         
-        print(f'🔄 Syncing slash commands to main guild {DISCORD_GUILD_ID}...')
-        
-        # Sync commands to specific guild for instant availability
+        # 1. Sync ALL commands to main guild
+        print(f'🔄 Syncing ALL commands to main guild {DISCORD_GUILD_ID}...')
         bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        print(f'✓ Slash commands synced to main guild {DISCORD_GUILD_ID} ({len(synced)} commands).')
+        synced_main = await bot.tree.sync(guild=guild)
+        print(f'✓ {len(synced_main)} commands synced to main guild: {", ".join([c.name for c in synced_main[:5]])}{"..." if len(synced_main) > 5 else ""}')
         
-        # CRITICAL: Only sync /ask to friend's server - clear all other commands first
-        print(f'🔄 Clearing all commands from friend\'s guild {FRIEND_SERVER_ID}...')
+        # 2. Clear all commands from friend's guild first
+        print(f'🔄 Clearing commands from friend\'s guild {FRIEND_SERVER_ID}...')
         bot.tree.clear_commands(guild=friend_guild)
-        await bot.tree.sync(guild=friend_guild)  # Clear existing commands
+        await bot.tree.sync(guild=friend_guild)
+        print(f'✓ Cleared all commands from friend\'s guild')
         
-        # Now manually add ONLY /ask command to friend's server
-        print(f'🔄 Adding ONLY /ask command to friend\'s guild {FRIEND_SERVER_ID}...')
-        # Create a temporary command tree with only /ask
-        friend_tree = app_commands.CommandTree(bot)
+        # 3. Add ONLY the /ask command to friend's guild
+        print(f'🔄 Adding ONLY /ask to friend\'s guild {FRIEND_SERVER_ID}...')
         
-        # Copy only the /ask command
-        @friend_tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base")
-        async def ask_friend(interaction: discord.Interaction, question: str):
-            """Ask command for friend's server - everyone can use it"""
-            await ask(interaction, question)  # Call the main ask function
+        # Create the ask command specifically for friend's guild
+        @app_commands.command(name="ask", description="Ask the bot a question using the RAG knowledge base")
+        @app_commands.describe(question="The question you want to ask")
+        async def ask_friend_server(interaction: discord.Interaction, question: str):
+            """Ask command - available to everyone on friend's server"""
+            # Call the main ask function logic
+            await ask(interaction, question)
         
-        # Sync only this command to friend's server
-        bot.tree = friend_tree
+        # Add it to friend's guild
+        bot.tree.add_command(ask_friend_server, guild=friend_guild)
         synced_friend = await bot.tree.sync(guild=friend_guild)
-        print(f'✓ Only /ask command synced to friend\'s guild {FRIEND_SERVER_ID} ({len(synced_friend)} commands).')
+        print(f'✓ {len(synced_friend)} command synced to friend\'s guild: {[c.name for c in synced_friend]}')
         
-        # Restore the main command tree
-        # Re-register all commands (they're already registered, just need to restore tree)
-        bot.tree = app_commands.CommandTree(bot)
-        # Commands are already registered via decorators, so they'll be available on next sync
-        print(f'   Commands are now available in the server!')
-        print(f'   💡 If you see duplicates, use /fix_duplicate_commands')
-        print(f'   ⚠ NOTE: If you don\'t see commands, re-invite bot with "applications.commands" scope!')
+        if len(synced_friend) != 1 or synced_friend[0].name != "ask":
+            print(f'⚠ WARNING: Expected only /ask on friend\'s server, but got: {[c.name for c in synced_friend]}')
+        
+        print(f'\n✅ Command sync complete!')
+        print(f'   • Main guild ({DISCORD_GUILD_ID}): {len(synced_main)} commands')
+        print(f'   • Friend\'s guild ({FRIEND_SERVER_ID}): {len(synced_friend)} command(s)')
     except Exception as e:
         print(f'⚠ Failed to sync commands: {e}')
-        print(f'   This usually means the bot lacks "applications.commands" permission.')
-        print(f'   Re-invite the bot using the OAuth2 URL Generator with both "bot" and "applications.commands" scopes.')
+        import traceback
+        traceback.print_exc()
     
     # Verify bot is watching the correct channel and list all forum channels
     try:
