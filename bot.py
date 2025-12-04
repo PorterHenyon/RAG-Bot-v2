@@ -5687,7 +5687,17 @@ Format your response as:
 [Detected: SOURCE_LANGUAGE → TARGET_LANGUAGE]
 TRANSLATION_HERE"""
         
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # Use key manager with model rotation for reliability
+        try:
+            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
+        except Exception as e:
+            print(f"⚠ Failed to create gemini-2.5-flash model, trying gemini-1.5-flash: {e}")
+            try:
+                model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
+            except Exception as e2:
+                print(f"⚠ Failed to create gemini-1.5-flash model, trying gemini-flash-latest: {e2}")
+                model = gemini_key_manager.create_model_with_retry('gemini-flash-latest')
+        
         response = model.generate_content(
             prompt,
             generation_config=genai.types.GenerationConfig(
@@ -5697,6 +5707,9 @@ TRANSLATION_HERE"""
         )
         
         translation = response.text.strip()
+        
+        # Track API usage
+        track_api_call()
         
         # Create embed with original and translation
         embed = discord.Embed(
