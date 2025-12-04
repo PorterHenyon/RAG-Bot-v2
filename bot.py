@@ -358,6 +358,10 @@ FRIEND_SERVER_ID = 1221433387772805260  # Friend's server - ONLY /ask command al
 RAG_DATABASE = []
 AUTO_RESPONSES = []
 SYSTEM_PROMPT_TEXT = ""  # Fetched from API, fallback to default if not available
+LEADERBOARD_DATA = {
+    'month': '',  # Format: "2025-12" for December 2025
+    'scores': {}  # {user_id: {'username': 'Name', 'solved_count': 5, 'avatar_url': 'https://...'}}
+}
 
 # --- BOT SETTINGS (Stored in Vercel KV API - NO local files) ---
 BOT_SETTINGS = {
@@ -1067,8 +1071,8 @@ def save_bot_settings():
 
 # --- DATA SYNC FUNCTIONS ---
 async def fetch_data_from_api():
-    """Fetch RAG entries, auto-responses, and system prompt from the dashboard API"""
-    global RAG_DATABASE, AUTO_RESPONSES, SYSTEM_PROMPT_TEXT
+    """Fetch RAG entries, auto-responses, system prompt, and leaderboard from the dashboard API"""
+    global RAG_DATABASE, AUTO_RESPONSES, SYSTEM_PROMPT_TEXT, LEADERBOARD_DATA
     
     # Skip API call if URL is still the placeholder
     if 'your-vercel-app' in DATA_API_URL:
@@ -1088,6 +1092,7 @@ async def fetch_data_from_api():
                     new_rag = data.get('ragEntries', [])
                     new_auto = data.get('autoResponses', [])
                     new_settings = data.get('botSettings', {})
+                    new_leaderboard = data.get('leaderboard', {'month': '', 'scores': {}})
                     
                     # Debug: Show what settings we got from API
                     if new_settings:
@@ -1105,6 +1110,7 @@ async def fetch_data_from_api():
                     # Update data
                     RAG_DATABASE = new_rag
                     AUTO_RESPONSES = new_auto
+                    LEADERBOARD_DATA = new_leaderboard
                     
                     # Update system prompt if available
                     if new_settings and 'systemPrompt' in new_settings:
@@ -1191,6 +1197,53 @@ async def fetch_data_from_api():
         print("ℹ Using local data.")
         load_local_fallback_data()
         return False
+
+async def increment_leaderboard(user: discord.User):
+    """Increment solved count for a staff member"""
+    from datetime import datetime
+    
+    current_month = datetime.now().strftime("%Y-%m")
+    
+    # Reset if new month
+    if LEADERBOARD_DATA['month'] != current_month:
+        print(f"🔄 New month detected! Resetting leaderboard from {LEADERBOARD_DATA['month']} to {current_month}")
+        LEADERBOARD_DATA['month'] = current_month
+        LEADERBOARD_DATA['scores'] = {}
+    
+    user_id = str(user.id)
+    
+    # Initialize or increment user's score
+    if user_id not in LEADERBOARD_DATA['scores']:
+        LEADERBOARD_DATA['scores'][user_id] = {
+            'username': user.display_name,
+            'solved_count': 0,
+            'avatar_url': str(user.display_avatar.url) if user.display_avatar else ''
+        }
+    
+    LEADERBOARD_DATA['scores'][user_id]['solved_count'] += 1
+    LEADERBOARD_DATA['scores'][user_id]['username'] = user.display_name  # Update in case they changed name
+    LEADERBOARD_DATA['scores'][user_id]['avatar_url'] = str(user.display_avatar.url) if user.display_avatar else ''
+    
+    print(f"📊 Leaderboard: {user.display_name} now has {LEADERBOARD_DATA['scores'][user_id]['solved_count']} solved threads this month")
+    
+    # Save to API
+    await save_leaderboard_to_api()
+
+async def save_leaderboard_to_api():
+    """Save leaderboard data back to the dashboard API"""
+    if 'your-vercel-app' in DATA_API_URL:
+        return  # Skip if not configured
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {'action': 'update_leaderboard', 'leaderboard': LEADERBOARD_DATA}
+            async with session.post(DATA_API_URL, json=payload, timeout=aiohttp.ClientTimeout(total=5)) as response:
+                if response.status == 200:
+                    print(f"✓ Leaderboard saved to dashboard")
+                    return True
+    except Exception as e:
+        print(f"⚠ Failed to save leaderboard: {e}")
+    return False
 
 def load_local_fallback_data():
     """Load fallback data if API is unavailable"""
@@ -1888,6 +1941,38 @@ async def get_unsolved_tag(forum_channel):
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
+
+@tasks.loop(hours=24)  # Check daily for month reset
+async def check_leaderboard_reset():
+    """Check if it's a new month and reset leaderboard"""
+    from datetime import datetime
+    
+    try:
+        current_month = datetime.now().strftime("%Y-%m")
+        
+        if LEADERBOARD_DATA['month'] and LEADERBOARD_DATA['month'] != current_month:
+            old_month = datetime.strptime(LEADERBOARD_DATA['month'], "%Y-%m").strftime("%B %Y")
+            print(f"🔄 New month detected! Resetting leaderboard from {old_month} to {datetime.now().strftime('%B %Y')}")
+            
+            # Log final standings before reset
+            if LEADERBOARD_DATA['scores']:
+                sorted_staff = sorted(LEADERBOARD_DATA['scores'].items(), key=lambda x: x[1]['solved_count'], reverse=True)
+                print(f"📊 Final standings for {old_month}:")
+                for i, (user_id, data) in enumerate(sorted_staff[:5], 1):
+                    print(f"   {i}. {data.get('username', 'Unknown')}: {data.get('solved_count', 0)} solved")
+            
+            # Reset for new month
+            LEADERBOARD_DATA['month'] = current_month
+            LEADERBOARD_DATA['scores'] = {}
+            await save_leaderboard_to_api()
+            print(f"✅ Leaderboard reset for new month: {datetime.now().strftime('%B %Y')}")
+        elif not LEADERBOARD_DATA['month']:
+            # Initialize month if not set
+            LEADERBOARD_DATA['month'] = current_month
+            await save_leaderboard_to_api()
+            print(f"✅ Initialized leaderboard for {datetime.now().strftime('%B %Y')}")
+    except Exception as e:
+        print(f"⚠ Error in check_leaderboard_reset task: {e}")
     # All data stored in memory (loaded from API) - no local files
 
 @sync_data_task.before_loop
@@ -2234,6 +2319,7 @@ async def on_ready():
     
     # Start periodic sync
     sync_data_task.start()
+    check_leaderboard_reset.start()
     
     # Start old post check task
     if not check_old_posts.is_running():
@@ -2385,6 +2471,10 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
         else:
             avatar_url = owner_avatar_url or f'https://cdn.discordapp.com/embed/avatars/0.png'
         
+        # Get guild ID for Discord URL
+        guild_id = thread.guild.id if thread.guild else DISCORD_GUILD_ID
+        discord_url = f"https://discord.com/channels/{guild_id}/{thread.id}"
+        
         post_data = {
             'action': 'create',
             'post': {
@@ -2400,6 +2490,7 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
                 'createdAt': thread_created.isoformat() if hasattr(thread_created, 'isoformat') else datetime.now().isoformat(),
                 'forumChannelId': str(thread.parent_id),
                 'postId': str(thread.id),
+                'discordUrl': discord_url,  # Direct link to Discord thread
                 'conversation': [
                     {
                         'author': 'User',
@@ -5238,11 +5329,15 @@ async def mark_as_solved(interaction: discord.Interaction):
             except Exception as e:
                 print(f"⚠ Error updating dashboard: {e}")
         
+        # Increment leaderboard for staff member
+        await increment_leaderboard(interaction.user)
+        
         # Send success message
         await interaction.followup.send(
             f"✅ Thread marked as **Solved** and locked!\n\n"
             f"🔒 Thread is now closed.\n"
-            f"📋 No RAG entry created (as requested).",
+            f"📋 No RAG entry created (as requested).\n"
+            f"🏆 +1 to your leaderboard score!",
             ephemeral=False
         )
         print(f"✓ Thread {thread_id} marked as solved (no RAG) by {interaction.user}")
@@ -5405,13 +5500,17 @@ async def mark_as_solved_with_review(interaction: discord.Interaction):
                                     print(f"✓ Created pending RAG entry for review: '{new_pending_entry['title']}'")
                                     print(f"✓ API response: {result}")
             
+                                    # Increment leaderboard for staff member
+                                    await increment_leaderboard(interaction.user)
+                                    
                                     # Send success message to user
                                     await interaction.followup.send(
                                         f"✅ Thread marked as solved and RAG entry submitted for review!\n\n"
                                         f"**Title:** {new_pending_entry['title']}\n"
                                         f"**ID:** {new_pending_entry['id']}\n\n"
                                         f"📋 The entry is now **pending review** in the **RAG Management** tab.\n"
-                                        f"You can approve or reject it from the dashboard.",
+                                        f"You can approve or reject it from the dashboard.\n"
+                                        f"🏆 +1 to your leaderboard score!",
                                         ephemeral=True
                                     )
                                 else:
@@ -5590,6 +5689,90 @@ async def search(interaction: discord.Interaction, query: str):
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred while searching: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="leaderboard", description="View the monthly support staff leaderboard (Staff only).")
+async def leaderboard(interaction: discord.Interaction):
+    """Display the monthly leaderboard of staff members who solved threads"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    
+    # Check if user has staff role or admin
+    if not has_staff_role(interaction):
+        await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        from datetime import datetime
+        
+        current_month = datetime.now().strftime("%Y-%m")
+        month_name = datetime.now().strftime("%B %Y")
+        
+        # Check if we need to reset for new month
+        if LEADERBOARD_DATA['month'] != current_month:
+            LEADERBOARD_DATA['month'] = current_month
+            LEADERBOARD_DATA['scores'] = {}
+            await save_leaderboard_to_api()
+        
+        scores = LEADERBOARD_DATA['scores']
+        
+        if not scores:
+            await interaction.followup.send(
+                f"📊 **Support Staff Leaderboard - {month_name}**\n\n"
+                f"No solved threads yet this month! Be the first to help someone! 🚀",
+                ephemeral=False
+            )
+            return
+        
+        # Sort by solved_count (descending)
+        sorted_staff = sorted(scores.items(), key=lambda x: x[1]['solved_count'], reverse=True)
+        
+        # Create embed
+        embed = discord.Embed(
+            title=f"🏆 Support Staff Leaderboard",
+            description=f"**{month_name}** - Top support heroes this month!",
+            color=discord.Color.gold()
+        )
+        
+        # Add top 10 staff members
+        medals = ["🥇", "🥈", "🥉"]
+        for i, (user_id, data) in enumerate(sorted_staff[:10], 1):
+            medal = medals[i-1] if i <= 3 else f"**#{i}**"
+            username = data.get('username', 'Unknown')
+            solved_count = data.get('solved_count', 0)
+            
+            # Try to get the actual user for mention
+            try:
+                user = await bot.fetch_user(int(user_id))
+                user_mention = user.mention
+            except:
+                user_mention = username
+            
+            embed.add_field(
+                name=f"{medal} {username}",
+                value=f"{user_mention} • **{solved_count}** solved thread{'s' if solved_count != 1 else ''}",
+                inline=False
+            )
+        
+        # Add footer with total stats
+        total_solved = sum(data['solved_count'] for data in scores.values())
+        total_staff = len(scores)
+        
+        embed.set_footer(text=f"Total: {total_solved} threads solved by {total_staff} staff member{'s' if total_staff != 1 else ''} • Resets monthly")
+        
+        # Add timestamp
+        embed.timestamp = datetime.now()
+        
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        print(f"📊 Leaderboard displayed by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in leaderboard command: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="translate", description="Translate a message. Smart detection: non-English→English, English→target language (Staff only).")
 @app_commands.describe(

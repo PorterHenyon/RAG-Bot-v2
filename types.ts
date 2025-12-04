@@ -37,6 +37,7 @@ export interface ForumPost {
   postId: string;
   conversation: Message[];
   logs?: string;
+  discordUrl?: string; // Direct link to Discord thread
 }
 
 export interface RagEntry {
@@ -86,4 +87,15 @@ export interface SlashCommand {
 export interface BotSettings {
   systemPrompt: string;
   updatedAt: string;
+}
+
+export interface LeaderboardEntry {
+  username: string;
+  solved_count: number;
+  avatar_url: string;
+}
+
+export interface Leaderboard {
+  month: string; // Format: "2025-12"
+  scores: Record<string, LeaderboardEntry>; // user_id -> entry
 }
