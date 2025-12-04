@@ -154,14 +154,14 @@ let inMemoryStore: DataStore = {
     },
     {
       id: 'CMD-SYS-004',
-      name: 'mark_as_solve',
+      name: 'mark_as_solved_with_review',
       description: 'Mark a forum thread as solved. Analyzes the conversation and SAVES it as a RAG entry to the knowledge base. Updates dashboard status. Requires Admin role.',
       parameters: [],
       createdAt: new Date().toISOString(),
     },
     {
       id: 'CMD-SYS-004B',
-      name: 'mark_as_solve_no_review',
+      name: 'mark_as_solved',
       description: 'Mark thread as solved and lock it WITHOUT creating a RAG entry. Just closes the thread. Requires Admin role.',
       parameters: [],
       createdAt: new Date().toISOString(),
@@ -248,6 +248,22 @@ let inMemoryStore: DataStore = {
       parameters: [
         { name: 'days', description: 'Days to retain solved posts (1-365)', type: 'number', required: true },
       ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-015',
+      name: 'search',
+      description: 'Search for solved support forum posts containing your search term. Useful for finding solutions to similar problems. Requires Staff role.',
+      parameters: [
+        { name: 'query', description: 'The search term to look for in solved forum posts', type: 'string', required: true },
+      ],
+      createdAt: new Date().toISOString(),
+    },
+    {
+      id: 'CMD-SYS-016',
+      name: 'translate',
+      description: 'Translate the most recent message in the channel into English. Use right after a non-English message. Requires Staff role.',
+      parameters: [],
       createdAt: new Date().toISOString(),
     },
   ],

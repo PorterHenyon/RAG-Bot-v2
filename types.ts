@@ -54,7 +54,7 @@ export interface PendingRagEntry {
   content: string;
   keywords: string[];
   createdAt: string;
-  source: string; // "Auto-satisfaction" or "Staff via /mark_as_solve"
+  source: string; // "Auto-satisfaction" or "Staff via /mark_as_solved_with_review"
   threadId: string;
   conversationPreview: string;
 }

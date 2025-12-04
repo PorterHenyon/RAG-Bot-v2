@@ -5137,8 +5137,8 @@ async def ask(interaction: discord.Interaction, question: str):
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=False)
 
-@bot.tree.command(name="mark_as_solve_no_review", description="Mark thread as solved and lock it WITHOUT creating a RAG entry (Staff only).")
-async def mark_as_solve_no_review(interaction: discord.Interaction):
+@bot.tree.command(name="mark_as_solved", description="Mark thread as solved and lock it WITHOUT creating a RAG entry (Staff only).")
+async def mark_as_solved(interaction: discord.Interaction):
     """Mark thread as solved and lock it without creating RAG entry"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
@@ -5162,13 +5162,13 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
         # Mark this thread as manually closed with no review (prevents auto-RAG creation)
         global no_review_threads
         no_review_threads.add(thread_id)
-        print(f"🚫 Thread {thread_id} marked as no_review - will not create RAG entry")
+        print(f"🚫 Thread {thread_id} marked as solved (no review) - will not create RAG entry")
         
         # Cancel any pending satisfaction timer for this thread
         if thread_id in satisfaction_timers:
             satisfaction_timers[thread_id].cancel()
             del satisfaction_timers[thread_id]
-            print(f"⏰ Cancelled satisfaction timer for no_review thread {thread_id}")
+            print(f"⏰ Cancelled satisfaction timer for solved thread {thread_id}")
         
         # Apply "Resolved" tag and remove "Unsolved" tag if it exists
         try:
@@ -5197,7 +5197,7 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
         # Lock and archive the thread
         try:
             await thread.edit(archived=True, locked=True)
-            print(f"🔒 Thread {thread_id} locked and archived (manual /mark_as_solve_no_review)")
+            print(f"🔒 Thread {thread_id} locked and archived (manual /mark_as_solved)")
         except discord.errors.Forbidden:
             await interaction.followup.send(
                 "⚠️ I don't have permission to lock the thread.\n\n"
@@ -5250,13 +5250,13 @@ async def mark_as_solve_no_review(interaction: discord.Interaction):
         print(f"✓ Thread {thread_id} marked as solved (no RAG) by {interaction.user}")
         
     except Exception as e:
-        print(f"Error in mark_as_solve_no_review: {e}")
+        print(f"Error in mark_as_solved: {e}")
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="mark_as_solve", description="Mark thread as solved and send conversation to analyzer (Staff only).")
-async def mark_as_solve(interaction: discord.Interaction):
+@bot.tree.command(name="mark_as_solved_with_review", description="Mark thread as solved and send conversation to analyzer (Staff only).")
+async def mark_as_solved_with_review(interaction: discord.Interaction):
     """Mark a thread as solved and analyze the conversation for RAG entry creation"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
@@ -5381,7 +5381,7 @@ async def mark_as_solve(interaction: discord.Interaction):
                                 'content': rag_entry.get('content', ''),
                                 'keywords': rag_entry.get('keywords', []),
                                 'createdAt': datetime.now().isoformat(),
-                                'source': f'Staff ({interaction.user.name}) via /mark_as_solve',
+                                'source': f'Staff ({interaction.user.name}) via /mark_as_solved_with_review',
                                 'threadId': str(thread.id),
                                 'conversationPreview': conversation_preview
                             }
@@ -5479,7 +5479,7 @@ async def mark_as_solve(interaction: discord.Interaction):
             try:
                 thread = interaction.channel
                 await thread.edit(archived=True, locked=True)
-                print(f"🔒 Thread {thread.id} locked and archived (manual /mark_as_solve)")
+                print(f"🔒 Thread {thread.id} locked and archived (manual /mark_as_solved_with_review)")
             except discord.errors.Forbidden as perm_error:
                 print(f"❌ Bot lacks 'Manage Threads' permission to lock thread {thread.id}")
                 print(f"   Error: {perm_error}")
@@ -5501,10 +5501,194 @@ async def mark_as_solve(interaction: discord.Interaction):
             print(f"⚠ Failed to generate RAG entry from conversation in thread {interaction.channel.id}")
     
     except Exception as e:
-        print(f"Error in mark_as_solve command: {e}")
+        print(f"Error in mark_as_solved_with_review command: {e}")
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="search", description="Search for solved support forum posts containing your search term (Staff only).")
+@app_commands.describe(query="The search term to look for in solved forum posts")
+async def search(interaction: discord.Interaction, query: str):
+    """Search for solved forum posts containing a search term"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    
+    # Check if user has staff role or admin
+    if not has_staff_role(interaction):
+        await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Get the support forum channel
+        forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+        if not forum_channel:
+            await interaction.followup.send("❌ Support forum channel not configured.", ephemeral=True)
+            return
+        
+        # Search through archived threads (solved posts are typically archived)
+        query_lower = query.lower()
+        matching_threads = []
+        
+        # Get the Resolved tag to identify solved posts
+        resolved_tag = await get_resolved_tag(forum_channel)
+        
+        # Search through threads
+        async for thread in forum_channel.archived_threads(limit=100):
+            # Check if thread has resolved tag
+            is_solved = resolved_tag and resolved_tag in thread.applied_tags
+            
+            if is_solved:
+                # Check if query matches thread name or any message content
+                if query_lower in thread.name.lower():
+                    matching_threads.append((thread, "title"))
+                else:
+                    # Search through messages
+                    try:
+                        async for message in thread.history(limit=50):
+                            if query_lower in message.content.lower():
+                                matching_threads.append((thread, "message"))
+                                break
+                    except:
+                        pass  # Skip if we can't access thread messages
+            
+            # Limit results
+            if len(matching_threads) >= 10:
+                break
+        
+        if not matching_threads:
+            await interaction.followup.send(
+                f"🔍 No solved forum posts found containing: **{query}**\n\n"
+                f"Try using different keywords or check if the posts are actually marked as solved.",
+                ephemeral=False
+            )
+            return
+        
+        # Build response with results
+        embed = discord.Embed(
+            title=f"🔍 Search Results: \"{query}\"",
+            description=f"Found {len(matching_threads)} solved post(s) matching your search:",
+            color=discord.Color.green()
+        )
+        
+        for thread, match_type in matching_threads[:10]:
+            match_icon = "📌" if match_type == "title" else "💬"
+            embed.add_field(
+                name=f"{match_icon} {thread.name}",
+                value=f"[View Thread](https://discord.com/channels/{interaction.guild_id}/{thread.id})",
+                inline=False
+            )
+        
+        if len(matching_threads) >= 10:
+            embed.set_footer(text="Showing first 10 results. Refine your search for more specific results.")
+        
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        print(f"🔍 Search completed for '{query}' by {interaction.user} - found {len(matching_threads)} results")
+        
+    except Exception as e:
+        print(f"Error in search command: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ An error occurred while searching: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="translate", description="Translate the message you're replying to into English (Staff only).")
+async def translate(interaction: discord.Interaction):
+    """Translate a message that is being replied to"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    
+    # Check if user has staff role or admin
+    if not has_staff_role(interaction):
+        await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Check if this command is being used as a reply
+        # We need to check the message that triggered this interaction
+        # Since slash commands don't have a direct reply context, we'll need to get the latest message
+        channel = interaction.channel
+        
+        # Get recent messages to find what the user might be replying to
+        messages = []
+        async for msg in channel.history(limit=5):
+            messages.append(msg)
+        
+        # Find the most recent non-bot message before the command
+        target_message = None
+        for msg in messages:
+            if msg.author.id != bot.user.id and not msg.content.startswith('/'):
+                target_message = msg
+                break
+        
+        if not target_message:
+            await interaction.followup.send(
+                "❌ Could not find a message to translate. Please use this command right after the message you want to translate.",
+                ephemeral=True
+            )
+            return
+        
+        if not target_message.content:
+            await interaction.followup.send(
+                "❌ The message has no text content to translate.",
+                ephemeral=True
+            )
+            return
+        
+        # Use Gemini to translate the message
+        prompt = f"""Translate the following message into English. If it's already in English, respond with "[Already in English]" followed by the original text.
+
+Message to translate:
+{target_message.content}
+
+Provide ONLY the translation, no explanations or additional text."""
+        
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = model.generate_content(
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.3,
+                max_output_tokens=500
+            )
+        )
+        
+        translation = response.text.strip()
+        
+        # Create embed with original and translation
+        embed = discord.Embed(
+            title="🌐 Translation",
+            color=discord.Color.blue()
+        )
+        
+        embed.add_field(
+            name="Original Message",
+            value=f"```{target_message.content[:1000]}```",
+            inline=False
+        )
+        
+        embed.add_field(
+            name="Translation",
+            value=f"```{translation[:1000]}```",
+            inline=False
+        )
+        
+        embed.set_footer(text=f"Translated by {interaction.user.display_name}")
+        
+        # Add link to original message
+        embed.description = f"[Jump to Original Message](https://discord.com/channels/{interaction.guild_id}/{channel.id}/{target_message.id})"
+        
+        await interaction.followup.send(embed=embed, ephemeral=False)
+        print(f"🌐 Translation completed by {interaction.user} for message from {target_message.author}")
+        
+    except Exception as e:
+        print(f"Error in translate command: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ An error occurred while translating: {str(e)}", ephemeral=True)
 
 # --- RUN THE BOT WITH AUTO-RESTART ---
 async def run_bot_with_restart():
