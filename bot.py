@@ -366,7 +366,7 @@ LEADERBOARD_DATA = {
 # --- BOT SETTINGS (Stored in Vercel KV API - NO local files) ---
 BOT_SETTINGS = {
     'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
-    'satisfaction_delay': 15,  # Seconds to wait before analyzing satisfaction
+    'satisfaction_delay': 30,  # Seconds to wait before analyzing satisfaction (increased to reduce false triggers)
     'satisfaction_analysis_enabled': True,  # Enable/disable automatic satisfaction analysis (saves API calls!)
     'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
     'ai_max_tokens': 2048,  # Max tokens for AI responses
@@ -387,6 +387,13 @@ from collections import deque
 
 # Track API calls per key (for monitoring)
 gemini_api_calls_by_key = {key[:10] + '...': deque(maxlen=100) for key in GEMINI_API_KEYS}
+
+# Cache for AI responses (reduces duplicate API calls)
+ai_response_cache = {}  # {query_hash: (response, timestamp)}
+AI_CACHE_TTL = 3600  # Cache responses for 1 hour
+
+# Hash for data change detection (skip unnecessary syncs)
+last_data_hash = None
 
 async def check_rate_limit():
     """Check if we can make a Gemini API call without hitting rate limit
@@ -1072,7 +1079,7 @@ def save_bot_settings():
 # --- DATA SYNC FUNCTIONS ---
 async def fetch_data_from_api():
     """Fetch RAG entries, auto-responses, system prompt, and leaderboard from the dashboard API"""
-    global RAG_DATABASE, AUTO_RESPONSES, SYSTEM_PROMPT_TEXT, LEADERBOARD_DATA
+    global RAG_DATABASE, AUTO_RESPONSES, SYSTEM_PROMPT_TEXT, LEADERBOARD_DATA, last_data_hash
     
     # Skip API call if URL is still the placeholder
     if 'your-vercel-app' in DATA_API_URL:
@@ -1107,10 +1114,24 @@ async def fetch_data_from_api():
                     rag_changed = len(new_rag) != old_rag_count
                     auto_changed = len(new_auto) != old_auto_count
                     
+                    # Check if data actually changed using hash
+                    import hashlib
+                    data_to_hash = json.dumps({
+                        'rag': [r.get('id') for r in new_rag],
+                        'auto': [a.get('id') for a in new_auto],
+                        'leaderboard': LEADERBOARD_DATA.get('month', '')
+                    }, sort_keys=True)
+                    current_hash = hashlib.md5(data_to_hash.encode()).hexdigest()
+                    
+                    if last_data_hash == current_hash:
+                        print(f"✓ Data unchanged (hash match) - skipping update to save resources")
+                        return True
+                    
                     # Update data
                     RAG_DATABASE = new_rag
                     AUTO_RESPONSES = new_auto
                     LEADERBOARD_DATA = new_leaderboard
+                    last_data_hash = current_hash
                     
                     # Update system prompt if available
                     if new_settings and 'systemPrompt' in new_settings:
@@ -1526,6 +1547,26 @@ async def download_images_for_gemini(attachments):
 
 async def generate_ai_response(query, context_entries, image_parts=None):
     """Generate an AI response using Gemini API with knowledge base context - SIMPLIFIED"""
+    from datetime import datetime
+    import hashlib
+    
+    # Check cache first (skip if images provided)
+    if not image_parts:
+        # Create cache key from query + context IDs
+        context_ids = [c.get('id', '') for c in context_entries] if context_entries else []
+        cache_key = hashlib.md5(f"{query.lower()}:{':'.join(sorted(context_ids))}".encode()).hexdigest()
+        
+        # Check if we have a cached response
+        if cache_key in ai_response_cache:
+            cached_response, cached_time = ai_response_cache[cache_key]
+            age = (datetime.now() - cached_time).total_seconds()
+            if age < AI_CACHE_TTL:
+                print(f"✓ Using cached AI response (age: {int(age)}s)")
+                return cached_response
+            else:
+                # Expired, remove from cache
+                del ai_response_cache[cache_key]
+    
     # DISABLED: Image processing
     image_parts = None
     
@@ -1631,6 +1672,18 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             if not response_text or len(response_text.strip()) == 0:
                 print(f"   ⚠️ Empty response from '{model_name}', trying next model...")
                 continue
+            
+            # Cache the response (if no images)
+            if not image_parts and 'cache_key' in locals():
+                ai_response_cache[cache_key] = (response_text, datetime.now())
+                print(f"✓ Cached AI response (cache size: {len(ai_response_cache)})")
+                
+                # Clean old cache entries if cache gets too large
+                if len(ai_response_cache) > 100:
+                    sorted_cache = sorted(ai_response_cache.items(), key=lambda x: x[1][1])
+                    for old_key, _ in sorted_cache[:20]:
+                        del ai_response_cache[old_key]
+                    print(f"✓ Cleaned cache (now {len(ai_response_cache)} entries)")
             
             # Success!
             print(f"✅ SUCCESS! Got {len(response_text)} character response from '{model_name}'")
@@ -2194,7 +2247,7 @@ async def notify_support_channel_summary(ping_support=False):
 # REMOVED: Local backups disabled - all data stored in Vercel KV API only
 # Users can download backups anytime with /export_data command
 
-@tasks.loop(hours=1)  # Default interval, can be changed dynamically
+@tasks.loop(hours=2)  # Check every 2 hours (optimized from 1 hour to save resources)
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
     try:
