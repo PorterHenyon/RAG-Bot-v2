@@ -458,7 +458,7 @@ export const useMockData = () => {
     // Sync data to API whenever RAG entries, auto-responses, slash commands, or bot settings change (with debounce)
     // IMPORTANT: Only sync after initial load is complete to prevent overwriting API data
     // Use refs to track previous values and only sync when data actually changes
-    const prevDataRef = useRef<{rag: number, auto: number, commands: number, pending: number, settings: string} | null>(null);
+    const prevDataRef = useRef<{rag: number, auto: number, commands: number, pending: number, settings: string, ragHash?: string, autoHash?: string} | null>(null);
     
     useEffect(() => {
         // Don't sync if we're still loading initial data from API
@@ -466,13 +466,15 @@ export const useMockData = () => {
             return;
         }
         
-        // Check if data actually changed by comparing counts and settings hash
+        // Check if data actually changed by comparing counts AND content hashes
         const currentData = {
             rag: ragEntries.length,
             auto: autoResponses.length,
             commands: slashCommands.length,
             pending: pendingRagEntries.length,
-            settings: JSON.stringify(botSettings)
+            settings: JSON.stringify(botSettings),
+            ragHash: JSON.stringify(ragEntries.map(r => r.id + r.title + r.content)), // Hash content to detect edits
+            autoHash: JSON.stringify(autoResponses.map(a => a.id + a.name + a.responseText)) // Hash content to detect edits
         };
         
         // Skip if data hasn't actually changed
@@ -481,7 +483,9 @@ export const useMockData = () => {
             prevDataRef.current.auto === currentData.auto &&
             prevDataRef.current.commands === currentData.commands &&
             prevDataRef.current.pending === currentData.pending &&
-            prevDataRef.current.settings === currentData.settings) {
+            prevDataRef.current.settings === currentData.settings &&
+            prevDataRef.current.ragHash === currentData.ragHash &&
+            prevDataRef.current.autoHash === currentData.autoHash) {
             return; // No changes, skip sync
         }
         
