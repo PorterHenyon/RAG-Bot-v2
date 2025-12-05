@@ -1032,8 +1032,17 @@ async def save_bot_settings_to_api():
                 
                 current_data = await get_response.json()
                 
-                # Update botSettings in the data - include system prompt if we have it
-                full_bot_settings = BOT_SETTINGS.copy()
+                # CRITICAL FIX: Merge current API settings with our settings
+                # This prevents overwriting settings that were changed elsewhere
+                existing_settings = current_data.get('botSettings', {})
+                
+                # Start with existing API settings
+                full_bot_settings = existing_settings.copy()
+                
+                # Update with current BOT_SETTINGS (our changes take priority)
+                full_bot_settings.update(BOT_SETTINGS)
+                
+                # Include system prompt if we have it
                 if SYSTEM_PROMPT_TEXT:
                     full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
                     print(f"🔍 DEBUG: Including custom system prompt ({len(SYSTEM_PROMPT_TEXT)} chars)")
@@ -1140,16 +1149,24 @@ async def fetch_data_from_api():
                     
                     # Load bot settings from API (persists across deployments!)
                     if new_settings:
-                        # Merge API settings with defaults, API takes priority
+                        # IMPORTANT: Keep defaults, only override with API values (prevents reset on missing fields)
+                        # This ensures that if API doesn't have a field, we keep the default
                         settings_to_merge = {k: v for k, v in new_settings.items() if k != 'systemPrompt'}
                         if settings_to_merge:
-                            old_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
-                            BOT_SETTINGS.update(settings_to_merge)
+                            # Merge: Defaults stay, API overrides only what it has
+                            for key, value in settings_to_merge.items():
+                                if value is not None:  # Only update if API has a value
+                                    BOT_SETTINGS[key] = value
+                            
                             print(f"✓ Loaded bot settings from API (persisted across deployments)")
-                            print(f"   satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 15)}s, "
+                            print(f"   satisfaction_delay={BOT_SETTINGS.get('satisfaction_delay', 30)}s, "
                                   f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
                                   f"retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d, "
                                   f"notification_channel={BOT_SETTINGS.get('support_notification_channel_id', 'Not set')}")
+                    else:
+                        # No settings in API yet - save our defaults to establish them
+                        print(f"ℹ️ No settings in API - saving defaults to establish baseline")
+                        await save_bot_settings_to_api()
                             
                             # Update task intervals if they changed
                             new_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
