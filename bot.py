@@ -1163,19 +1163,20 @@ async def fetch_data_from_api():
                                   f"temperature={BOT_SETTINGS.get('ai_temperature', 1.0)}, "
                                   f"retention={BOT_SETTINGS.get('solved_post_retention_days', 30)}d, "
                                   f"notification_channel={BOT_SETTINGS.get('support_notification_channel_id', 'Not set')}")
-                    else:
-                        # No settings in API yet - save our defaults to establish them
-                        print(f"ℹ️ No settings in API - saving defaults to establish baseline")
-                        await save_bot_settings_to_api()
                             
                             # Update task intervals if they changed
-                            new_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
+                            old_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 2.0)
+                            new_interval = BOT_SETTINGS.get('high_priority_check_interval_hours', 2.0)
                             if old_interval != new_interval and check_old_posts.is_running():
                                 try:
                                     check_old_posts.change_interval(hours=new_interval)
                                     print(f"✓ Updated check_old_posts interval to {new_interval} hours")
                                 except Exception as interval_error:
                                     print(f"⚠ Could not update check_old_posts interval: {interval_error}")
+                    else:
+                        # No settings in API yet - save our defaults to establish them
+                        print(f"ℹ️ No settings in API - saving defaults to establish baseline")
+                        await save_bot_settings_to_api()
                     
                     # Log changes for visibility
                     print(f"✓ Successfully connected to dashboard API!")
