@@ -5845,13 +5845,13 @@ async def leaderboard(interaction: discord.Interaction):
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="translate", description="Translate a message. Smart detection: non-English→English, English→target language (Staff only).")
+@bot.tree.command(name="translate", description="Translate a message to a specific language (Staff only).")
 @app_commands.describe(
-    message_id="REQUIRED: ID of message to translate (right-click message → Copy ID)",
-    target_language="Optional: Target language (e.g., 'Spanish', 'French'). If empty, auto-detects direction."
+    message_id="Message ID to translate (right-click message → Copy ID)",
+    target_language="Target language (e.g., 'English', 'Spanish', 'French', 'Portuguese')"
 )
-async def translate(interaction: discord.Interaction, message_id: str, target_language: str = None):
-    """Translate a message with smart language detection"""
+async def translate(interaction: discord.Interaction, message_id: str, target_language: str):
+    """Translate a message to a specified language"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
         return
@@ -5917,29 +5917,15 @@ async def translate(interaction: discord.Interaction, message_id: str, target_la
             )
             return
         
-        # Use Gemini to detect language and translate appropriately
-        if target_language:
-            # User specified target language
-            prompt = f"""Translate the following message into {target_language}.
+        # Use Gemini to translate to the specified language
+        prompt = f"""Translate the following message into {target_language}.
+
+If the message is already in {target_language}, respond with "[Already in {target_language}]" followed by the original text.
 
 Message to translate:
 {target_message.content}
 
 Provide ONLY the translation, no explanations or additional text."""
-        else:
-            # Auto-detect and translate smartly
-            prompt = f"""Detect the language of this message and translate it intelligently:
-- If the message is in English, translate it to the most appropriate common language based on context (Spanish, Portuguese, French, German, etc.)
-- If the message is NOT in English, translate it to English
-
-After translation, indicate the detected source language in brackets.
-
-Message to translate:
-{target_message.content}
-
-Format your response as:
-[Detected: SOURCE_LANGUAGE → TARGET_LANGUAGE]
-TRANSLATION_HERE"""
         
         # Use key manager with model rotation for reliability
         try:

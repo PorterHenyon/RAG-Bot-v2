@@ -231,10 +231,10 @@ const initialSlashCommands: SlashCommand[] = [
     {
       id: 'CMD-SYS-016',
       name: 'translate',
-      description: 'Translate a message with smart detection. Non-English→English, or specify target language. REQUIRES message ID (no history permission needed). Requires Staff role.',
+      description: 'Translate a message to a specific language. Both message ID and target language required. Works in any channel. Requires Staff role.',
       parameters: [
-        { name: 'message_id', description: 'REQUIRED: ID of message to translate (right-click → Copy ID)', type: 'string', required: true },
-        { name: 'target_language', description: 'Optional: Target language (e.g., Spanish, French). Auto-detects if empty.', type: 'string', required: false },
+        { name: 'message_id', description: 'Message ID to translate (right-click → Copy ID)', type: 'string', required: true },
+        { name: 'target_language', description: 'Target language (e.g., English, Spanish, French, Portuguese)', type: 'string', required: true },
       ],
       createdAt: '2025-12-04T10:05:00Z',
     },
