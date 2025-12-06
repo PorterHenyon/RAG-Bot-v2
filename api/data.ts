@@ -259,16 +259,6 @@ let inMemoryStore: DataStore = {
       ],
       createdAt: new Date().toISOString(),
     },
-    {
-      id: 'CMD-SYS-016',
-      name: 'translate',
-      description: 'Translate a message to a specific language. Both message ID and target language required. Works in any channel. Requires Staff role.',
-      parameters: [
-        { name: 'message_id', description: 'Message ID to translate (right-click → Copy ID)', type: 'string', required: true },
-        { name: 'target_language', description: 'Target language (e.g., English, Spanish, French, Portuguese)', type: 'string', required: true },
-      ],
-      createdAt: new Date().toISOString(),
-    },
   ],
   pendingRagEntries: [],
   botSettings: {
@@ -351,6 +341,8 @@ async function initKV() {
 }
 
 // Helper functions to get/set data
+// Leaderboard is now handled in the POST handler directly
+
 async function getDataStore(): Promise<DataStore> {
   await initKV();
   if (kvClient) {
@@ -566,6 +558,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'POST') {
+    // Handle special actions like leaderboard updates
+    if (req.body && typeof req.body === 'object' && 'action' in req.body) {
+      const action = req.body.action;
+      
+      if (action === 'update_leaderboard') {
+        // Handle leaderboard update
+        try {
+          await initKV();
+          const leaderboard = req.body.leaderboard;
+          
+          if (kvClient) {
+            if (typeof kvClient.set === 'function') {
+              // Direct Redis
+              await kvClient.set('leaderboard', JSON.stringify(leaderboard));
+            } else {
+              // Vercel KV
+              await kvClient.set('leaderboard', leaderboard);
+            }
+            console.log('✓ Leaderboard saved to persistent storage');
+            return res.status(200).json({ success: true, message: 'Leaderboard updated' });
+          } else {
+            console.warn('⚠ No persistent storage for leaderboard');
+            return res.status(200).json({ success: true, warning: 'No persistent storage configured' });
+          }
+        } catch (error) {
+          console.error('Error saving leaderboard:', error);
+          return res.status(500).json({ error: 'Failed to save leaderboard' });
+        }
+      }
+    }
+    
     // Update data
     try {
       await initKV(); // Ensure KV is initialized before saving

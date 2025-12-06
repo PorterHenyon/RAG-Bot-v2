@@ -283,11 +283,39 @@ class GeminiKeyManager:
                 print(f"🔑 Attempt {attempts + 1}/{max_attempts}: Trying key {key_short} for model {model_name}")
                 
                 # Create model - if this succeeds, mark key as successful
-                model = genai.GenerativeModel(model_name, **kwargs)
-                # Mark success (we'll mark it again when the actual API call succeeds)
-                last_key_used = current_key
-                print(f"✅ Successfully created model with key {key_short}")
-                return model
+                # Handle different model versions: if model_name is 2.5 but key only supports 1.5, try 1.5
+                try:
+                    model = genai.GenerativeModel(model_name, **kwargs)
+                    # Mark success (we'll mark it again when the actual API call succeeds)
+                    last_key_used = current_key
+                    print(f"✅ Successfully created model {model_name} with key {key_short}")
+                    return model
+                except Exception as model_error:
+                    error_str_model = str(model_error).lower()
+                    # If model version not supported, try alternative versions
+                    if 'not found' in error_str_model or 'invalid' in error_str_model or 'not available' in error_str_model:
+                        # Try alternative model versions
+                        alternative_models = []
+                        if '2.5' in model_name:
+                            alternative_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-flash-latest']
+                        elif '1.5' in model_name:
+                            alternative_models = ['gemini-2.5-flash', 'gemini-flash-latest']
+                        else:
+                            alternative_models = ['gemini-1.5-flash', 'gemini-2.5-flash']
+                        
+                        for alt_model in alternative_models:
+                            try:
+                                print(f"   Trying alternative model: {alt_model}")
+                                model = genai.GenerativeModel(alt_model, **kwargs)
+                                last_key_used = current_key
+                                print(f"✅ Successfully created alternative model {alt_model} with key {key_short}")
+                                return model
+                            except:
+                                continue
+                        # If all alternatives failed, raise original error
+                        raise model_error
+                    else:
+                        raise model_error
             except Exception as e:
                 error_str = str(e).lower()
                 key_used = self.get_current_key()
@@ -362,6 +390,12 @@ LEADERBOARD_DATA = {
     'month': '',  # Format: "2025-12" for December 2025
     'scores': {}  # {user_id: {'username': 'Name', 'solved_count': 5, 'avatar_url': 'https://...'}}
 }
+
+# Cooldown tracking for /ask command on friends server (1 minute cooldown)
+ask_cooldowns = {}  # {user_id: last_used_timestamp}
+
+# Track support notification messages so we can delete them when classification is done
+support_notification_messages = {}  # {thread_id: message_id}
 
 # --- BOT SETTINGS (Stored in Vercel KV API - NO local files) ---
 BOT_SETTINGS = {
@@ -953,7 +987,9 @@ class SatisfactionButtons(discord.ui.View):
             inline=True
         )
         escalate_embed.set_footer(text="Revolution Macro Support Team")
-        await thread.send(embed=escalate_embed)
+        notification_msg = await thread.send(embed=escalate_embed)
+        # Track this message so we can delete it when classification is done
+        support_notification_messages[self.thread_id] = notification_msg.id
         
         await update_forum_post_status(self.thread_id, 'Human Support')
         print(f"⚠ Thread {self.thread_id} escalated to Human Support")
@@ -1352,10 +1388,60 @@ async def fetch_context(msg):
 # RAG_DATABASE is loaded from API and kept in memory
 
 # --- CORE BOT LOGIC (MIRRORS PLAYGROUND) ---
-def get_auto_response(query: str) -> str | None:
-    """Check if query matches any auto-response triggers - uses word boundary matching to avoid false positives"""
+def classify_issue(question: str) -> str:
+    """Classify issue type using regex patterns (simple classification)"""
     import re
-    query_lower = query.lower()
+    question_lower = question.lower()
+    
+    # Issue type patterns (regex-based classification)
+    issue_patterns = {
+        'Bug/Error': [r'\b(error|crash|bug|broken|not working|doesn\'t work|failed|failure)\b'],
+        'Performance': [r'\b(slow|lag|freeze|frozen|stuck|hanging|performance|fps|frame)\b'],
+        'Installation/Setup': [r'\b(install|setup|download|update|install|configure|activation|license)\b'],
+        'Display/Graphics': [r'\b(display|graphics|screen|visual|render|flicker|glitch|resolution|scaling)\b'],
+        'Connection/Network': [r'\b(connection|network|connect|disconnect|timeout|offline|server)\b'],
+        'Account/Authentication': [r'\b(account|login|password|auth|sign in|sign up|register)\b'],
+        'Feature Request': [r'\b(add|feature|request|suggest|improve|enhance|new)\b'],
+        'Question/Help': [r'\b(how|what|why|where|when|help|question|tutorial|guide)\b'],
+        'Macro/Automation': [r'\b(macro|automation|auto|gather|collect|farm|path|navigation)\b'],
+        'Other': []  # Default fallback
+    }
+    
+    # Check each pattern
+    for issue_type, patterns in issue_patterns.items():
+        if issue_type == 'Other':
+            continue  # Skip default
+        for pattern in patterns:
+            if re.search(pattern, question_lower):
+                return issue_type
+    
+    # Default to 'Other' if no pattern matches
+    return 'Other'
+
+async def remove_support_notification(thread_id):
+    """Remove support notification message when issue is classified"""
+    if thread_id in support_notification_messages:
+        try:
+            thread = bot.get_channel(thread_id)
+            if thread:
+                msg_id = support_notification_messages[thread_id]
+                try:
+                    msg = await thread.fetch_message(msg_id)
+                    await msg.delete()
+                    print(f"✓ Removed support notification message from thread {thread_id}")
+                    del support_notification_messages[thread_id]
+                except discord.NotFound:
+                    # Message already deleted
+                    del support_notification_messages[thread_id]
+                except Exception as e:
+                    print(f"⚠ Could not delete notification message: {e}")
+        except Exception as e:
+            print(f"⚠ Error removing support notification: {e}")
+
+def get_auto_response(query: str) -> str | None:
+    """Check if query matches any auto-response triggers - STRICT matching: only use if user asks exactly what auto response has"""
+    import re
+    query_lower = query.lower().strip()
     
     # Debug: Log what we're checking
     if len(AUTO_RESPONSES) == 0:
@@ -1363,28 +1449,49 @@ def get_auto_response(query: str) -> str | None:
     
     for auto_response in AUTO_RESPONSES:
         trigger_keywords = auto_response.get('triggerKeywords', [])
-        matched_keywords = []
+        response_text = auto_response.get('responseText', '')
         
+        # STRICT MATCHING: Check if the query is asking EXACTLY what the auto-response covers
+        # This means ALL trigger keywords should be present, or the query should be very similar to the response topic
+        
+        # Method 1: Check if ALL trigger keywords are present (exact match)
+        all_keywords_present = True
+        matched_keywords = []
         for keyword in trigger_keywords:
             keyword_lower = keyword.lower()
-            # Use word boundary matching to avoid false positives
-            # Match whole words only, not substrings
-            # Pattern: word boundary, then keyword, then word boundary (or end of string)
             pattern = r'\b' + re.escape(keyword_lower) + r'\b'
             if re.search(pattern, query_lower):
                 matched_keywords.append(keyword)
+            else:
+                all_keywords_present = False
         
-        # Only match if at least one keyword was found as a whole word
-        if matched_keywords:
-            response_text = auto_response.get('responseText')
-            print(f"✓ Auto-response matched: '{auto_response.get('name', 'Unknown')}' (keywords: {matched_keywords})")
+        # Method 2: Check if query is very similar to response text (fuzzy match for exact questions)
+        # Extract key phrases from response text
+        response_lower = response_text.lower()
+        # Simple check: if query contains most words from response title/name, it's likely asking exactly that
+        auto_name = auto_response.get('name', '').lower()
+        
+        # Only use auto-response if:
+        # 1. ALL trigger keywords are present, OR
+        # 2. Query is very similar to the auto-response name/topic (80%+ keyword match)
+        if all_keywords_present and len(trigger_keywords) > 0:
+            print(f"✓ Auto-response matched (ALL keywords): '{auto_response.get('name', 'Unknown')}' (keywords: {matched_keywords})")
             print(f"   Query was: '{query[:100]}...'")
             return response_text
+        
+        # Check if query is asking exactly about this topic (high keyword match ratio)
+        if len(trigger_keywords) > 0:
+            match_ratio = len(matched_keywords) / len(trigger_keywords)
+            # Require at least 80% of keywords to match, and at least 2 keywords
+            if match_ratio >= 0.8 and len(matched_keywords) >= 2:
+                print(f"✓ Auto-response matched (high match ratio): '{auto_response.get('name', 'Unknown')}' ({len(matched_keywords)}/{len(trigger_keywords)} keywords)")
+                print(f"   Query was: '{query[:100]}...'")
+                return response_text
     
     # Debug: Log what we checked if no match
     if AUTO_RESPONSES:
         all_keywords = [kw for auto in AUTO_RESPONSES for kw in auto.get('triggerKeywords', [])]
-        print(f"ℹ No auto-response match. Checked {len(AUTO_RESPONSES)} auto-responses with {len(all_keywords)} total keywords.")
+        print(f"ℹ No auto-response match (using AI instead). Checked {len(AUTO_RESPONSES)} auto-responses with {len(all_keywords)} total keywords.")
         print(f"   Query was: '{query[:100]}...'")
     
     return None
@@ -2008,7 +2115,7 @@ async def get_unsolved_tag(forum_channel):
         return None
 
 # --- PERIODIC DATA SYNC ---
-@tasks.loop(hours=6)  # Sync every 6 hours (reduced frequency to save bandwidth and stay within Vercel limits)
+@tasks.loop(hours=1)  # Sync every 1 hour (reduced from 6h so RAG entries appear faster)
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
@@ -2344,7 +2451,9 @@ async def check_old_posts():
                                             )
                                             escalate_embed.set_footer(text="Revolution Macro Support • Auto-escalation")
                                             
-                                            await thread_channel.send(embed=escalate_embed)
+                                            notification_msg = await thread_channel.send(embed=escalate_embed)
+                                            # Track this message so we can delete it when classification is done
+                                            support_notification_messages[thread_id] = notification_msg.id
                                             escalated_threads.add(thread_id)  # Mark as escalated
                                             print(f"📢 Sent high priority notification to thread {thread_id}")
                                     except Exception as ping_error:
@@ -2414,27 +2523,71 @@ async def on_ready():
         guild = discord.Object(id=DISCORD_GUILD_ID)
         friend_guild = discord.Object(id=FRIEND_SERVER_ID)
         
+        # 0. Remove /translate from global commands FIRST (before any copying)
+        # Try multiple times to ensure it's removed
+        for attempt in range(3):
+            try:
+                bot.tree.remove_command("translate", guild=None)  # Remove from global
+                print(f'🗑️ Removed /translate from global commands (attempt {attempt + 1})')
+            except Exception as e:
+                if attempt == 2:  # Last attempt
+                    print(f'   (translate not in global commands or already removed)')
+                pass
+        
         # 1. Sync ALL commands to main guild
         print(f'🔄 Syncing ALL commands to main guild {DISCORD_GUILD_ID}...')
         bot.tree.copy_global_to(guild=guild)
+        
+        # Remove translate from main guild AFTER copying (in case it was copied)
+        try:
+            bot.tree.remove_command("translate", guild=guild)
+            print(f'🗑️ Removed /translate from main guild')
+        except Exception as e:
+            print(f'   (translate not in main guild: {e})')
+        
         synced_main = await bot.tree.sync(guild=guild)
         print(f'✓ {len(synced_main)} commands synced to main guild')
         
-        # 2. For friend's guild: Copy all globally, then manually clear non-ask commands
+        # 2. For friend's guild: Explicitly add ONLY /ask command
         print(f'🔄 Setting up friend\'s guild {FRIEND_SERVER_ID}...')
         
-        # First, copy all global commands to friend guild
-        bot.tree.copy_global_to(guild=friend_guild)
-        
-        # Get all commands that were copied
-        all_commands = bot.tree.get_commands(guild=friend_guild)
-        print(f'   Copied {len(all_commands)} commands to friend guild')
-        
-        # Remove everything except /ask
-        for cmd in all_commands:
-            if cmd.name != "ask":
+        # Clear all commands from friend guild first
+        try:
+            # Get current commands
+            current_commands = bot.tree.get_commands(guild=friend_guild)
+            for cmd in current_commands:
                 bot.tree.remove_command(cmd.name, guild=friend_guild)
                 print(f'   Removed /{cmd.name} from friend guild')
+        except Exception as e:
+            print(f'   ⚠ Error clearing commands: {e}')
+        
+        # Copy global commands temporarily to get /ask
+        bot.tree.copy_global_to(guild=friend_guild)
+        
+        # Get all commands and remove everything except /ask (including translate)
+        all_commands = bot.tree.get_commands(guild=friend_guild)
+        print(f'   Found {len(all_commands)} commands in friend guild')
+        
+        # Remove everything except /ask (especially translate)
+        for cmd in all_commands:
+            if cmd.name != "ask":
+                try:
+                    bot.tree.remove_command(cmd.name, guild=friend_guild)
+                    if cmd.name == "translate":
+                        print(f'   🗑️ Removed /translate from friend guild')
+                    else:
+                        print(f'   Removed /{cmd.name} from friend guild')
+                except Exception as e:
+                    print(f'   ⚠ Could not remove /{cmd.name}: {e}')
+        
+        # Verify /ask exists
+        final_commands = bot.tree.get_commands(guild=friend_guild)
+        ask_exists = any(cmd.name == "ask" for cmd in final_commands)
+        
+        if not ask_exists:
+            print(f'   ⚠ /ask not found! Adding it explicitly...')
+            # The /ask command should already be registered globally, so copy it
+            bot.tree.copy_global_to(guild=friend_guild)
         
         # Now sync only the remaining command(s)
         synced_friend = await bot.tree.sync(guild=friend_guild)
@@ -2444,6 +2597,7 @@ async def on_ready():
             print(f'✅ SUCCESS: Only /ask on friend\'s server!')
         else:
             print(f'⚠ Unexpected commands on friend server: {[c.name for c in synced_friend]}')
+            print(f'   Make sure /ask command is registered globally')
         
         print(f'\n✅ Command sync complete!')
         print(f'   • Main guild: {len(synced_main)} commands')
@@ -2833,7 +2987,9 @@ async def on_thread_create(thread):
             inline=True
         )
         human_escalation_embed.set_footer(text="Revolution Macro Support Team")
-        await thread.send(embed=human_escalation_embed)
+        notification_msg = await thread.send(embed=human_escalation_embed)
+        # Track this message so we can delete it when classification is done
+        support_notification_messages[thread_id] = notification_msg.id
         
         # Update forum post status
         await update_forum_post_status(thread_id, 'Human Support')
@@ -2873,12 +3029,40 @@ async def on_thread_create(thread):
             thread_images[thread_id] = image_parts
             print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id} (for escalation if needed)")
         
-        # Add satisfaction buttons (pass images for escalation)
-        button_view = SatisfactionButtons(thread_id, conversation, 'auto', image_parts)
-        await thread.send(embed=auto_embed, view=button_view)
-        bot_response_text = auto_response
-        thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
-        print(f"⚡ Responded to '{thread.name}' with instant auto-response.")
+            # Add satisfaction buttons (pass images for escalation)
+            button_view = SatisfactionButtons(thread_id, conversation, 'auto', image_parts)
+            await thread.send(embed=auto_embed, view=button_view)
+            bot_response_text = auto_response
+            thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
+            
+            # Classify issue and remove notification if present
+            issue_type = classify_issue(user_question)
+            await remove_support_notification(thread_id)
+            # Update forum post with classification
+            if 'your-vercel-app' not in DATA_API_URL:
+                try:
+                    forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
+                            if get_resp.status == 200:
+                                all_posts = await get_resp.json()
+                                current_post = None
+                                for p in all_posts:
+                                    if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
+                                        current_post = p
+                                        break
+                                
+                                if current_post:
+                                    current_post['issueType'] = issue_type
+                                    update_payload = {'action': 'update', 'post': current_post}
+                                    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                    async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                        if post_response.status == 200:
+                                            print(f"✓ Classified issue as: {issue_type}")
+                except Exception as e:
+                    print(f"⚠ Could not update issue classification: {e}")
+            
+            print(f"⚡ Responded to '{thread.name}' with instant auto-response.")
     else:
         relevant_docs = find_relevant_rag_entries(user_question)
         
@@ -2985,6 +3169,33 @@ async def on_thread_create(thread):
             print(f"✅ Responded to '{thread.name}' with RAG-based answer using {num_to_use} knowledge base {'entry' if num_to_use == 1 else 'entries'}:")
             for i, doc in enumerate(confident_docs[:num_to_use], 1):
                 print(f"   {i}. '{doc.get('title', 'Unknown')}'")
+            
+            # Classify issue and remove notification if present
+            issue_type = classify_issue(user_question)
+            await remove_support_notification(thread_id)
+            # Update forum post with classification
+            if 'your-vercel-app' not in DATA_API_URL:
+                try:
+                    forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
+                            if get_resp.status == 200:
+                                all_posts = await get_resp.json()
+                                current_post = None
+                                for p in all_posts:
+                                    if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
+                                        current_post = p
+                                        break
+                                
+                                if current_post:
+                                    current_post['issueType'] = issue_type
+                                    update_payload = {'action': 'update', 'post': current_post}
+                                    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                    async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                        if post_response.status == 200:
+                                            print(f"✓ Classified issue as: {issue_type}")
+                except Exception as e:
+                    print(f"⚠ Could not update issue classification: {e}")
         else:
             # No confident match - generate AI response using general Revolution Macro knowledge
             print(f"⚠ No confident RAG match found. Attempting AI response with general knowledge...")
@@ -3052,6 +3263,34 @@ async def on_thread_create(thread):
                 button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
                 await thread.send(embed=general_ai_embed, view=button_view)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
+                
+                # Classify issue and remove notification if present
+                issue_type = classify_issue(user_question)
+                await remove_support_notification(thread_id)
+                # Update forum post with classification
+                if 'your-vercel-app' not in DATA_API_URL:
+                    try:
+                        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+                        async with aiohttp.ClientSession() as session:
+                            async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
+                                if get_resp.status == 200:
+                                    all_posts = await get_resp.json()
+                                    current_post = None
+                                    for p in all_posts:
+                                        if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
+                                            current_post = p
+                                            break
+                                    
+                                    if current_post:
+                                        current_post['issueType'] = issue_type
+                                        update_payload = {'action': 'update', 'post': current_post}
+                                        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                        async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                            if post_response.status == 200:
+                                                print(f"✓ Classified issue as: {issue_type}")
+                    except Exception as e:
+                        print(f"⚠ Could not update issue classification: {e}")
+                
                 print(f"💡 Responded to '{thread.name}' with Revolution Macro AI assistance (no specific RAG match).")
                 
             except Exception as e:
@@ -5190,17 +5429,47 @@ def is_friend_server(interaction: discord.Interaction) -> bool:
         return False
     return interaction.guild.id == FRIEND_SERVER_ID
 
-@bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base (Staff only).")
+@bot.tree.command(name="ask", description="Ask the bot a question using the RAG knowledge base.")
 async def ask(interaction: discord.Interaction, question: str):
-    """Staff command to query the RAG knowledge base"""
-    await interaction.response.defer(ephemeral=False)
-    
-    # On friend's server, allow everyone to use /ask (no permission check)
-    # On other servers, require staff role or admin
-    if not is_friend_server(interaction):
-        if not has_staff_role(interaction):
-            await interaction.followup.send("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
-            return
+    """Query the RAG knowledge base - available to everyone on friends server, staff only on main server"""
+    try:
+        # On friend's server, allow everyone to use /ask but with 1 minute cooldown
+        # On other servers, require staff role or admin (no cooldown)
+        if is_friend_server(interaction):
+            # Check cooldown for friends server BEFORE deferring
+            user_id = interaction.user.id
+            current_time = datetime.now().timestamp()
+            if user_id in ask_cooldowns:
+                time_since_last_use = current_time - ask_cooldowns[user_id]
+                cooldown_seconds = 60  # 1 minute cooldown
+                if time_since_last_use < cooldown_seconds:
+                    remaining = int(cooldown_seconds - time_since_last_use)
+                    await interaction.response.send_message(
+                        f"⏳ Please wait {remaining} second(s) before using /ask again.",
+                        ephemeral=True
+                    )
+                    return
+            # Update cooldown
+            ask_cooldowns[user_id] = current_time
+            # Defer after cooldown check passes
+            await interaction.response.defer(ephemeral=False)
+        else:
+            # Main server: require staff role - check BEFORE deferring
+            if not has_staff_role(interaction):
+                await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
+                return
+            # Defer after permission check passes
+            await interaction.response.defer(ephemeral=False)
+    except discord.errors.InteractionResponded:
+        # Already responded (cooldown or permission error)
+        return
+    except Exception as e:
+        print(f"⚠ Error in /ask command setup: {e}")
+        try:
+            await interaction.response.send_message(f"❌ An error occurred: {str(e)}", ephemeral=True)
+        except:
+            pass
+        return
     
     try:
         # Step 1: Check auto-responses first
@@ -5697,8 +5966,14 @@ async def search(interaction: discord.Interaction, query: str):
             return
         
         # Search through archived threads (solved posts are typically archived)
-        query_lower = query.lower()
+        # Use fuzzy matching - split query into words and match any of them
+        query_words = query.lower().split()
+        # Remove very common words
+        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be', 'how', 'what', 'why', 'when', 'where'}
+        query_words = [w for w in query_words if w not in stopwords and len(w) > 2]  # Only words longer than 2 chars
+        
         matching_threads = []
+        thread_scores = {}  # Track relevance scores
         
         # Get the Resolved tag to identify solved posts
         resolved_tag = await get_resolved_tag(forum_channel)
@@ -5709,22 +5984,40 @@ async def search(interaction: discord.Interaction, query: str):
             is_solved = resolved_tag and resolved_tag in thread.applied_tags
             
             if is_solved:
-                # Check if query matches thread name or any message content
-                if query_lower in thread.name.lower():
-                    matching_threads.append((thread, "title"))
-                else:
-                    # Search through messages
-                    try:
-                        async for message in thread.history(limit=50):
-                            if query_lower in message.content.lower():
-                                matching_threads.append((thread, "message"))
-                                break
-                    except:
-                        pass  # Skip if we can't access thread messages
+                score = 0
+                thread_name_lower = thread.name.lower()
+                
+                # Score based on how many query words match
+                for word in query_words:
+                    if word in thread_name_lower:
+                        score += 10  # Title matches are worth more
+                
+                # Also search through messages for better matching
+                try:
+                    message_matches = 0
+                    async for message in thread.history(limit=50):
+                        message_lower = message.content.lower()
+                        for word in query_words:
+                            if word in message_lower:
+                                message_matches += 1
+                                score += 1  # Message matches worth less
+                    if message_matches > 0 and score == 0:
+                        # If we found matches in messages but not title, still include it
+                        score = message_matches
+                except:
+                    pass  # Skip if we can't access thread messages
+                
+                # Include thread if any words matched (score > 0)
+                if score > 0:
+                    matching_threads.append((thread, score))
             
             # Limit results
-            if len(matching_threads) >= 10:
+            if len(matching_threads) >= 20:  # Get more candidates for sorting
                 break
+        
+        # Sort by score (highest first) and take top 10
+        matching_threads.sort(key=lambda x: x[1], reverse=True)
+        matching_threads = matching_threads[:10]
         
         if not matching_threads:
             await interaction.followup.send(
@@ -5741,16 +6034,15 @@ async def search(interaction: discord.Interaction, query: str):
             color=discord.Color.green()
         )
         
-        for thread, match_type in matching_threads[:10]:
-            match_icon = "📌" if match_type == "title" else "💬"
+        for thread, score in matching_threads:
             embed.add_field(
-                name=f"{match_icon} {thread.name}",
+                name=f"📌 {thread.name}",
                 value=f"[View Thread](https://discord.com/channels/{interaction.guild_id}/{thread.id})",
                 inline=False
             )
         
         if len(matching_threads) >= 10:
-            embed.set_footer(text="Showing first 10 results. Refine your search for more specific results.")
+            embed.set_footer(text="Showing top 10 results. Try more specific keywords for better matches.")
         
         await interaction.followup.send(embed=embed, ephemeral=False)
         print(f"🔍 Search completed for '{query}' by {interaction.user} - found {len(matching_threads)} results")
@@ -5844,155 +6136,6 @@ async def leaderboard(interaction: discord.Interaction):
         import traceback
         traceback.print_exc()
         await interaction.followup.send(f"❌ An error occurred: {str(e)}", ephemeral=True)
-
-@bot.tree.command(name="translate", description="Translate a message to a specific language (Staff only).")
-@app_commands.describe(
-    message_id="Message ID to translate (right-click message → Copy ID)",
-    target_language="Target language (e.g., 'English', 'Spanish', 'French', 'Portuguese')"
-)
-async def translate(interaction: discord.Interaction, message_id: str, target_language: str):
-    """Translate a message to a specified language"""
-    if is_friend_server(interaction):
-        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
-        return
-    
-    # Check if user has staff role or admin
-    if not has_staff_role(interaction):
-        await interaction.response.send_message("❌ You need the Staff role or Administrator permission to use this command.", ephemeral=True)
-        return
-    
-    await interaction.response.defer(ephemeral=False)
-    
-    try:
-        channel = interaction.channel
-        target_message = None
-        
-        # Fetch the specific message by ID
-        try:
-            target_message = await channel.fetch_message(int(message_id))
-        except discord.NotFound:
-            await interaction.followup.send(
-                "❌ Message not found. Make sure:\n"
-                "• The message ID is correct\n"
-                "• The message is in this channel\n"
-                "• The message hasn't been deleted\n\n"
-                "**How to get message ID:**\n"
-                "1. Enable Developer Mode (User Settings → Advanced → Developer Mode)\n"
-                "2. Right-click the message → Copy ID",
-                ephemeral=True
-            )
-            return
-        except discord.Forbidden:
-            await interaction.followup.send(
-                "❌ **Permission Error**: I can't read messages in this channel.\n\n"
-                "**Required Bot Permissions:**\n"
-                "✅ View Channel\n"
-                "✅ Read Message History\n"
-                "✅ Send Messages\n\n"
-                "**To Fix:**\n"
-                "Ask an administrator to check the bot's role permissions or channel overrides.",
-                ephemeral=True
-            )
-            return
-        except ValueError:
-            await interaction.followup.send(
-                "❌ Invalid message ID format. The message ID should be a long number.\n\n"
-                "**Example:** `/translate message_id:1234567890123456789`",
-                ephemeral=True
-            )
-            return
-        except Exception as e:
-            await interaction.followup.send(
-                f"❌ Error fetching message: {str(e)}\n\n"
-                "Make sure you're providing a valid message ID from this channel.",
-                ephemeral=True
-            )
-            return
-        
-        if not target_message.content:
-            await interaction.followup.send(
-                "❌ This message has no text content to translate.\n"
-                "(Images, embeds, and attachments cannot be translated)",
-                ephemeral=True
-            )
-            return
-        
-        # Use Gemini to translate to the specified language
-        prompt = f"""Translate the following message into {target_language}.
-
-If the message is already in {target_language}, respond with "[Already in {target_language}]" followed by the original text.
-
-Message to translate:
-{target_message.content}
-
-Provide ONLY the translation, no explanations or additional text."""
-        
-        # Use key manager with model rotation for reliability
-        try:
-            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
-        except Exception as e:
-            print(f"⚠ Failed to create gemini-2.5-flash model, trying gemini-1.5-flash: {e}")
-            try:
-                model = gemini_key_manager.create_model_with_retry('gemini-1.5-flash')
-            except Exception as e2:
-                print(f"⚠ Failed to create gemini-1.5-flash model, trying gemini-flash-latest: {e2}")
-                model = gemini_key_manager.create_model_with_retry('gemini-flash-latest')
-        
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.types.GenerationConfig(
-                temperature=0.3,
-                max_output_tokens=500
-            )
-        )
-        
-        translation = response.text.strip()
-        
-        # Track API usage
-        track_api_call()
-        
-        # Create embed with original and translation
-        embed = discord.Embed(
-            title="🌐 Translation",
-            color=discord.Color.blue()
-        )
-        
-        # Show original author and message
-        embed.add_field(
-            name=f"Original Message (from {target_message.author.display_name})",
-            value=f"```{target_message.content[:1000]}```",
-            inline=False
-        )
-        
-        embed.add_field(
-            name="Translation",
-            value=f"```{translation[:1000]}```",
-            inline=False
-        )
-        
-        embed.set_footer(text=f"Translated by {interaction.user.display_name}")
-        
-        # Add link to original message
-        embed.description = f"[Jump to Original Message](https://discord.com/channels/{interaction.guild_id}/{channel.id}/{target_message.id})"
-        
-        await interaction.followup.send(embed=embed, ephemeral=False)
-        print(f"🌐 Translation completed by {interaction.user} for message from {target_message.author}")
-        
-    except discord.Forbidden as e:
-        await interaction.followup.send(
-            "❌ **Permission Error**: I don't have access to read messages in this channel.\n\n"
-            "**Required Permissions:**\n"
-            "• Read Message History\n"
-            "• View Channel\n\n"
-            "Please ask an administrator to grant these permissions to the bot.",
-            ephemeral=True
-        )
-        print(f"Permission error in translate command: {e}")
-    except Exception as e:
-        print(f"Error in translate command: {e}")
-        import traceback
-        traceback.print_exc()
-        await interaction.followup.send(f"❌ An error occurred while translating: {str(e)}", ephemeral=True)
 
 # --- RUN THE BOT WITH AUTO-RESTART ---
 async def run_bot_with_restart():

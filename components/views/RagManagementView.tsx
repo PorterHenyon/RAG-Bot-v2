@@ -190,7 +190,7 @@ const RagManagementView: React.FC = () => {
         resp.triggerKeywords.some(kw => kw.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
-    const handleSaveNewAutoResponse = (e: React.FormEvent) => {
+    const handleSaveNewAutoResponse = async (e: React.FormEvent) => {
         e.preventDefault();
         const newEntry: AutoResponse = {
             id: `AR-${Date.now()}`,
@@ -202,9 +202,18 @@ const RagManagementView: React.FC = () => {
         setAutoResponses(prev => [...prev, newEntry]);
         setNewAutoResponse({ name: '', responseText: '', triggerKeywords: '' });
         setShowNewAutoForm(false);
+        // Immediately save to API
+        try {
+            const { dataService } = await import('../../services/dataService');
+            const currentData = await dataService.fetchData();
+            await dataService.saveData(currentData.ragEntries, [...currentData.autoResponses, newEntry], currentData.slashCommands, currentData.botSettings, currentData.pendingRagEntries);
+            console.log('✓ New auto-response saved immediately');
+        } catch (error) {
+            console.error('Failed to save new auto-response:', error);
+        }
     };
 
-    const handleSaveNewRagEntry = (e: React.FormEvent) => {
+    const handleSaveNewRagEntry = async (e: React.FormEvent) => {
         e.preventDefault();
         const newEntry: RagEntry = {
             id: `RAG-${Date.now()}`,
@@ -217,17 +226,46 @@ const RagManagementView: React.FC = () => {
         setRagEntries(prev => [newEntry, ...prev]);
         setNewRagEntry({ title: '', content: '', keywords: '' });
         setShowNewRagForm(false);
-    };
-
-    const handleDeleteRagEntry = (id: string) => {
-        if (window.confirm('Are you sure you want to delete this RAG entry? This cannot be undone.')) {
-            setRagEntries(prev => prev.filter(entry => entry.id !== id));
+        // Immediately save to API
+        try {
+            const { dataService } = await import('../../services/dataService');
+            const currentData = await dataService.fetchData();
+            await dataService.saveData([newEntry, ...currentData.ragEntries], currentData.autoResponses, currentData.slashCommands, currentData.botSettings, currentData.pendingRagEntries);
+            console.log('✓ New RAG entry saved immediately');
+        } catch (error) {
+            console.error('Failed to save new RAG entry:', error);
         }
     };
 
-    const handleDeleteAutoResponse = (id: string) => {
+    const handleDeleteRagEntry = async (id: string) => {
+        if (window.confirm('Are you sure you want to delete this RAG entry? This cannot be undone.')) {
+            setRagEntries(prev => prev.filter(entry => entry.id !== id));
+            // Immediately save to API
+            try {
+                const { dataService } = await import('../../services/dataService');
+                const currentData = await dataService.fetchData();
+                const updatedRagEntries = currentData.ragEntries.filter(entry => entry.id !== id);
+                await dataService.saveData(updatedRagEntries, currentData.autoResponses, currentData.slashCommands, currentData.botSettings, currentData.pendingRagEntries);
+                console.log('✓ RAG entry deleted and saved immediately');
+            } catch (error) {
+                console.error('Failed to delete RAG entry:', error);
+            }
+        }
+    };
+
+    const handleDeleteAutoResponse = async (id: string) => {
         if (window.confirm('Are you sure you want to delete this auto-response?')) {
             setAutoResponses(prev => prev.filter(response => response.id !== id));
+            // Immediately save to API
+            try {
+                const { dataService } = await import('../../services/dataService');
+                const currentData = await dataService.fetchData();
+                const updatedAutoResponses = currentData.autoResponses.filter(response => response.id !== id);
+                await dataService.saveData(currentData.ragEntries, updatedAutoResponses, currentData.slashCommands, currentData.botSettings, currentData.pendingRagEntries);
+                console.log('✓ Auto-response deleted and saved immediately');
+            } catch (error) {
+                console.error('Failed to delete auto-response:', error);
+            }
         }
     };
 
@@ -236,7 +274,7 @@ const RagManagementView: React.FC = () => {
         setEditingRagKeywords(entry.keywords.join(', '));
     };
 
-    const handleSaveEditRag = (e: React.FormEvent) => {
+    const handleSaveEditRag = async (e: React.FormEvent) => {
         e.preventDefault();
         if (editingRag) {
             const updatedEntry = {
@@ -248,6 +286,18 @@ const RagManagementView: React.FC = () => {
             ));
             setEditingRag(null);
             setEditingRagKeywords('');
+            // Immediately save to API
+            try {
+                const { dataService } = await import('../../services/dataService');
+                const currentData = await dataService.fetchData();
+                const updatedRagEntries = currentData.ragEntries.map(entry => 
+                    entry.id === editingRag.id ? updatedEntry : entry
+                );
+                await dataService.saveData(updatedRagEntries, currentData.autoResponses, currentData.slashCommands, currentData.botSettings, currentData.pendingRagEntries);
+                console.log('✓ RAG entry saved immediately');
+            } catch (error) {
+                console.error('Failed to save RAG entry:', error);
+            }
         }
     };
 
@@ -256,7 +306,7 @@ const RagManagementView: React.FC = () => {
         setEditingAutoTriggers(response.triggerKeywords.join(', '));
     };
 
-    const handleSaveEditAuto = (e: React.FormEvent) => {
+    const handleSaveEditAuto = async (e: React.FormEvent) => {
         e.preventDefault();
         if (editingAuto) {
             const updatedResponse = {
@@ -268,6 +318,18 @@ const RagManagementView: React.FC = () => {
             ));
             setEditingAuto(null);
             setEditingAutoTriggers('');
+            // Immediately save to API
+            try {
+                const { dataService } = await import('../../services/dataService');
+                const currentData = await dataService.fetchData();
+                const updatedAutoResponses = currentData.autoResponses.map(resp => 
+                    resp.id === editingAuto.id ? updatedResponse : resp
+                );
+                await dataService.saveData(currentData.ragEntries, updatedAutoResponses, currentData.slashCommands, currentData.botSettings, currentData.pendingRagEntries);
+                console.log('✓ Auto-response saved immediately');
+            } catch (error) {
+                console.error('Failed to save auto-response:', error);
+            }
         }
     };
 
