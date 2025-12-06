@@ -22,16 +22,24 @@ DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # S
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
 
 # Load API keys from environment variable
+# Supports multiple formats:
+# - GEMINI_API_KEY (legacy, for backward compatibility)
+# - GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3, etc. (numbered keys)
 GEMINI_API_KEYS = []
-env_key = os.getenv('GEMINI_API_KEY')
-if env_key:
-    GEMINI_API_KEYS.append(env_key)
 
-# Also check for additional keys (GEMINI_API_KEY_2 through GEMINI_API_KEY_6)
-for i in range(2, 7):
-    additional_key = os.getenv(f'GEMINI_API_KEY_{i}')
-    if additional_key and additional_key not in GEMINI_API_KEYS:
-        GEMINI_API_KEYS.append(additional_key)
+# First, check for numbered keys (GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc.)
+# Check up to 10 keys to support multiple keys
+for i in range(1, 11):
+    numbered_key = os.getenv(f'GEMINI_API_KEY_{i}')
+    if numbered_key and numbered_key not in GEMINI_API_KEYS:
+        GEMINI_API_KEYS.append(numbered_key)
+        print(f"  ✓ Loaded GEMINI_API_KEY_{i}")
+
+# Also check legacy GEMINI_API_KEY (without number) for backward compatibility
+legacy_key = os.getenv('GEMINI_API_KEY')
+if legacy_key and legacy_key not in GEMINI_API_KEYS:
+    GEMINI_API_KEYS.append(legacy_key)
+    print(f"  ✓ Loaded GEMINI_API_KEY (legacy)")
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
@@ -40,7 +48,7 @@ if not DISCORD_BOT_TOKEN:
 
 if not GEMINI_API_KEYS:
     print("FATAL ERROR: No Gemini API keys found in environment.")
-    print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6")
+    print("   Set GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc. (or GEMINI_API_KEY for legacy)")
     exit()
 
 print(f"✓ Loaded {len(GEMINI_API_KEYS)} Gemini API key(s) for rotation")
