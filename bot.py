@@ -595,8 +595,6 @@ support_notification_messages = {}  # {thread_id: message_id}
 # --- BOT SETTINGS (Stored in Vercel KV API - NO local files) ---
 BOT_SETTINGS = {
     'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
-    'satisfaction_delay': 30,  # Seconds to wait before analyzing satisfaction (increased to reduce false triggers)
-    'satisfaction_analysis_enabled': True,  # Enable/disable automatic satisfaction analysis (saves API calls!)
     'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
     'ai_max_tokens': 2048,  # Max tokens for AI responses
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
@@ -606,7 +604,6 @@ BOT_SETTINGS = {
     'unsolved_tag_id': None,  # Discord tag ID for "Unsolved" posts
     'resolved_tag_id': None,  # Discord tag ID for "Resolved" posts
     'issue_type_tag_ids': {},  # Map issue types to Discord tag IDs (e.g., {'Bug/Error': '123456789'})
-    'auto_rag_enabled': True,  # Auto-create RAG entries from solved threads
     'support_notification_channel_id': '1436918674069000212',  # Channel ID for high priority notifications (string to prevent JS precision loss)
     'support_role_id': None,  # Support role ID to ping (optional)
     'last_updated': datetime.now().isoformat()
@@ -728,7 +725,6 @@ def track_api_call(key_manager=None, api_calls_dict=None):
 
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
-satisfaction_timers = {}  # {thread_id: asyncio.Task}
 # Track processed threads to avoid duplicate processing
 # Use dict with timestamps to enable cleanup of old entries
 processed_threads = {}  # {thread_id: timestamp}
@@ -897,8 +893,8 @@ class HighPriorityPostsView(discord.ui.View):
         # For now, just acknowledge
         await interaction.followup.send("⚠️ Refresh not yet implemented. Use the navigation buttons.", ephemeral=True)
 
-# --- SATISFACTION BUTTON VIEW ---
-class SatisfactionButtons(discord.ui.View):
+# --- SIMPLE SOLVED BUTTON VIEW ---
+class SolvedButton(discord.ui.View):
     """Interactive buttons for user feedback on bot responses"""
     
     def __init__(self, thread_id, conversation, response_type='ai', image_parts=None):
@@ -1152,9 +1148,9 @@ class SatisfactionButtons(discord.ui.View):
             else:
                 ai_embed.set_footer(text="Revolution Macro AI")
             
-            # Add new buttons for AI response
-            new_view = SatisfactionButtons(self.thread_id, self.conversation, 'ai', escalation_images)
-            await thread.send(embed=ai_embed, view=new_view)
+            # Add solved button
+            solved_view = SolvedButton(self.thread_id)
+            await thread.send(embed=ai_embed, view=solved_view)
             thread_response_type[self.thread_id] = 'ai'
             
             await update_forum_post_status(self.thread_id, 'AI Response')
@@ -2361,142 +2357,6 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
-async def analyze_conversation(conversation_text):
-    """Analyze a conversation and create a RAG entry from it (with retry logic)"""
-    max_retries = 2  # Try twice (initial attempt + 1 retry)
-    
-    for attempt in range(max_retries):
-        try:
-            # Check rate limit before making API call
-            if not await check_rate_limit():
-                print(f"⚠️ Skipping RAG entry generation due to rate limit")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1)
-                    continue
-                return None
-            
-            # Use key manager for automatic rotation
-            model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
-            
-            prompt = (
-                "Analyze the following support conversation and generate a structured knowledge base entry from it.\n"
-                "- The 'title' should be a clear, concise summary of the problem (e.g., 'Fix for ... Error').\n"
-                "- The 'content' should be a detailed explanation of the solution.\n"
-                "- The 'keywords' should be an array of relevant search terms.\n\n"
-                f"Conversation:\n{conversation_text}\n\n"
-                "Return only a valid JSON object with this structure:\n"
-                '{\n'
-                '  "title": "string",\n'
-                '  "content": "string",\n'
-                '  "keywords": ["string1", "string2", ...]\n'
-                '}'
-            )
-            
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(None, model.generate_content, prompt)
-            
-            # Parse JSON response
-            response_text = response.text.strip()
-            # Try to extract JSON from response (handle markdown code blocks)
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-            parsed = json.loads(response_text)
-            return parsed
-            
-        except Exception as e:
-            if attempt < max_retries - 1:
-                print(f"⚠️ Error analyzing conversation (attempt {attempt + 1}/{max_retries}): {e}")
-                print(f"   Retrying in 1 second...")
-                await asyncio.sleep(1)
-                continue
-            else:
-                print(f"❌ Error analyzing conversation after {max_retries} attempts: {e}")
-                return None
-
-async def analyze_user_satisfaction(user_messages: list) -> dict:
-    """Use AI to determine if user is satisfied or needs human support
-    
-    Args:
-        user_messages: List of recent user messages to analyze together
-    """
-    try:
-        # Combine messages for analysis
-        combined_message = " ".join(user_messages)
-        
-        # Check for explicit human support requests first
-        human_keywords = ['human', 'staff', 'real person', 'talk to someone', 'support agent', 'representative', 'speak to', 'talk to']
-        if any(keyword in combined_message.lower() for keyword in human_keywords):
-            print(f"🚨 Explicit human support request detected")
-            return {
-                "satisfied": False,
-                "reason": "User explicitly requested human support",
-                "confidence": 100,
-                "wants_human": True
-            }
-        
-        # Check if satisfaction analysis is enabled (saves API calls!)
-        if not BOT_SETTINGS.get('satisfaction_analysis_enabled', True):
-            print(f"ℹ️ Satisfaction analysis disabled - skipping")
-            return {"satisfied": False, "reason": "Analysis disabled", "confidence": 0, "wants_human": False}
-        
-        # Check rate limit before making API call
-        if not await check_rate_limit():
-            print(f"⚠️ Skipping satisfaction analysis due to rate limit")
-            return {"satisfied": False, "reason": "Rate limit", "confidence": 0, "wants_human": False}
-        
-        # Use key manager for automatic rotation
-        model = gemini_key_manager.create_model_with_retry('gemini-2.5-flash')
-        
-        prompt = (
-            "Analyze the following user message(s) and determine if they are satisfied with the bot's response or need human support.\n\n"
-            f"User message(s): \"{combined_message}\"\n\n"
-            "Return a JSON object with this structure:\n"
-            '{\n'
-            '  "satisfied": true/false,\n'
-            '  "reason": "brief explanation",\n'
-            '  "confidence": 0-100,\n'
-            '  "wants_human": true/false\n'
-            '}\n\n'
-            "Consider satisfied if:\n"
-            "- They say thanks, thank you, appreciated, helpful, etc.\n"
-            "- They confirm it worked or was resolved\n"
-            "- They say they're good, all set, no problem, etc.\n\n"
-            "Consider NOT satisfied if:\n"
-            "- They ask follow-up questions\n"
-            "- They express confusion or frustration\n"
-            "- They say it didn't work or need more help\n\n"
-            "IMPORTANT: Set wants_human to true ONLY if:\n"
-            "- They EXPLICITLY ask for: human support, staff, real person, agent, representative, etc.\n"
-            "- They use phrases like: 'talk to someone', 'speak to a person', 'need human help'\n"
-            "\n"
-            "DO NOT set wants_human to true just because:\n"
-            "- They're unsatisfied or frustrated\n"
-            "- They say 'that didn't work' or 'still not working'\n"
-            "- They ask follow-up questions\n"
-            "- They need more help (bot can provide another solution first)"
-        )
-        
-        loop = asyncio.get_event_loop()
-        response = await loop.run_in_executor(None, model.generate_content, prompt)
-        track_api_call()  # Track successful API call
-        
-        # Parse JSON response
-        response_text = response.text.strip()
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in response_text:
-            response_text = response_text.split("```")[1].split("```")[0].strip()
-        
-        result = json.loads(response_text)
-        print(f"📊 Satisfaction analysis: {result.get('satisfied')} ({result.get('confidence')}% confidence) - {result.get('reason')}")
-        return result
-    except Exception as e:
-        print(f"⚠ Error analyzing user satisfaction: {e}")
-        # Default to needing human support if analysis fails
-        return {"satisfied": False, "reason": "Analysis failed", "confidence": 0, "wants_human": False}
 
 async def get_resolved_tag(forum_channel):
     """
@@ -3572,9 +3432,9 @@ async def on_thread_create(thread):
             thread_images[thread_id] = image_parts
             print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id} (for escalation if needed)")
         
-            # Add satisfaction buttons (pass images for escalation)
-            button_view = SatisfactionButtons(thread_id, conversation, 'auto', image_parts)
-            await thread.send(embed=auto_embed, view=button_view)
+            # Add solved button
+            solved_view = SolvedButton(thread_id)
+            await thread.send(embed=auto_embed, view=solved_view)
             bot_response_text = auto_response
             thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
             
@@ -3707,9 +3567,9 @@ async def on_thread_create(thread):
                 thread_images[thread_id] = image_parts
                 print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
             
-            # Add satisfaction buttons (pass images for escalation)
-            button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
-            await thread.send(embed=ai_embed, view=button_view)
+            # Add solved button
+            solved_view = SolvedButton(thread_id)
+            await thread.send(embed=ai_embed, view=solved_view)
             thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
             
             # Show which entries were used in terminal
@@ -4106,12 +3966,7 @@ async def on_message(message):
                                     }
                                 }
                             else:
-                                # Cancel any existing timer for this thread
-                                if thread_id in satisfaction_timers:
-                                    satisfaction_timers[thread_id].cancel()
-                                    print(f"⏰ Cancelled previous satisfaction timer for thread {thread_id}")
-                                
-                                # IMPORTANT: Update the conversation with user's reply BEFORE starting timer
+                                # Update conversation immediately
                                 post_update = {
                                     'action': 'update',
                                     'post': {
@@ -4120,11 +3975,6 @@ async def on_message(message):
                                         'status': new_status
                                     }
                                 }
-                                
-                                # Create delayed analysis task (configurable delay)
-                                # Capture user_who_sent in closure for later use
-                                captured_user = user_who_sent
-                                async def delayed_satisfaction_check():
                                     try:
                                         delay = BOT_SETTINGS.get('satisfaction_delay', 15)
                                         await asyncio.sleep(delay)  # Wait for user to finish typing
@@ -4393,9 +4243,9 @@ async def on_message(message):
                                                     )
                                                     ai_embed.set_footer(text="Revolution Macro AI")
                                                     
-                                                    # Add satisfaction buttons
-                                                    button_view = SatisfactionButtons(thread_id, conversation, 'ai')
-                                                    await thread_channel.send(embed=ai_embed, view=button_view)
+                                                    # Add solved button
+                                                    solved_view = SolvedButton(thread_id)
+                                                    await thread_channel.send(embed=ai_embed, view=solved_view)
                                                     thread_response_type[thread_id] = 'ai'
                                                     updated_status = 'AI Response'
                                                     print(f"✅ SENT AI FOLLOW-UP RESPONSE to thread {thread_id}")
@@ -4666,9 +4516,6 @@ async def on_thread_delete(thread):
                     print(f"⚠ Failed to delete post from dashboard: {response.status}")
         
         # Clean up tracking dictionaries
-        if thread_id in satisfaction_timers:
-            satisfaction_timers[thread_id].cancel()
-            del satisfaction_timers[thread_id]
         if thread_id in processed_threads:
             del processed_threads[thread_id]
         if thread_id in escalated_threads:
