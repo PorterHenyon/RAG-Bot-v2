@@ -18,6 +18,10 @@ from sklearn.metrics.pairwise import cosine_similarity
 # --- Configuration ---
 load_dotenv()
 
+# CPU OPTIMIZATION: Disable embeddings by default to save CPU costs
+# Set ENABLE_EMBEDDINGS=true in environment to enable vector search (uses more CPU)
+ENABLE_EMBEDDINGS = os.getenv('ENABLE_EMBEDDINGS', 'false').lower() == 'true'
+
 # 1. LOAD ENVIRONMENT VARIABLES FROM .env FILE
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
 SUPPORT_FORUM_CHANNEL_ID_STR = os.getenv('SUPPORT_FORUM_CHANNEL_ID')
@@ -63,6 +67,12 @@ if len(valid_keys) != len(GEMINI_API_KEYS):
         exit()
 
 print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (forum posts, /ask, etc.)")
+
+# CPU OPTIMIZATION: Show embeddings status
+if not ENABLE_EMBEDDINGS:
+    print("💡 CPU OPTIMIZATION: Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true to enable)")
+else:
+    print("💡 Embeddings enabled - vector search active (uses more CPU)")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
@@ -538,17 +548,24 @@ _rag_embeddings = {}  # {entry_id: embedding_vector}
 _rag_embeddings_version = 0  # Increment when RAG database changes
 
 def get_embedding_model():
-    """Lazy load the embedding model"""
+    """Lazy load the embedding model (non-blocking, will fallback if fails)"""
     global _embedding_model
+    
+    # CPU OPTIMIZATION: Skip embeddings if disabled
+    if not ENABLE_EMBEDDINGS:
+        return None
+    
     if _embedding_model is None:
         print("🔧 Loading embedding model for vector search...")
         try:
             # Use a lightweight, fast model for embeddings
+            # Model should be pre-cached in Docker image, so this should be fast
             _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
             print("✅ Embedding model loaded")
         except Exception as e:
             print(f"⚠️ Failed to load embedding model: {e}")
-            print("   Falling back to keyword-based search")
+            print("   Bot will continue with keyword-based search")
+            print("   Embeddings will be available after model loads successfully")
             return None
     return _embedding_model
 
@@ -585,6 +602,16 @@ def compute_rag_embeddings():
     
     _rag_embeddings_version += 1
     print(f"✅ Computed {len(_rag_embeddings)} embeddings (version {_rag_embeddings_version})")
+
+async def compute_embeddings_background():
+    """Background task to compute embeddings without blocking bot startup"""
+    try:
+        # Small delay to let bot finish startup
+        await asyncio.sleep(2)
+        compute_rag_embeddings()
+    except Exception as e:
+        print(f"⚠️ Error in background embedding computation: {e}")
+        print("   Bot will continue with keyword-based search until embeddings are ready")
 
 # Cooldown tracking for /ask command on friends server (1 minute cooldown)
 ask_cooldowns = {}  # {user_id: last_used_timestamp}
@@ -725,6 +752,7 @@ def track_api_call(key_manager=None, api_calls_dict=None):
 
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
+satisfaction_timers = {}  # {thread_id: asyncio.Task} - tracks active satisfaction analysis timers
 # Track processed threads to avoid duplicate processing
 # Use dict with timestamps to enable cleanup of old entries
 processed_threads = {}  # {thread_id: timestamp}
@@ -1440,13 +1468,17 @@ async def fetch_data_from_api():
                     LEADERBOARD_DATA = new_leaderboard
                     last_data_hash = current_hash
                     
-                    # Recompute embeddings when RAG database changes
-                    if rag_changed:
-                        compute_rag_embeddings()
-                    elif len(RAG_DATABASE) > 0 and not _rag_embeddings:
-                        # Compute embeddings on first load if we have RAG entries but no embeddings yet
-                        print("🔄 Computing initial embeddings for RAG database...")
-                        compute_rag_embeddings()
+                    # CPU OPTIMIZATION: Only recompute embeddings if enabled and actually needed
+                    if ENABLE_EMBEDDINGS:
+                        if rag_changed:
+                            print("🔄 RAG database changed - recomputing embeddings...")
+                            compute_rag_embeddings()
+                        elif len(RAG_DATABASE) > 0 and not _rag_embeddings:
+                            # Compute embeddings on first load if we have RAG entries but no embeddings yet
+                            print("🔄 Computing initial embeddings for RAG database...")
+                            compute_rag_embeddings()
+                    else:
+                        print("ℹ Embeddings disabled (CPU optimization) - using keyword search only")
                     
                     # Update system prompt if available
                     if new_settings and 'systemPrompt' in new_settings:
@@ -2423,7 +2455,7 @@ async def get_unsolved_tag(forum_channel):
         return None
 
 # --- PERIODIC DATA SYNC ---
-@tasks.loop(hours=1)  # Sync every 1 hour (reduced from 6h so RAG entries appear faster)
+@tasks.loop(hours=6)  # Sync every 6 hours (reduced frequency to save CPU costs)
 async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
@@ -2769,7 +2801,7 @@ async def notify_support_channel_summary(ping_support=False):
 # REMOVED: Local backups disabled - all data stored in Vercel KV API only
 # Users can download backups anytime with /export_data command
 
-@tasks.loop(hours=2)  # Check every 2 hours (optimized from 1 hour to save resources)
+@tasks.loop(hours=4)  # Check every 4 hours (optimized to save CPU costs)
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
     try:
@@ -2894,10 +2926,15 @@ async def on_ready():
     # Initial data sync - loads everything into memory from API
     await fetch_data_from_api()
     
-    # Compute initial embeddings if we have RAG entries
-    if len(RAG_DATABASE) > 0 and not _rag_embeddings:
-        print("🔄 Computing initial embeddings for RAG database...")
-        compute_rag_embeddings()
+    # CPU OPTIMIZATION: Only compute embeddings if enabled
+    # Compute initial embeddings in background (non-blocking)
+    # This prevents bot from hanging if model download takes time
+    if ENABLE_EMBEDDINGS and len(RAG_DATABASE) > 0 and not _rag_embeddings:
+        print("🔄 Computing initial embeddings in background (non-blocking)...")
+        # Run in background task to avoid blocking bot startup
+        bot.loop.create_task(compute_embeddings_background())
+    elif not ENABLE_EMBEDDINGS:
+        print("ℹ Embeddings disabled (CPU optimization) - using keyword search only")
 
     # Start periodic sync
     sync_data_task.start()
@@ -2906,7 +2943,7 @@ async def on_ready():
     # Start old post check task
     if not check_old_posts.is_running():
         check_old_posts.start()
-        print("✓ Started background task: check_old_posts (runs every hour)")
+        print("✓ Started background task: check_old_posts (runs every 4 hours)")
     
     # Start cleanup task for old solved posts
     if not cleanup_old_solved_posts.is_running():
