@@ -396,145 +396,96 @@ class GeminiKeyManager:
         return genai.GenerativeModel(model_name, **kwargs)
     
     def create_model_with_retry(self, model_name, **kwargs):
-        """Create a GenerativeModel with automatic key rotation on rate limit and proactive rotation"""
-        max_attempts = len(self.api_keys) * 3  # Try each key up to 3 times for better success rate
-        attempts = 0
-        last_key_used = None
-        tried_keys = []  # Track which keys we've tried
+        """Create a GenerativeModel with automatic key rotation"""
+        # Try each key once, rotating through all keys
+        tried_keys = set()
+        max_attempts = len(self.api_keys) * 2  # Try each key up to 2 times
         
-        while attempts < max_attempts:
-            try:
-                # Get current key and track usage (this may rotate proactively)
-                key = self.get_current_key()
-                self.track_usage(key)  # This rotates after N calls
-                
-                # Get key again in case it rotated
+        for attempt in range(max_attempts):
+            current_key = self.get_current_key()
+            key_short = current_key[:15] + '...'
+            
+            # If we've tried this key recently, rotate
+            if current_key in tried_keys and attempt > 0:
+                self.rotate_key(force_round_robin=True)
                 current_key = self.get_current_key()
                 key_short = current_key[:15] + '...'
-                
-                # Skip if we've already tried this key recently (avoid infinite loops)
-                if current_key in tried_keys and attempts > len(self.api_keys):
-                    print(f"⚠️ Already tried key {key_short}, forcing rotation...")
-                    self.rotate_key(force_round_robin=True)
-                    current_key = self.get_current_key()
-                    key_short = current_key[:15] + '...'
-                
-                tried_keys.append(current_key)
-                
-                # Configure genai with current key BEFORE creating model
-                try:
-                    genai.configure(api_key=current_key)
-                except Exception as config_error:
-                    print(f"❌ CRITICAL: Failed to configure genai with key {key_short}: {config_error}")
-                    print(f"   This is a configuration error, not an API error")
-                    attempts += 1
-                    self.rotate_key(force_round_robin=True)
-                    if attempts >= max_attempts:
-                        raise Exception(f"Failed to configure genai with any key. Configuration error: {config_error}")
-                    continue
-                
-                print(f"🔑 Attempt {attempts + 1}/{max_attempts}: Trying key {key_short} for model {model_name}")
-                
-                # Create model - if this succeeds, mark key as successful
-                # Handle different model versions: if model_name is 2.5 but key only supports 1.5, try 1.5
-                try:
-                    # Verify key is configured
-                    if not current_key or len(current_key.strip()) < 10:
-                        raise Exception(f"Invalid API key: key is too short or empty")
-                    
-                    model = genai.GenerativeModel(model_name, **kwargs)
-                    # Mark success (we'll mark it again when the actual API call succeeds)
-                    last_key_used = current_key
-                    print(f"✅ Successfully created model {model_name} with key {key_short}")
-                    return model
-                except Exception as model_error:
-                    error_str_model = str(model_error).lower()
-                    # If model version not supported, try alternative versions
-                    if 'not found' in error_str_model or 'invalid' in error_str_model or 'not available' in error_str_model:
-                        # Try alternative model versions
-                        alternative_models = []
-                        if '2.5' in model_name:
-                            alternative_models = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-flash-latest']
-                        elif '1.5' in model_name:
-                            alternative_models = ['gemini-2.5-flash', 'gemini-flash-latest']
-                        else:
-                            alternative_models = ['gemini-1.5-flash', 'gemini-2.5-flash']
-                        
-                        for alt_model in alternative_models:
+            
+            tried_keys.add(current_key)
+            
+            try:
+                # Configure and create model
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel(model_name, **kwargs)
+                print(f"✅ Created model {model_name} with key {key_short}")
+                return model
+            except Exception as e:
+                error_str = str(e).lower()
+                # If it's a model not found error, try alternative models
+                if 'not found' in error_str or 'invalid' in error_str or 'not available' in error_str:
+                    # Try alternative models
+                    alternatives = ['gemini-1.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']
+                    for alt_model in alternatives:
+                        if alt_model != model_name:
                             try:
-                                print(f"   Trying alternative model: {alt_model}")
+                                genai.configure(api_key=current_key)
                                 model = genai.GenerativeModel(alt_model, **kwargs)
-                                last_key_used = current_key
-                                print(f"✅ Successfully created alternative model {alt_model} with key {key_short}")
+                                print(f"✅ Created alternative model {alt_model} with key {key_short}")
                                 return model
                             except:
                                 continue
-                        # If all alternatives failed, raise original error
-                        raise model_error
-                    else:
-                        raise model_error
-            except Exception as e:
-                error_str = str(e).lower()
-                key_used = self.get_current_key()
-                
-                # Check if it's a rate limit error (don't mark as permanent error, just rotate)
-                if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str:
-                    # Rate limit is temporary - don't mark as permanent error, just rotate
-                    self.key_rate_limited[key_used[:10] + '...'] = True
-                    self.key_rate_limit_time[key_used[:10] + '...'] = datetime.now()
-                    attempts += 1
-                    print(f"⚠️ Rate limit on key {key_used[:15]}... (temporary), rotating to next key...")
+                # Rotate to next key and try again
+                if attempt < max_attempts - 1:
                     self.rotate_key(force_round_robin=True)
-                    # Brief pause before trying next key (use time.sleep for sync context)
                     import time
-                    time.sleep(0.5)
-                    continue
-                elif 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
-                    # API key is leaked/invalid - only mark if we've confirmed it multiple times
-                    # Don't mark on first failure (might be transient)
-                    if attempts > len(self.api_keys):
-                        # We've tried this key multiple times, it's definitely invalid
-                        self.mark_key_error(key_used, is_rate_limit=False)
-                        print(f"❌ API key {key_used[:15]}... appears to be leaked or invalid after multiple attempts")
-                        print(f"   Get a new key: https://aistudio.google.com/app/apikey")
-                    else:
-                        # First failure - might be transient, just rotate
-                        print(f"⚠️ Possible API key issue with {key_used[:15]}..., trying next key...")
-                    # Try next key instead of failing completely
-                    self.rotate_key(force_round_robin=True)
-                    attempts += 1
-                    if attempts >= max_attempts:
-                        raise Exception(f"All API keys failed. Check keys at https://aistudio.google.com/app/apikey")
-                    continue
-                elif 'not found' in error_str or 'invalid' in error_str or 'not available' in error_str:
-                    # Model compatibility issue - not a key error, just try different model
-                    print(f"⚠️ Model compatibility issue, will try alternative models...")
-                    attempts += 1
-                    self.rotate_key(force_round_robin=True)
-                    if attempts >= max_attempts:
-                        raise
+                    time.sleep(0.2)
                     continue
                 else:
-                    # Transient error - log it but don't mark as permanent error
-                    attempts += 1
-                    print(f"⚠️ Error on attempt {attempts} with key {key_used[:15]}...: {type(e).__name__}: {str(e)[:150]}")
-                    print(f"   Error details: {str(e)}")
-                    # Try next key instead of marking error (might be network issue, etc.)
-                    self.rotate_key(force_round_robin=True)
-                    # Brief pause for transient issues
-                    import time
-                    time.sleep(0.3)
-                    if attempts >= max_attempts:
-                        # If we've tried all keys, re-raise the last error with full details
-                        print(f"❌ All {max_attempts} attempts exhausted. Last error: {type(e).__name__}: {str(e)}")
-                        raise Exception(f"Failed to create model after {max_attempts} attempts. Last error: {str(e)[:200]}")
-                    continue
+                    # Last attempt failed
+                    raise Exception(f"Failed to create model: {str(e)[:200]}")
         
-        # All keys exhausted
-        raise Exception("All API keys exhausted. Please wait before trying again.")
+        raise Exception("All API keys exhausted")
 
 # Initialize key manager (all keys used for all operations)
 gemini_key_manager = GeminiKeyManager(GEMINI_API_KEYS)
+
+# Test API keys on startup to verify they work (non-blocking - bot will start even if test fails)
+print(f"\n🔍 Testing API keys on startup (quick validation)...")
+test_passed = False
+working_keys = []
+for i, test_key in enumerate(GEMINI_API_KEYS, 1):
+    try:
+        key_short = test_key[:15] + '...'
+        genai.configure(api_key=test_key)
+        # Try to create a simple model to verify the key works (quick test)
+        test_model = genai.GenerativeModel('gemini-1.5-flash')
+        # Simple test - just try to generate content (no timeout option, let it use default)
+        test_response = test_model.generate_content("Hi")
+        if test_response and hasattr(test_response, 'text') and test_response.text:
+            print(f"   ✅ Key {i} ({key_short}) works!")
+            working_keys.append(i)
+            test_passed = True
+        else:
+            print(f"   ⚠️ Key {i} ({key_short}) responded but no text")
+    except Exception as test_error:
+        error_str = str(test_error).lower()
+        error_msg = str(test_error)[:150]
+        if 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
+            print(f"   ❌ Key {i} INVALID/LEAKED: {error_msg}")
+        elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+            print(f"   ⚠️ Key {i} rate limited (temporary): {error_msg}")
+        elif 'timeout' in error_str:
+            print(f"   ⚠️ Key {i} timeout (may still work): {error_msg}")
+        else:
+            print(f"   ⚠️ Key {i} test failed: {error_msg}")
+
+if test_passed:
+    print(f"✓ Startup test: {len(working_keys)}/{len(GEMINI_API_KEYS)} key(s) working ({', '.join(map(str, working_keys))})\n")
+else:
+    print(f"\n⚠️ WARNING: Startup test failed for all keys!")
+    print(f"   The bot will still try to use them (test may have been too strict)")
+    print(f"   Check Railway logs when making actual API calls to see real errors")
+    print(f"   Verify keys at: https://aistudio.google.com/app/apikey\n")
 
 # Configure with first key (will be reconfigured per-request)
 if gemini_key_manager.api_keys:
@@ -2004,32 +1955,20 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             model = None
             model_error = None
             
-            # Try to create model with system_instruction
+            # Try to create model - try with system_instruction first, then without
             model = None
             try:
                 model = key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
-                print(f"   ✓ Model created with system_instruction")
             except Exception as e:
-                error_str = str(e).lower()
-                print(f"   ⚠️ Failed with system_instruction: {type(e).__name__}: {str(e)[:200]}")
-                
-                # If it's a leaked/invalid key error, log it but try next model
-                if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
-                    print(f"   ❌ API KEY ISSUE DETECTED!")
-                    print(f"   📝 Check your keys at: https://aistudio.google.com/app/apikey")
-                
-                # Try without system_instruction for other errors
-                print(f"   Trying without system_instruction...")
+                # If system_instruction fails, try without it
                 try:
                     model = key_manager.create_model_with_retry(model_name)
-                    print(f"   ✓ Model created without system_instruction")
                 except Exception as e2:
-                    print(f"   ❌ Also failed without system_instruction: {type(e2).__name__}: {str(e2)[:200]}")
-                    # Model creation failed - continue to next model
-                    model = None
+                    # Both failed, continue to next model
+                    print(f"   ⚠️ Model '{model_name}' failed, trying next model...")
+                    continue
             
             if model is None:
-                print(f"   ❌ Could not create model '{model_name}', trying next model...")
                 continue
             
             # Configure generation settings
@@ -2073,30 +2012,15 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 continue
             except Exception as api_error:
                 error_str = str(api_error).lower()
-                error_full = str(api_error)
-                print(f"   ❌ API call failed: {type(api_error).__name__}: {error_full[:300]}")
+                print(f"   ⚠️ API call failed: {str(api_error)[:200]}")
                 
-                # Print the full error for debugging
-                import traceback
-                print(f"   Full error traceback:")
-                traceback.print_exc()
-                
-                # Check error type and handle accordingly
+                # Handle rate limits
                 if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
                     key_short_err = current_key[:10] + '...'
                     key_manager.key_rate_limited[key_short_err] = True
                     key_manager.key_rate_limit_time[key_short_err] = datetime.now()
-                    print(f"   ⚠️ Rate limit detected, will try next key/model...")
-                elif 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
-                    print(f"   ❌ API key authentication issue detected")
-                    print(f"   Error: {error_full[:200]}")
-                    key_manager.mark_key_error(current_key, is_rate_limit=False)
-                elif 'timeout' in error_str:
-                    print(f"   ⚠️ Request timeout, trying next model...")
-                else:
-                    # Other error - log it and try next model
-                    print(f"   ⚠️ Unknown error type, trying next model...")
-                    key_manager.mark_key_error(current_key, is_rate_limit=False)
+                    key_manager.rotate_key(force_round_robin=True)
+                # Try next model
                 continue
             
             # Check if response has text attribute BEFORE marking success
@@ -5497,6 +5421,73 @@ async def check_rag_entries(interaction: discord.Interaction):
     except Exception as e:
         print(f"Error in check_rag_entries: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=False)
+
+@bot.tree.command(name="test_api_keys", description="Test all API keys to see which ones work (Admin only).")
+async def test_api_keys(interaction: discord.Interaction):
+    """Test all API keys and report which ones work"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    working_keys = []
+    failed_keys = []
+    
+    embed = discord.Embed(
+        title="🔍 Testing API Keys",
+        description=f"Testing {len(GEMINI_API_KEYS)} key(s)...",
+        color=discord.Color.blue()
+    )
+    await interaction.followup.send(embed=embed, ephemeral=True)
+    
+    for i, test_key in enumerate(GEMINI_API_KEYS, 1):
+        key_short = test_key[:15] + '...' if len(test_key) > 15 else test_key
+        key_name = f"GEMINI_API_KEY" if i == 1 else f"GEMINI_API_KEY_{i}"
+        
+        try:
+            genai.configure(api_key=test_key)
+            test_model = genai.GenerativeModel('gemini-1.5-flash')
+            test_response = test_model.generate_content("Say hello")
+            
+            if test_response and hasattr(test_response, 'text') and test_response.text:
+                working_keys.append((i, key_name, key_short))
+            else:
+                failed_keys.append((i, key_name, key_short, "No response text"))
+        except Exception as e:
+            error_str = str(e).lower()
+            error_msg = str(e)[:200]
+            
+            if 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
+                failed_keys.append((i, key_name, key_short, f"Invalid/Leaked: {error_msg}"))
+            elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+                working_keys.append((i, key_name, key_short))  # Rate limited but key works
+            else:
+                failed_keys.append((i, key_name, key_short, error_msg))
+    
+    # Build result embed
+    result_embed = discord.Embed(
+        title="✅ API Key Test Results",
+        color=discord.Color.green() if working_keys else discord.Color.red()
+    )
+    
+    if working_keys:
+        working_text = "\n".join([f"✅ {idx}. {name} ({short})" for idx, name, short in working_keys])
+        result_embed.add_field(name=f"Working Keys ({len(working_keys)})", value=working_text[:1024], inline=False)
+    
+    if failed_keys:
+        failed_text = "\n".join([f"❌ {idx}. {name} ({short})\n   {reason[:80]}" for idx, name, short, reason in failed_keys[:10]])
+        if len(failed_keys) > 10:
+            failed_text += f"\n... and {len(failed_keys) - 10} more"
+        result_embed.add_field(name=f"Failed Keys ({len(failed_keys)})", value=failed_text[:1024], inline=False)
+    
+    result_embed.set_footer(text=f"Total: {len(working_keys)} working, {len(failed_keys)} failed out of {len(GEMINI_API_KEYS)} keys")
+    
+    await interaction.followup.send(embed=result_embed, ephemeral=True)
 
 @bot.tree.command(name="check_api_keys", description="Show detailed API key usage and health statistics (Admin only).")
 async def check_api_keys(interaction: discord.Interaction):
