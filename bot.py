@@ -22,24 +22,21 @@ DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # S
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
 
 # Load API keys from environment variable
-# Supports multiple formats:
-# - GEMINI_API_KEY (legacy, for backward compatibility)
-# - GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3, etc. (numbered keys)
+# All keys (GEMINI_API_KEY, GEMINI_API_KEY_2 through GEMINI_API_KEY_6) are used for all operations
 GEMINI_API_KEYS = []
 
-# First, check for numbered keys (GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc.)
-# Check up to 10 keys to support multiple keys
-for i in range(1, 11):
-    numbered_key = os.getenv(f'GEMINI_API_KEY_{i}')
-    if numbered_key and numbered_key not in GEMINI_API_KEYS:
-        GEMINI_API_KEYS.append(numbered_key)
-        print(f"  ✓ Loaded GEMINI_API_KEY_{i}")
+# Load GEMINI_API_KEY (primary key)
+env_key = os.getenv('GEMINI_API_KEY')
+if env_key:
+    GEMINI_API_KEYS.append(env_key)
+    print(f"✓ Loaded API key from GEMINI_API_KEY")
 
-# Also check legacy GEMINI_API_KEY (without number) for backward compatibility
-legacy_key = os.getenv('GEMINI_API_KEY')
-if legacy_key and legacy_key not in GEMINI_API_KEYS:
-    GEMINI_API_KEYS.append(legacy_key)
-    print(f"  ✓ Loaded GEMINI_API_KEY (legacy)")
+# Load additional keys (GEMINI_API_KEY_2 through GEMINI_API_KEY_6)
+for i in range(2, 7):
+    additional_key = os.getenv(f'GEMINI_API_KEY_{i}')
+    if additional_key and additional_key not in GEMINI_API_KEYS:
+        GEMINI_API_KEYS.append(additional_key)
+        print(f"✓ Loaded API key from GEMINI_API_KEY_{i}")
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
@@ -48,10 +45,10 @@ if not DISCORD_BOT_TOKEN:
 
 if not GEMINI_API_KEYS:
     print("FATAL ERROR: No Gemini API keys found in environment.")
-    print("   Set GEMINI_API_KEY_1, GEMINI_API_KEY_2, etc. (or GEMINI_API_KEY for legacy)")
+    print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6")
     exit()
 
-print(f"✓ Loaded {len(GEMINI_API_KEYS)} Gemini API key(s) for rotation")
+print(f"✓ Loaded {len(GEMINI_API_KEYS)} API key(s) for all operations (forum posts, /ask, etc.)")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
@@ -108,6 +105,19 @@ class GeminiKeyManager:
         """Get the current active API key"""
         return self.api_keys[self.current_key_index]
     
+    def get_recent_call_count(self, key_index):
+        """Get number of API calls in the last minute for a key"""
+        key_short = self.api_keys[key_index][:10] + '...'
+        if key_short not in gemini_api_calls_by_key:
+            return 0
+        
+        api_calls = gemini_api_calls_by_key[key_short]
+        now = datetime.now()
+        # Count calls in last 60 seconds
+        recent_count = sum(1 for call_time in api_calls 
+                          if (now - call_time).total_seconds() <= 60)
+        return recent_count
+    
     def get_key_health_score(self, key_index):
         """Calculate health score for a key (higher is better)"""
         key_short = self.api_keys[key_index][:10] + '...'
@@ -124,38 +134,83 @@ class GeminiKeyManager:
                     self.key_rate_limited[key_short] = False
                     self.key_rate_limit_time[key_short] = None
         
+        # CRITICAL: Check recent calls in last minute (rate limit is 10/min)
+        recent_calls = self.get_recent_call_count(key_index)
+        
+        # Heavily penalize keys close to or at the limit
+        if recent_calls >= 10:
+            return -2000  # Way over limit - never use
+        elif recent_calls >= 8:
+            return -500   # Very close to limit - avoid
+        elif recent_calls >= 6:
+            return -100  # Getting close - prefer others
+        elif recent_calls >= 4:
+            return 10    # Moderate usage - low priority
+        
         # Calculate health score based on:
         # - Success rate (higher is better)
         # - Recent usage (prefer less recently used keys for load balancing)
         total_calls = self.key_usage_count[key_short]
         if total_calls == 0:
-            return 100  # New/unused keys get high priority
+            return 200  # New/unused keys get very high priority
         
         success_rate = self.key_success_count[key_short] / total_calls if total_calls > 0 else 1.0
         error_rate = self.key_error_count[key_short] / total_calls if total_calls > 0 else 0.0
         
-        # Prefer keys with high success rate and low error rate
+        # Base score from success/error rate
         health_score = (success_rate * 100) - (error_rate * 50)
+        
+        # Big bonus for keys with few recent calls (main factor)
+        if recent_calls == 0:
+            health_score += 150  # Huge bonus for unused keys
+        elif recent_calls == 1:
+            health_score += 100
+        elif recent_calls == 2:
+            health_score += 50
+        elif recent_calls == 3:
+            health_score += 20
         
         # Prefer keys that haven't been used recently (load balancing)
         if self.key_last_used[key_short]:
             time_since_use = (datetime.now() - self.key_last_used[key_short]).total_seconds()
-            if time_since_use > 10:  # Bonus for keys not used in last 10 seconds
-                health_score += 20
+            if time_since_use > 30:  # Bonus for keys not used in last 30 seconds
+                health_score += 30
+            elif time_since_use > 10:
+                health_score += 10
         
         return health_score
     
     def get_best_key_index(self):
-        """Get the index of the healthiest available key"""
+        """Get the index of the healthiest available key with fewest recent calls"""
         best_index = self.current_key_index
         best_score = self.get_key_health_score(self.current_key_index)
+        best_recent_calls = self.get_recent_call_count(self.current_key_index)
         
         # Check all keys to find the best one
         for i in range(len(self.api_keys)):
             if i == self.current_key_index:
                 continue
+            
+            # Skip rate-limited keys
+            key_short = self.api_keys[i][:10] + '...'
+            if self.key_rate_limited[key_short]:
+                limit_time = self.key_rate_limit_time[key_short]
+                if limit_time:
+                    time_since_limit = (datetime.now() - limit_time).total_seconds()
+                    if time_since_limit < self.rate_limit_cooldown:
+                        continue  # Skip this key, still rate limited
+            
             score = self.get_key_health_score(i)
-            if score > best_score:
+            recent_calls = self.get_recent_call_count(i)
+            
+            # Prefer keys with fewer recent calls, even if score is slightly lower
+            # This prevents hitting rate limits
+            if recent_calls < best_recent_calls:
+                best_score = score
+                best_index = i
+                best_recent_calls = recent_calls
+            elif recent_calls == best_recent_calls and score > best_score:
+                # Same recent call count, prefer better health score
                 best_score = score
                 best_index = i
         
@@ -164,31 +219,51 @@ class GeminiKeyManager:
     def rotate_key(self, force_round_robin=False):
         """Intelligently rotate to the best available key, or use round-robin if forced"""
         original_index = self.current_key_index
+        original_key_short = self.api_keys[original_index][:10] + '...'
+        
+        # Check if current key is approaching limit (proactive rotation)
+        current_recent_calls = self.get_recent_call_count(original_index)
+        if current_recent_calls >= 7 and not force_round_robin:
+            print(f"⚠️ Key {original_key_short} has {current_recent_calls}/10 calls in last minute - proactively rotating")
+            force_round_robin = False  # Use smart rotation to find best key
         
         if force_round_robin:
-            # Simple round-robin rotation
-            self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+            # Round-robin but skip rate-limited keys
+            attempts = 0
+            while attempts < len(self.api_keys):
+                self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
+                key_short = self.api_keys[self.current_key_index][:10] + '...'
+                recent_calls = self.get_recent_call_count(self.current_key_index)
+                
+                # Skip if rate limited or too many recent calls
+                if not self.key_rate_limited[key_short] and recent_calls < 8:
+                    break
+                attempts += 1
         else:
-            # Smart rotation: find the healthiest key
-            self.current_key_index = self.get_best_key_index()
+            # Smart rotation: find the healthiest key with fewest recent calls
+            best_index = self.get_best_key_index()
+            self.current_key_index = best_index
         
-        # If we found a rate-limited key, try round-robin as fallback
+        # Final check: if selected key is still problematic, find any available key
         key_short = self.api_keys[self.current_key_index][:10] + '...'
-        if self.key_rate_limited[key_short]:
-            limit_time = self.key_rate_limit_time[key_short]
-            if limit_time:
-                time_since_limit = (datetime.now() - limit_time).total_seconds()
-                if time_since_limit < self.rate_limit_cooldown:
-                    # Still rate limited, try round-robin
-                    self.current_key_index = (original_index + 1) % len(self.api_keys)
-                    key_short = self.api_keys[self.current_key_index][:10] + '...'
+        recent_calls = self.get_recent_call_count(self.current_key_index)
+        
+        if self.key_rate_limited[key_short] or recent_calls >= 8:
+            # Emergency: find ANY key that's available
+            for i in range(len(self.api_keys)):
+                test_key_short = self.api_keys[i][:10] + '...'
+                test_recent = self.get_recent_call_count(i)
+                if not self.key_rate_limited[test_key_short] and test_recent < 8:
+                    self.current_key_index = i
+                    key_short = test_key_short
+                    recent_calls = test_recent
+                    break
         
         # Reset call counter for new key
         self.current_key_calls = 0
-        old_key = self.api_keys[original_index][:10] + '...'
         
         if original_index != self.current_key_index:
-            print(f"🔄 Rotated from key {old_key} to key {key_short} (smart rotation)")
+            print(f"🔄 Rotated from key {original_key_short} ({self.get_recent_call_count(original_index)} recent) to key {key_short} ({recent_calls} recent)")
         
         return self.api_keys[self.current_key_index]
     
@@ -225,9 +300,20 @@ class GeminiKeyManager:
         self.key_usage_count[key_short] = self.key_usage_count.get(key_short, 0) + 1
         self.current_key_calls += 1
         
-        # Proactive rotation: rotate after N calls to distribute load evenly
-        if len(self.api_keys) > 1 and self.current_key_calls >= self.calls_per_key:
-            self.rotate_key()
+        # Check recent calls for this key
+        key_index = self.api_keys.index(key) if key in self.api_keys else self.current_key_index
+        recent_calls = self.get_recent_call_count(key_index)
+        
+        # Proactive rotation strategies:
+        # 1. If key has 6+ calls in last minute, rotate immediately
+        # 2. Otherwise, rotate after N calls to distribute load
+        if len(self.api_keys) > 1:
+            if recent_calls >= 6:
+                print(f"🔄 Key {key_short} has {recent_calls} recent calls - rotating proactively")
+                self.rotate_key()
+            elif self.current_key_calls >= self.calls_per_key:
+                # Normal rotation after N calls
+                self.rotate_key()
     
     def get_usage_stats(self):
         """Get comprehensive usage statistics for all keys"""
@@ -361,7 +447,7 @@ class GeminiKeyManager:
         # All keys exhausted
         raise Exception("All API keys exhausted. Please wait before trying again.")
 
-# Initialize key manager
+# Initialize key manager (all keys used for all operations)
 gemini_key_manager = GeminiKeyManager(GEMINI_API_KEYS)
 
 # Configure with first key
@@ -437,49 +523,106 @@ AI_CACHE_TTL = 3600  # Cache responses for 1 hour
 # Hash for data change detection (skip unnecessary syncs)
 last_data_hash = None
 
-async def check_rate_limit():
+async def check_rate_limit(key_manager=None, api_calls_dict=None):
     """Check if we can make a Gemini API call without hitting rate limit
-    Note: With key rotation, we check the current key's usage"""
-    current_key = gemini_key_manager.get_current_key()
+    Proactively rotates to best key before hitting limits
+    
+    Args:
+        key_manager: The GeminiKeyManager to use (defaults to gemini_key_manager for backward compatibility)
+        api_calls_dict: Dictionary tracking API calls per key (defaults to gemini_api_calls_by_key)
+    """
+    if key_manager is None:
+        key_manager = gemini_key_manager
+    if api_calls_dict is None:
+        api_calls_dict = gemini_api_calls_by_key
+    
+    current_key = key_manager.get_current_key()
     key_short = current_key[:10] + '...'
     
-    if key_short not in gemini_api_calls_by_key:
-        gemini_api_calls_by_key[key_short] = deque(maxlen=100)
+    if key_short not in api_calls_dict:
+        api_calls_dict[key_short] = deque(maxlen=100)
     
-    api_calls = gemini_api_calls_by_key[key_short]
+    api_calls = api_calls_dict[key_short]
     now = datetime.now()
     
     # Remove calls older than 1 minute
     while api_calls and (now - api_calls[0]).total_seconds() > 60:
         api_calls.popleft()
     
-    # Check if we're at the limit (10 per minute per key)
-    if len(api_calls) >= 10:
-        # Try next key if available
-        next_key = gemini_key_manager.get_next_key()
-        if next_key != current_key:
-            print(f"⚠️ Current key at rate limit, rotating to next key...")
-            return True  # Can proceed with next key
+    recent_count = len(api_calls)
+    
+    # Proactive rotation: if we're at 7+ calls, rotate to a better key
+    if recent_count >= 7:
+        print(f"⚠️ Key {key_short} has {recent_count}/10 calls - proactively rotating to better key")
+        key_manager.rotate_key()
+        new_key = key_manager.get_current_key()
+        new_key_short = new_key[:10] + '...'
+        
+        # Check the new key
+        if new_key_short not in api_calls_dict:
+            api_calls_dict[new_key_short] = deque(maxlen=100)
+        new_api_calls = api_calls_dict[new_key_short]
+        
+        # Clean old calls
+        while new_api_calls and (now - new_api_calls[0]).total_seconds() > 60:
+            new_api_calls.popleft()
+        
+        new_recent_count = len(new_api_calls)
+        
+        if new_recent_count >= 10:
+            # All keys are at limit, must wait
+            if new_api_calls:
+                oldest_call = new_api_calls[0]
+                wait_time = 60 - (now - oldest_call).total_seconds()
+                print(f"⚠️ ALL KEYS AT LIMIT: {new_recent_count}/10 calls. Waiting {wait_time:.1f}s...")
+                return False
+            return True
         else:
+            print(f"✓ Rotated to key {new_key_short} with {new_recent_count}/10 calls")
+            return True
+    
+    # Check if we're at the hard limit (10 per minute per key)
+    if recent_count >= 10:
+        # Try rotating to a better key
+        key_manager.rotate_key()
+        new_key = key_manager.get_current_key()
+        new_key_short = new_key[:10] + '...'
+        
+        if new_key_short != key_short:
+            print(f"⚠️ Key {key_short} at limit ({recent_count}/10), rotated to {new_key_short}")
+            return True  # Can proceed with new key
+        else:
+            # No better key available, must wait
             oldest_call = api_calls[0]
             wait_time = 60 - (now - oldest_call).total_seconds()
-            print(f"⚠️ RATE LIMIT: {len(api_calls)}/10 API calls in last minute. Waiting {wait_time:.1f}s...")
+            print(f"⚠️ RATE LIMIT: {recent_count}/10 API calls in last minute. Waiting {wait_time:.1f}s...")
             return False
+    
     return True
 
-def track_api_call():
-    """Track that we made a Gemini API call"""
-    current_key = gemini_key_manager.get_current_key()
+def track_api_call(key_manager=None, api_calls_dict=None):
+    """Track that we made a Gemini API call
+    
+    Args:
+        key_manager: The GeminiKeyManager to use (defaults to gemini_key_manager for backward compatibility)
+        api_calls_dict: Dictionary tracking API calls per key (defaults to gemini_api_calls_by_key)
+    """
+    if key_manager is None:
+        key_manager = gemini_key_manager
+    if api_calls_dict is None:
+        api_calls_dict = gemini_api_calls_by_key
+    
+    current_key = key_manager.get_current_key()
     key_short = current_key[:10] + '...'
     
-    if key_short not in gemini_api_calls_by_key:
-        gemini_api_calls_by_key[key_short] = deque(maxlen=100)
+    if key_short not in api_calls_dict:
+        api_calls_dict[key_short] = deque(maxlen=100)
     
-    gemini_api_calls_by_key[key_short].append(datetime.now())
-    usage_stats = gemini_key_manager.get_usage_stats()
-    total_keys = len(gemini_key_manager.api_keys)
-    current_index = gemini_key_manager.current_key_index
-    print(f"📊 Using key {key_short} ({current_index + 1}/{total_keys}) | Calls on this key: {gemini_key_manager.current_key_calls}/{gemini_key_manager.calls_per_key} | Total usage: {usage_stats}")
+    api_calls_dict[key_short].append(datetime.now())
+    usage_stats = key_manager.get_usage_stats()
+    total_keys = len(key_manager.api_keys)
+    current_index = key_manager.current_key_index
+    print(f"📊 Using key {key_short} ({current_index + 1}/{total_keys}) | Calls on this key: {key_manager.current_key_calls}/{key_manager.calls_per_key} | Total usage: {usage_stats}")
 
 # --- SATISFACTION ANALYSIS TIMERS ---
 # Track pending satisfaction analysis tasks per thread
@@ -1679,9 +1822,22 @@ async def download_images_for_gemini(attachments):
         return None
 
 async def generate_ai_response(query, context_entries, image_parts=None):
-    """Generate an AI response using Gemini API with knowledge base context - SIMPLIFIED"""
+    """Generate an AI response using Gemini API with knowledge base context - SIMPLIFIED
+    
+    Args:
+        query: The user's question
+        context_entries: Relevant RAG entries to use as context
+        image_parts: Optional images to include
+    """
     from datetime import datetime
     import hashlib
+    
+    # Use the main key manager (all keys available for all operations)
+    key_manager = gemini_key_manager
+    api_calls_dict = gemini_api_calls_by_key
+    
+    if not key_manager:
+        raise Exception("No key manager available")
     
     # Check cache first (skip if images provided)
     if not image_parts:
@@ -1721,8 +1877,24 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     else:
         print(f"⚠️ No knowledge base entries provided - using AI general knowledge")
     
+    # Check rate limit before making API call
+    if not await check_rate_limit(key_manager, api_calls_dict):
+        print(f"⚠️ Rate limit reached, waiting before generating response...")
+        # Wait for rate limit to clear
+        current_key = key_manager.get_current_key()
+        key_short = current_key[:10] + '...'
+        api_calls = api_calls_dict.get(key_short, deque())
+        if api_calls:
+            oldest_call = api_calls[0]
+            wait_time = 60 - (datetime.now() - oldest_call).total_seconds()
+            if wait_time > 0:
+                print(f"   Waiting {wait_time:.1f}s for rate limit to clear...")
+                await asyncio.sleep(wait_time)
+        # Try rotating to a different key
+        key_manager.rotate_key(force_round_robin=True)
+    
     # Use key manager for automatic rotation
-    current_key = gemini_key_manager.get_current_key()
+    current_key = key_manager.get_current_key()
     print(f"🤖 Generating AI response with key {current_key[:15]}...")
     
     for model_name in models_to_try:
@@ -1735,7 +1907,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             model_error = None
             
             try:
-                model = gemini_key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
+                model = key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
                 print(f"   ✓ Model created with system_instruction")
             except Exception as e:
                 error_str = str(e).lower()
@@ -1745,7 +1917,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
                     print(f"   ❌ API KEY IS LEAKED/INVALID!")
                     print(f"   📝 You MUST get a NEW key: https://aistudio.google.com/app/apikey")
-                    print(f"   Then update GEMINI_API_KEY in your .env file and restart the bot")
+                    print(f"   Then update GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6 in your .env file and restart the bot")
                     print(f"   Full error: {str(e)}")
                     raise  # Re-raise to stop trying other models
                 
@@ -1753,7 +1925,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ Failed with system_instruction: {str(e)[:150]}")
                 print(f"   Trying without system_instruction...")
                 try:
-                    model = gemini_key_manager.create_model_with_retry(model_name)
+                    model = key_manager.create_model_with_retry(model_name)
                     print(f"   ✓ Model created without system_instruction")
                 except Exception as e2:
                     print(f"   ❌ Also failed without system_instruction: {str(e2)[:150]}")
@@ -1772,9 +1944,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             user_context = build_user_context(query, context_entries)
             
             # Generate response - log which key is being used
-            current_key = gemini_key_manager.get_current_key()
+            current_key = key_manager.get_current_key()
             key_short = current_key[:15] + '...'
-            print(f"💬 Calling Gemini API with key {key_short} and model {model_name}...")
+            print(f"💬 Calling Gemini API with {key_type} key {key_short} and model {model_name}...")
+            
+            # Track the API call BEFORE making it to prevent race conditions
+            # This ensures concurrent requests see the updated count immediately
+            track_api_call(key_manager, api_calls_dict)
+            
             loop = asyncio.get_event_loop()
             
             # Define function outside lambda to avoid closure issues
@@ -1787,10 +1964,9 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             )
             
             # SUCCESS! Get response text
-            track_api_call()
             
             # Mark the current key as successful (API call succeeded)
-            gemini_key_manager.mark_key_success(current_key)
+            key_manager.mark_key_success(current_key)
             print(f"✅ API call succeeded with key {key_short}")
             
             # Check if response has text attribute
@@ -1826,14 +2002,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 
         except asyncio.TimeoutError:
             # Mark timeout as error for current key
-            current_key = gemini_key_manager.get_current_key()
-            gemini_key_manager.mark_key_error(current_key, is_rate_limit=False)
+            current_key = key_manager.get_current_key()
+            key_manager.mark_key_error(current_key, is_rate_limit=False)
             print(f"   ⚠️ Timeout with '{model_name}', trying next model...")
             continue
         except Exception as e:
             error_msg = str(e).lower()
             error_type = type(e).__name__
-            current_key = gemini_key_manager.get_current_key()
+            current_key = key_manager.get_current_key()
             
             print(f"   ❌ '{model_name}' failed: {error_type}: {str(e)[:200]}")
             
@@ -1848,12 +2024,12 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 continue
             elif 'quota' in error_msg or 'rate limit' in error_msg or '429' in error_msg or 'resource exhausted' in error_msg:
                 # Rate limit error - mark and rotate
-                gemini_key_manager.mark_key_error(current_key, is_rate_limit=True)
+                key_manager.mark_key_error(current_key, is_rate_limit=True)
                 print(f"   ⚠️ Rate limit detected, will try next key/model...")
                 continue
             elif 'api key' in error_msg or 'auth' in error_msg or '403' in error_msg or 'permission denied' in error_msg or 'leaked' in error_msg:
                 # API key error - mark as error
-                gemini_key_manager.mark_key_error(current_key, is_rate_limit=False)
+                key_manager.mark_key_error(current_key, is_rate_limit=False)
                 print(f"   ❌ API KEY ERROR!")
                 if 'leaked' in error_msg:
                     print(f"   ⚠️ Your API key was reported as leaked. You need to generate a NEW API key.")
@@ -1861,7 +2037,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                     print(f"      1. Go to https://aistudio.google.com/app/apikey")
                     print(f"      2. Delete the old key (if visible)")
                     print(f"      3. Create a NEW API key")
-                    print(f"      4. Update GEMINI_API_KEY in your .env file")
+                    print(f"      4. Update GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6 in your .env file")
                     print(f"      5. Restart the bot")
                 else:
                     print(f"   Check your key at https://aistudio.google.com/")
@@ -1870,7 +2046,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 continue
             else:
                 # Other error - mark it but try next model
-                gemini_key_manager.mark_key_error(current_key, is_rate_limit=False)
+                key_manager.mark_key_error(current_key, is_rate_limit=False)
                 print(f"   ⚠️ Unknown error type, trying next model...")
                 continue
     
@@ -1879,9 +2055,9 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     print(f"❌ ALL MODELS FAILED!")
     print(f"{'='*60}")
     try:
-        current_key_short = gemini_key_manager.get_current_key()[:20] if gemini_key_manager.get_current_key() else "N/A"
-        total_keys = len(gemini_key_manager.api_keys)
-        usage_stats = gemini_key_manager.get_usage_stats()
+        current_key_short = key_manager.get_current_key()[:20] if key_manager.get_current_key() else "N/A"
+        total_keys = len(key_manager.api_keys)
+        usage_stats = key_manager.get_usage_stats()
         
         print(f"   Total API keys loaded: {total_keys}")
         print(f"   Current key: {current_key_short}...")
@@ -1908,7 +2084,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     # Try one final direct test to see if API works at all
     try:
         print("🔍 Running final diagnostic test...")
-        test_key = gemini_key_manager.get_current_key()
+        test_key = key_manager.get_current_key()
         genai.configure(api_key=test_key)
         test_model = genai.GenerativeModel('gemini-2.5-flash')
         test_response = test_model.generate_content("Say hello")
@@ -5000,9 +5176,20 @@ async def status(interaction: discord.Interaction):
             calls_for_key = len(gemini_api_calls_by_key.get(key_short, deque()))
             success_rate = stats.get('success_rate', 0)
             health = stats.get('health_score', 0)
-            rate_limited = "🔴" if stats.get('rate_limited', False) else "🟢"
+            is_rate_limited = stats.get('rate_limited', False)
             
-            key_stats_text += f"{rate_limited} {key_short}:\n"
+            # Determine status indicator based on health score and rate limit status
+            # Health score > 50: good, 0-50: warning, < 0: poor
+            if is_rate_limited:
+                status_icon = "🔴"  # Red for rate limited
+            elif health > 50:
+                status_icon = "🟢"  # Green for good health
+            elif health > 0:
+                status_icon = "🟡"  # Yellow for warning
+            else:
+                status_icon = "🔴"  # Red for poor health
+            
+            key_stats_text += f"{status_icon} {key_short}:\n"
             key_stats_text += f"  {calls_for_key}/10 calls, {success_rate:.0f}% success\n"
             key_stats_text += f"  Health: {health:.0f}\n"
         
@@ -5192,17 +5379,29 @@ async def check_api_keys(interaction: discord.Interaction):
             errors = stats.get('errors', 0)
             success_rate = stats.get('success_rate', 0)
             health_score = stats.get('health_score', 0)
-            rate_limited = "🔴 RATE LIMITED" if stats.get('rate_limited', False) else "🟢 Active"
+            is_rate_limited = stats.get('rate_limited', False)
             
             # Get recent calls from rate limit tracker
             recent_calls = len(gemini_api_calls_by_key.get(key_short, deque()))
             
-            status_icon = "✅" if success_rate > 80 else "⚠️" if success_rate > 50 else "❌"
+            # Determine status based on health score and rate limit
+            if is_rate_limited:
+                status_text = "🔴 RATE LIMITED"
+                status_icon = "🔴"
+            elif health_score > 50:
+                status_text = "🟢 Active (Healthy)"
+                status_icon = "✅"
+            elif health_score > 0:
+                status_text = "🟡 Active (Warning)"
+                status_icon = "⚠️"
+            else:
+                status_text = "🔴 Active (Poor Health)"
+                status_icon = "❌"
             
             key_embed.add_field(
                 name=f"{status_icon} Key {i}: {key_short}",
                 value=(
-                    f"**Status:** {rate_limited}\n"
+                    f"**Status:** {status_text}\n"
                     f"**Total Calls:** {total_calls} ({recent_calls} in last min)\n"
                     f"**Success Rate:** {success_rate:.1f}% ({success_calls} success, {errors} errors)\n"
                     f"**Health Score:** {health_score:.0f}"
@@ -5441,7 +5640,7 @@ def is_friend_server(interaction: discord.Interaction) -> bool:
 async def ask(interaction: discord.Interaction, question: str):
     """Query the RAG knowledge base - available to everyone on friends server, staff only on main server"""
     try:
-        # On friend's server, allow everyone to use /ask but with 1 minute cooldown
+        # On friend's server, allow everyone to use /ask but with 10 minute cooldown
         # On other servers, require staff role or admin (no cooldown)
         if is_friend_server(interaction):
             # Check cooldown for friends server BEFORE deferring
@@ -5449,13 +5648,21 @@ async def ask(interaction: discord.Interaction, question: str):
             current_time = datetime.now().timestamp()
             if user_id in ask_cooldowns:
                 time_since_last_use = current_time - ask_cooldowns[user_id]
-                cooldown_seconds = 60  # 1 minute cooldown
+                cooldown_seconds = 600  # 10 minute cooldown
                 if time_since_last_use < cooldown_seconds:
                     remaining = int(cooldown_seconds - time_since_last_use)
-                    await interaction.response.send_message(
-                        f"⏳ Please wait {remaining} second(s) before using /ask again.",
-                        ephemeral=True
-                    )
+                    remaining_minutes = remaining // 60
+                    remaining_secs = remaining % 60
+                    if remaining_minutes > 0:
+                        await interaction.response.send_message(
+                            f"⏳ Please wait {remaining_minutes} minute(s) and {remaining_secs} second(s) before using /ask again.",
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.response.send_message(
+                            f"⏳ Please wait {remaining} second(s) before using /ask again.",
+                            ephemeral=True
+                        )
                     return
             # Update cooldown
             ask_cooldowns[user_id] = current_time
