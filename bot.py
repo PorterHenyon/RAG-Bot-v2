@@ -11,6 +11,9 @@ from discord.ext import tasks
 import google.generativeai as genai
 from dotenv import load_dotenv
 import aiohttp
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # --- Configuration ---
 load_dotenv()
@@ -528,6 +531,61 @@ LEADERBOARD_DATA = {
     'scores': {}  # {user_id: {'username': 'Name', 'solved_count': 5, 'avatar_url': 'https://...'}}
 }
 
+# --- VECTOR EMBEDDINGS FOR RAG ---
+# Initialize embedding model (lazy load on first use)
+_embedding_model = None
+_rag_embeddings = {}  # {entry_id: embedding_vector}
+_rag_embeddings_version = 0  # Increment when RAG database changes
+
+def get_embedding_model():
+    """Lazy load the embedding model"""
+    global _embedding_model
+    if _embedding_model is None:
+        print("🔧 Loading embedding model for vector search...")
+        try:
+            # Use a lightweight, fast model for embeddings
+            _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            print("✅ Embedding model loaded")
+        except Exception as e:
+            print(f"⚠️ Failed to load embedding model: {e}")
+            print("   Falling back to keyword-based search")
+            return None
+    return _embedding_model
+
+def compute_rag_embeddings():
+    """Compute embeddings for all RAG entries (called when RAG database updates)"""
+    global _rag_embeddings, _rag_embeddings_version
+    
+    model = get_embedding_model()
+    if model is None:
+        return
+    
+    print(f"🔄 Computing embeddings for {len(RAG_DATABASE)} RAG entries...")
+    _rag_embeddings = {}
+    
+    for entry in RAG_DATABASE:
+        entry_id = entry.get('id', '')
+        if not entry_id:
+            continue
+        
+        # Combine title, content, and keywords for embedding
+        title = entry.get('title', '')
+        content = entry.get('content', '')
+        keywords = ' '.join(entry.get('keywords', []))
+        
+        # Create a combined text for embedding
+        combined_text = f"{title}\n{keywords}\n{content[:500]}"  # Limit content to avoid huge embeddings
+        
+        try:
+            embedding = model.encode(combined_text, convert_to_numpy=True)
+            _rag_embeddings[entry_id] = embedding
+        except Exception as e:
+            print(f"⚠️ Failed to compute embedding for entry {entry_id}: {e}")
+            continue
+    
+    _rag_embeddings_version += 1
+    print(f"✅ Computed {len(_rag_embeddings)} embeddings (version {_rag_embeddings_version})")
+
 # Cooldown tracking for /ask command on friends server (1 minute cooldown)
 ask_cooldowns = {}  # {user_id: last_used_timestamp}
 
@@ -547,6 +605,7 @@ BOT_SETTINGS = {
     'solved_post_retention_days': 30,  # Days to keep solved/closed posts before deletion
     'unsolved_tag_id': None,  # Discord tag ID for "Unsolved" posts
     'resolved_tag_id': None,  # Discord tag ID for "Resolved" posts
+    'issue_type_tag_ids': {},  # Map issue types to Discord tag IDs (e.g., {'Bug/Error': '123456789'})
     'auto_rag_enabled': True,  # Auto-create RAG entries from solved threads
     'support_notification_channel_id': '1436918674069000212',  # Channel ID for high priority notifications (string to prevent JS precision loss)
     'support_role_id': None,  # Support role ID to ping (optional)
@@ -1245,7 +1304,17 @@ def load_bot_settings():
     return True
 
 async def save_bot_settings_to_api():
-    """Save bot settings to API (persists across deployments)"""
+    """Save bot settings to API (persists across deployments)
+    
+    This saves ALL bot settings including:
+    - Tag IDs (issue_type_tag_ids, user_issue_tag_id, bug_tag_id, crash_tag_id, rdp_tag_id)
+    - Forum channel IDs
+    - AI settings (temperature, max_tokens)
+    - Notification settings
+    - All other BOT_SETTINGS
+    
+    Settings are persisted in Vercel KV/Redis and survive bot restarts.
+    """
     try:
         if 'your-vercel-app' in DATA_API_URL:
             print("⚠ API not configured, cannot save settings")
@@ -1292,10 +1361,13 @@ async def save_bot_settings_to_api():
                 }
                 async with session.post(DATA_API_URL, json=current_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
                     if save_response.status == 200:
-                        print(f"✅ Saved bot settings to API (persisted)")
+                        print(f"✅ Saved bot settings to API (persisted to Vercel KV/Redis)")
+                        print(f"   Saved settings: {list(BOT_SETTINGS.keys())}")
                         return True
                     else:
-                        print(f"⚠ Failed to save settings to API: {save_response.status}")
+                        error_text = await save_response.text()
+                        print(f"⚠ Failed to save bot settings: Status {save_response.status}")
+                        print(f"   Error: {error_text[:200]}")
                         return False
     except Exception as e:
         print(f"⚠ Error saving bot settings to API: {e}")
@@ -1371,6 +1443,14 @@ async def fetch_data_from_api():
                     AUTO_RESPONSES = new_auto
                     LEADERBOARD_DATA = new_leaderboard
                     last_data_hash = current_hash
+                    
+                    # Recompute embeddings when RAG database changes
+                    if rag_changed:
+                        compute_rag_embeddings()
+                    elif len(RAG_DATABASE) > 0 and not _rag_embeddings:
+                        # Compute embeddings on first load if we have RAG entries but no embeddings yet
+                        print("🔄 Computing initial embeddings for RAG database...")
+                        compute_rag_embeddings()
                     
                     # Update system prompt if available
                     if new_settings and 'systemPrompt' in new_settings:
@@ -1612,6 +1692,67 @@ def classify_issue(question: str) -> str:
     # Default to 'Other' if no pattern matches
     return 'Other'
 
+async def apply_issue_type_tag(thread, issue_type):
+    """Apply a Discord forum tag based on issue type using configured tag IDs (only bot/mods can add tags)"""
+    try:
+        # Get the parent forum channel
+        if not hasattr(thread, 'parent') or not thread.parent:
+            print(f"⚠ Could not get parent channel for thread {thread.id}")
+            return
+        
+        parent_channel = thread.parent
+        if not isinstance(parent_channel, discord.ForumChannel):
+            print(f"⚠ Parent channel is not a ForumChannel")
+            return
+        
+        # Get tag IDs from bot settings
+        tag_ids = BOT_SETTINGS.get('issue_type_tag_ids', {})
+        tag_id = tag_ids.get(issue_type)
+        
+        if not tag_id:
+            print(f"⚠ No tag ID configured for issue type '{issue_type}'. Use /set_tag_id to configure.")
+            return
+        
+        # Get available tags from the forum channel
+        available_tags = parent_channel.available_tags
+        
+        # Find tag by ID
+        matching_tag = None
+        try:
+            tag_id_int = int(tag_id)
+            for tag in available_tags:
+                if tag.id == tag_id_int:
+                    matching_tag = tag
+                    break
+        except (ValueError, TypeError):
+            print(f"⚠ Invalid tag ID '{tag_id}' for issue type '{issue_type}'. Tag ID must be a number.")
+            return
+        
+        if matching_tag:
+            # Get current applied tags
+            current_tags = list(thread.applied_tags) if hasattr(thread, 'applied_tags') and thread.applied_tags else []
+            
+            # Check if tag is already applied
+            if matching_tag not in current_tags:
+                # Add the tag
+                current_tags.append(matching_tag)
+                try:
+                    await thread.edit(applied_tags=current_tags)
+                    print(f"✓ Applied tag '{matching_tag.name}' (ID: {matching_tag.id}) to thread {thread.id} for issue type '{issue_type}'")
+                except discord.errors.Forbidden:
+                    print(f"⚠ Bot doesn't have permission to edit tags on thread {thread.id}")
+                except Exception as e:
+                    print(f"⚠ Could not apply tag: {e}")
+            else:
+                print(f"ℹ Tag '{matching_tag.name}' already applied to thread {thread.id}")
+        else:
+            print(f"⚠ Tag ID {tag_id} not found in forum channel. Available tags: {[(t.id, t.name) for t in available_tags]}")
+            print(f"   Use /list_forum_tags to see available tag IDs, then use /set_tag_id to configure.")
+    except Exception as e:
+        print(f"⚠ Error applying issue type tag: {e}")
+        import traceback
+        traceback.print_exc()
+
 async def remove_support_notification(thread_id):
     """Remove support notification message when issue is classified"""
     if thread_id in support_notification_messages:
@@ -1690,25 +1831,87 @@ def get_auto_response(query: str) -> str | None:
     
     return None
 
-def find_relevant_rag_entries(query, db=RAG_DATABASE):
-    """Find relevant RAG entries with improved scoring algorithm"""
-    # Keep ALL words, including short ones (vpn, api, etc.)
+def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_threshold=0.3):
+    """Find relevant RAG entries using vector similarity search (proper RAG with embeddings)
+    
+    Args:
+        query: User's question
+        db: RAG database to search (defaults to RAG_DATABASE)
+        top_k: Number of top results to return
+        similarity_threshold: Minimum cosine similarity score (0.0-1.0)
+    
+    Returns:
+        List of relevant RAG entries sorted by similarity
+    """
+    model = get_embedding_model()
+    
+    # Fallback to keyword search if embeddings not available
+    if model is None or not _rag_embeddings:
+        print("⚠️ Using keyword-based search (embeddings not available)")
+        return find_relevant_rag_entries_keyword(query, db)
+    
+    try:
+        # Compute query embedding
+        query_embedding = model.encode(query, convert_to_numpy=True)
+        query_embedding = query_embedding.reshape(1, -1)
+        
+        # Compute similarities with all RAG entries
+        similarities = []
+        for entry in db:
+            entry_id = entry.get('id', '')
+            if entry_id not in _rag_embeddings:
+                continue
+            
+            entry_embedding = _rag_embeddings[entry_id].reshape(1, -1)
+            similarity = cosine_similarity(query_embedding, entry_embedding)[0][0]
+            
+            if similarity >= similarity_threshold:
+                similarities.append({
+                    'entry': entry,
+                    'similarity': float(similarity)
+                })
+        
+        # Sort by similarity (highest first)
+        similarities.sort(key=lambda x: x['similarity'], reverse=True)
+        
+        # Return top_k results
+        results = similarities[:top_k]
+        
+        # Log for debugging
+        if results:
+            top_similarity = results[0]['similarity']
+            print(f"🔍 Vector search: Found {len(results)} relevant entries (top similarity: {top_similarity:.3f})")
+            for item in results[:3]:
+                entry_title = item['entry'].get('title', 'Unknown')
+                print(f"   - '{entry_title}' (similarity: {item['similarity']:.3f})")
+        else:
+            print(f"⚠️ No RAG entries found above similarity threshold {similarity_threshold}")
+            print(f"   Total RAG entries in database: {len(db)}")
+            print(f"   Total entries with embeddings: {len(_rag_embeddings)}")
+        
+        return [item['entry'] for item in results]
+    
+    except Exception as e:
+        print(f"⚠️ Error in vector search: {e}")
+        import traceback
+        traceback.print_exc()
+        # Fallback to keyword search
+        print("   Falling back to keyword-based search")
+        return find_relevant_rag_entries_keyword(query, db)
+
+def find_relevant_rag_entries_keyword(query, db=RAG_DATABASE):
+    """Fallback keyword-based search (used when embeddings unavailable)"""
     query_words = set(query.lower().split())
-    # Remove ONLY very common/meaningless words
     stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
     query_words = {word for word in query_words if word not in stopwords}
-    
+
     scored_entries = []
     for entry in db:
         score = 0
         entry_title = entry.get('title', '').lower()
         entry_content = entry.get('content', '').lower()
         entry_keywords = ' '.join(entry.get('keywords', [])).lower()
-        
-        # Weighted scoring (same as dashboard):
-        # - Title match: 5 points (highest priority)
-        # - Keyword match: 3 points (high priority)
-        # - Content match: 1 point (lower priority)
+
         for word in query_words:
             if word in entry_title:
                 score += 5
@@ -1716,25 +1919,16 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE):
                 score += 3
             if word in entry_content:
                 score += 1
-        
+
         if score > 0:
             scored_entries.append({'entry': entry, 'score': score})
-    
-    # Sort by score (highest first) and filter out very low scores
+
     scored_entries.sort(key=lambda x: x['score'], reverse=True)
     
-    # Log for debugging
     if scored_entries:
-        top_score = scored_entries[0]['score']
-        print(f"📊 Found {len(scored_entries)} relevant RAG entries (top score: {top_score})")
-        for item in scored_entries[:3]:  # Log top 3
-            entry_title = item['entry'].get('title', 'Unknown')
-            print(f"   - '{entry_title}' (score: {item['score']})")
-    else:
-        print(f"⚠ No RAG entries matched query: '{query[:50]}...'")
-        print(f"   Total RAG entries in database: {len(db)}")
+        print(f"📊 Keyword search: Found {len(scored_entries)} relevant entries (top score: {scored_entries[0]['score']})")
     
-    return [item['entry'] for item in scored_entries]
+    return [item['entry'] for item in scored_entries[:5]]
 
 SYSTEM_PROMPT = (
     "You are Revolution Macro support bot for Bee Swarm Simulator (BSS). You are an expert on BSS game mechanics and Revolution Macro automation.\n\n"
@@ -2046,12 +2240,23 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 ai_response_cache[cache_key] = (response_text, datetime.now())
                 print(f"✓ Cached AI response (cache size: {len(ai_response_cache)})")
                 
-                # Clean old cache entries if cache gets too large
+                # Clean old cache entries if cache gets too large (prevent memory leaks)
                 if len(ai_response_cache) > 100:
                     sorted_cache = sorted(ai_response_cache.items(), key=lambda x: x[1][1])
                     for old_key, _ in sorted_cache[:20]:
                         del ai_response_cache[old_key]
                     print(f"✓ Cleaned cache (now {len(ai_response_cache)} entries)")
+                
+                # Also clean expired entries periodically (prevent memory leaks)
+                current_time = datetime.now()
+                expired_keys = [
+                    key for key, (_, timestamp) in ai_response_cache.items()
+                    if (current_time - timestamp).total_seconds() > AI_CACHE_TTL
+                ]
+                for key in expired_keys:
+                    del ai_response_cache[key]
+                if expired_keys:
+                    print(f"✓ Cleaned {len(expired_keys)} expired cache entries")
             
             # Success!
             print(f"✅ SUCCESS! Got {len(response_text)} character response from '{model_name}'")
@@ -2403,30 +2608,119 @@ async def before_sync_task():
 # --- BOT EVENTS ---
 @tasks.loop(hours=6)  # Run every 6 hours
 async def cleanup_processed_threads():
-    """Background task to clean up old entries from processed_threads and thread_images to prevent memory leak"""
+    """Clean up old processed threads and prevent memory leaks"""
+    global processed_threads, support_notification_messages, thread_images, thread_response_type, not_solved_retry_count
+    global satisfaction_timers, escalated_threads, no_review_threads, processing_threads, ask_cooldowns
+    
     try:
         now = datetime.now()
-        # Remove entries older than 7 days
-        cutoff_time = 7 * 24 * 3600  # 7 days in seconds
-        threads_to_remove = [
+        cleanup_count = 0
+        
+        # Clean up processed_threads older than 48 hours
+        old_threads = [
             thread_id for thread_id, timestamp in processed_threads.items()
-            if (now - timestamp).total_seconds() > cutoff_time
+            if (now - timestamp).total_seconds() > 172800  # 48 hours
         ]
-        for thread_id in threads_to_remove:
+        for thread_id in old_threads:
             del processed_threads[thread_id]
-            # Also clean up stored images
-            if thread_id in thread_images:
-                # Close PIL images before deleting to free memory
-                for img in thread_images[thread_id]:
-                    try:
+            cleanup_count += 1
+        
+        # Clean up support_notification_messages for threads that no longer exist
+        old_notifications = [
+            thread_id for thread_id in support_notification_messages.keys()
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 172800)
+        ]
+        for thread_id in old_notifications:
+            del support_notification_messages[thread_id]
+            cleanup_count += 1
+        
+        # Clean up thread_images (PIL images can be large)
+        old_images = [
+            thread_id for thread_id in thread_images.keys()
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 86400)  # 24 hours
+        ]
+        for thread_id in old_images:
+            # Close PIL images before deleting to free memory
+            for img in thread_images[thread_id]:
+                try:
+                    if hasattr(img, 'close'):
                         img.close()
-                    except:
-                        pass
-                del thread_images[thread_id]
-        if threads_to_remove:
-            print(f"🧹 Cleaned up {len(threads_to_remove)} old entries from processed_threads and thread_images (kept {len(processed_threads)} recent entries)")
+                except:
+                    pass
+            del thread_images[thread_id]
+            cleanup_count += 1
+        
+        # Clean up other thread tracking dicts
+        old_response_types = [
+            thread_id for thread_id in thread_response_type.keys()
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 172800)
+        ]
+        for thread_id in old_response_types:
+            del thread_response_type[thread_id]
+            cleanup_count += 1
+        
+        old_retry_counts = [
+            thread_id for thread_id in not_solved_retry_count.keys()
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 172800)
+        ]
+        for thread_id in old_retry_counts:
+            del not_solved_retry_count[thread_id]
+            cleanup_count += 1
+        
+        # Clean up satisfaction timers (cancel old tasks)
+        old_timers = [
+            thread_id for thread_id in satisfaction_timers.keys()
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 172800)
+        ]
+        for thread_id in old_timers:
+            timer_task = satisfaction_timers.get(thread_id)
+            if timer_task and not timer_task.done():
+                timer_task.cancel()
+            del satisfaction_timers[thread_id]
+            cleanup_count += 1
+        
+        # Clean up escalated_threads set
+        old_escalated = [
+            thread_id for thread_id in escalated_threads
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 172800)
+        ]
+        for thread_id in old_escalated:
+            escalated_threads.discard(thread_id)
+            cleanup_count += 1
+        
+        # Clean up no_review_threads set
+        old_no_review = [
+            thread_id for thread_id in no_review_threads
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 172800)
+        ]
+        for thread_id in old_no_review:
+            no_review_threads.discard(thread_id)
+            cleanup_count += 1
+        
+        # Clean up processing_threads set (should be empty, but clean up any stuck entries)
+        old_processing = [
+            thread_id for thread_id in processing_threads
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 86400)  # 24 hours
+        ]
+        for thread_id in old_processing:
+            processing_threads.discard(thread_id)
+            cleanup_count += 1
+        
+        # Clean up ask_cooldowns (older than 1 hour)
+        old_cooldowns = [
+            user_id for user_id, timestamp in ask_cooldowns.items()
+            if (now - timestamp).total_seconds() > 3600  # 1 hour
+        ]
+        for user_id in old_cooldowns:
+            del ask_cooldowns[user_id]
+            cleanup_count += 1
+        
+        if cleanup_count > 0:
+            print(f"🧹 Memory cleanup: Removed {len(old_threads)} threads, {len(old_notifications)} notifications, {len(old_images)} images, {len(old_response_types)} response types, {len(old_retry_counts)} retry counts, {len(old_timers)} timers, {len(old_escalated)} escalated, {len(old_no_review)} no_review, {len(old_processing)} processing, {len(old_cooldowns)} cooldowns")
     except Exception as e:
-        print(f"⚠ Error in cleanup_processed_threads task: {e}")
+        print(f"⚠️ Error in cleanup_processed_threads: {e}")
+        import traceback
+        traceback.print_exc()
 
 @tasks.loop(hours=24)  # Run daily
 async def cleanup_old_solved_posts():
@@ -2740,6 +3034,11 @@ async def on_ready():
     # Initial data sync - loads everything into memory from API
     await fetch_data_from_api()
     
+    # Compute initial embeddings if we have RAG entries
+    if len(RAG_DATABASE) > 0 and not _rag_embeddings:
+        print("🔄 Computing initial embeddings for RAG database...")
+        compute_rag_embeddings()
+
     # Start periodic sync
     sync_data_task.start()
     check_leaderboard_reset.start()
@@ -2979,13 +3278,14 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
         async with aiohttp.ClientSession() as session:
             async with session.post(forum_api_url, json=post_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
-                    print(f"✓ Forum post sent to dashboard: '{thread.name}' by {owner_name}")
+                    print(f"✅ Forum post saved to dashboard (persisted to Vercel KV/Redis): '{thread.name}' by {owner_name}")
                 else:
                     text = await response.text()
-                    print(f"⚠ Failed to send forum post to API: Status {response.status}")
+                    print(f"⚠ Failed to save forum post to API: Status {response.status}")
                     print(f"   Response: {text[:200]}")
                     print(f"   API URL: {forum_api_url}")
                     print(f"   Request body: {json.dumps(post_data)[:200]}")
+                    print(f"   ⚠️ Forum post will not persist - check API configuration")
     except aiohttp.ClientError as e:
         print(f"⚠ Network error sending forum post to API: {type(e).__name__}: {str(e)}")
         print(f"   API URL attempted: {forum_api_url}")
@@ -3281,6 +3581,10 @@ async def on_thread_create(thread):
             # Classify issue and remove notification if present
             issue_type = classify_issue(user_question)
             await remove_support_notification(thread_id)
+            
+            # Apply tag to Discord thread based on issue type
+            await apply_issue_type_tag(thread, issue_type)
+            
             # Update forum post with classification
             if 'your-vercel-app' not in DATA_API_URL:
                 try:
@@ -3416,6 +3720,10 @@ async def on_thread_create(thread):
             # Classify issue and remove notification if present
             issue_type = classify_issue(user_question)
             await remove_support_notification(thread_id)
+            
+            # Apply tag to Discord thread based on issue type
+            await apply_issue_type_tag(thread, issue_type)
+            
             # Update forum post with classification
             if 'your-vercel-app' not in DATA_API_URL:
                 try:
@@ -4619,6 +4927,499 @@ async def set_solved_tag_id(interaction: discord.Interaction, tag_id: str):
             await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_solved_tag_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="list_forum_tags", description="List all available tags in the support forum channel (Admin only).")
+async def list_forum_tags(interaction: discord.Interaction):
+    """List all available forum tags with their IDs"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.followup.send(f"❌ Forum channel not found or invalid. Channel ID: {forum_channel_id}", ephemeral=True)
+            return
+        
+        available_tags = forum_channel.available_tags
+        
+        if not available_tags:
+            await interaction.followup.send("⚠️ No tags found in the forum channel. Create tags in the channel settings first.", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="🏷️ Available Forum Tags",
+            description=f"Tags in **{forum_channel.name}**:",
+            color=0x5865F2
+        )
+        
+        tags_text = ""
+        for tag in available_tags:
+            emoji = tag.emoji if tag.emoji else ""
+            tags_text += f"{emoji} **{tag.name}**\n`ID: {tag.id}`\n\n"
+        
+        embed.add_field(name="Tags", value=tags_text[:1024], inline=False)
+        embed.set_footer(text=f"Use /set_tag_id to configure which tag to use for each issue type")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"list_forum_tags command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in list_forum_tags: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_tag_id", description="Set the Discord tag ID for an issue type (Admin only).")
+async def set_tag_id(interaction: discord.Interaction, issue_type: str, tag_id: str):
+    """Set the tag ID for a specific issue type"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    # Valid issue types
+    valid_issue_types = [
+        'Bug/Error', 'Performance', 'Installation/Setup', 'Display/Graphics',
+        'Connection/Network', 'Account/Authentication', 'Feature Request',
+        'Question/Help', 'Macro/Automation', 'Other'
+    ]
+    
+    if issue_type not in valid_issue_types:
+        await interaction.followup.send(
+            f"❌ Invalid issue type. Valid types:\n" + "\n".join(f"• {t}" for t in valid_issue_types),
+            ephemeral=True
+        )
+        return
+    
+    try:
+        # Validate tag ID is a number
+        tag_id_int = int(tag_id)
+        
+        # Verify tag exists in forum channel
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.followup.send(f"❌ Forum channel not found. Channel ID: {forum_channel_id}", ephemeral=True)
+            return
+        
+        available_tags = forum_channel.available_tags
+        tag_found = False
+        tag_name = None
+        
+        for tag in available_tags:
+            if tag.id == tag_id_int:
+                tag_found = True
+                tag_name = tag.name
+                break
+        
+        if not tag_found:
+            await interaction.followup.send(
+                f"❌ Tag ID {tag_id} not found in forum channel.\n"
+                f"Use `/list_forum_tags` to see available tag IDs.",
+                ephemeral=True
+            )
+            return
+        
+        # Initialize issue_type_tag_ids if it doesn't exist
+        if 'issue_type_tag_ids' not in BOT_SETTINGS:
+            BOT_SETTINGS['issue_type_tag_ids'] = {}
+        
+        # Set the tag ID
+        BOT_SETTINGS['issue_type_tag_ids'][issue_type] = str(tag_id_int)
+        
+        # Save to API
+        await save_bot_settings_to_api()
+        
+        embed = discord.Embed(
+            title="✅ Tag ID Set",
+            description=f"Set tag ID for **{issue_type}** to `{tag_id_int}`",
+            color=0x2ECC71
+        )
+        embed.add_field(name="Tag Name", value=tag_name, inline=True)
+        embed.add_field(name="Tag ID", value=str(tag_id_int), inline=True)
+        embed.set_footer(text="The bot will now automatically tag posts with this tag when the issue type is detected.")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"set_tag_id command used by {interaction.user}: {issue_type} -> {tag_id_int}")
+        
+    except ValueError:
+        await interaction.followup.send(f"❌ Invalid tag ID. Tag ID must be a number.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_tag_id: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="list_tag_ids", description="List all configured issue type tag IDs (Admin only).")
+async def list_tag_ids(interaction: discord.Interaction):
+    """List all configured tag IDs for issue types"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        tag_ids = BOT_SETTINGS.get('issue_type_tag_ids', {})
+        
+        # Check if any tags are configured (issue types or special tags)
+        has_special_tags = any([
+            BOT_SETTINGS.get('user_issue_tag_id'),
+            BOT_SETTINGS.get('bug_tag_id'),
+            BOT_SETTINGS.get('crash_tag_id'),
+            BOT_SETTINGS.get('rdp_tag_id')
+        ])
+        
+        if not tag_ids and not has_special_tags:
+            await interaction.followup.send("⚠️ No tag IDs configured. Use `/set_tag_id`, `/set_user_issue_tag_id`, `/set_bug_tag_id`, etc. to configure tags.", ephemeral=True)
+            return
+        
+        embed = discord.Embed(
+            title="🏷️ Configured Tags",
+            description="All configured tag IDs:",
+            color=0x5865F2
+        )
+        
+        # Get forum channel to show tag names
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        available_tags = {}
+        if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+            for tag in forum_channel.available_tags:
+                available_tags[tag.id] = tag.name
+        
+        # Build tags text
+        tags_text = ""
+        
+        # Issue type tags
+        if tag_ids:
+            tags_text += "**Auto-Classified Issue Types:**\n"
+            for issue_type, tag_id_str in tag_ids.items():
+                tag_id_int = int(tag_id_str)
+                tag_name = available_tags.get(tag_id_int, "Unknown")
+                tags_text += f"• **{issue_type}**: `{tag_id_str}` ({tag_name})\n"
+            tags_text += "\n"
+        
+        # Special tags
+        special_tags = []
+        if BOT_SETTINGS.get('user_issue_tag_id'):
+            special_tags.append(("User Issue", BOT_SETTINGS['user_issue_tag_id']))
+        if BOT_SETTINGS.get('bug_tag_id'):
+            special_tags.append(("Bug", BOT_SETTINGS['bug_tag_id']))
+        if BOT_SETTINGS.get('crash_tag_id'):
+            special_tags.append(("Crash", BOT_SETTINGS['crash_tag_id']))
+        if BOT_SETTINGS.get('rdp_tag_id'):
+            special_tags.append(("RDP", BOT_SETTINGS['rdp_tag_id']))
+        
+        if special_tags:
+            tags_text += "**Special Tags:**\n"
+            for tag_name, tag_id_str in special_tags:
+                tag_id_int = int(tag_id_str)
+                discord_tag_name = available_tags.get(tag_id_int, "Unknown")
+                tags_text += f"• **{tag_name}**: `{tag_id_str}` ({discord_tag_name})\n"
+        
+        if not tags_text:
+            tags_text = "No tags configured."
+        
+        embed.add_field(name="Configured Tags", value=tags_text[:1024] or "None", inline=False)
+        embed.set_footer(text="Use /set_tag_id, /set_user_issue_tag_id, /set_bug_tag_id, etc. to configure tags")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"list_tag_ids command used by {interaction.user}")
+        
+    except Exception as e:
+        print(f"Error in list_tag_ids: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="clear_tag_id", description="Clear the tag ID for an issue type (Admin only).")
+async def clear_tag_id(interaction: discord.Interaction, issue_type: str):
+    """Clear the tag ID for a specific issue type"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    tag_ids = BOT_SETTINGS.get('issue_type_tag_ids', {})
+    
+    if issue_type not in tag_ids:
+        await interaction.followup.send(f"❌ No tag ID configured for '{issue_type}'.", ephemeral=True)
+        return
+    
+    # Remove the tag ID
+    del tag_ids[issue_type]
+    BOT_SETTINGS['issue_type_tag_ids'] = tag_ids
+    
+    # Save to API
+    await save_bot_settings_to_api()
+    
+    await interaction.followup.send(f"✅ Cleared tag ID for **{issue_type}**. The bot will no longer tag posts with this issue type.", ephemeral=True)
+    print(f"clear_tag_id command used by {interaction.user}: {issue_type}")
+
+@bot.tree.command(name="set_user_issue_tag_id", description="Set the Discord tag ID for user-reported issues (Admin only).")
+async def set_user_issue_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the tag ID for user-reported issues"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        tag_id_int = int(tag_id)
+        
+        # Verify tag exists
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.followup.send(f"❌ Forum channel not found. Channel ID: {forum_channel_id}", ephemeral=True)
+            return
+        
+        available_tags = forum_channel.available_tags
+        tag_found = False
+        tag_name = None
+        
+        for tag in available_tags:
+            if tag.id == tag_id_int:
+                tag_found = True
+                tag_name = tag.name
+                break
+        
+        if not tag_found:
+            await interaction.followup.send(
+                f"❌ Tag ID {tag_id} not found in forum channel.\n"
+                f"Use `/list_forum_tags` to see available tag IDs.",
+                ephemeral=True
+            )
+            return
+        
+        BOT_SETTINGS['user_issue_tag_id'] = str(tag_id_int)
+        await save_bot_settings_to_api()
+        
+        embed = discord.Embed(
+            title="✅ User Issue Tag ID Set",
+            description=f"Set tag ID for user-reported issues to `{tag_id_int}`",
+            color=0x2ECC71
+        )
+        embed.add_field(name="Tag Name", value=tag_name, inline=True)
+        embed.add_field(name="Tag ID", value=str(tag_id_int), inline=True)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"set_user_issue_tag_id command used by {interaction.user}: {tag_id_int}")
+        
+    except ValueError:
+        await interaction.followup.send(f"❌ Invalid tag ID. Tag ID must be a number.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_user_issue_tag_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_bug_tag_id", description="Set the Discord tag ID for bug reports (Admin only).")
+async def set_bug_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the tag ID for bug reports"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        tag_id_int = int(tag_id)
+        
+        # Verify tag exists
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.followup.send(f"❌ Forum channel not found. Channel ID: {forum_channel_id}", ephemeral=True)
+            return
+        
+        available_tags = forum_channel.available_tags
+        tag_found = False
+        tag_name = None
+        
+        for tag in available_tags:
+            if tag.id == tag_id_int:
+                tag_found = True
+                tag_name = tag.name
+                break
+        
+        if not tag_found:
+            await interaction.followup.send(
+                f"❌ Tag ID {tag_id} not found in forum channel.\n"
+                f"Use `/list_forum_tags` to see available tag IDs.",
+                ephemeral=True
+            )
+            return
+        
+        BOT_SETTINGS['bug_tag_id'] = str(tag_id_int)
+        await save_bot_settings_to_api()
+        
+        embed = discord.Embed(
+            title="✅ Bug Tag ID Set",
+            description=f"Set tag ID for bug reports to `{tag_id_int}`",
+            color=0x2ECC71
+        )
+        embed.add_field(name="Tag Name", value=tag_name, inline=True)
+        embed.add_field(name="Tag ID", value=str(tag_id_int), inline=True)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"set_bug_tag_id command used by {interaction.user}: {tag_id_int}")
+        
+    except ValueError:
+        await interaction.followup.send(f"❌ Invalid tag ID. Tag ID must be a number.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_bug_tag_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_crash_tag_id", description="Set the Discord tag ID for crash reports (Admin only).")
+async def set_crash_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the tag ID for crash reports"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        tag_id_int = int(tag_id)
+        
+        # Verify tag exists
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.followup.send(f"❌ Forum channel not found. Channel ID: {forum_channel_id}", ephemeral=True)
+            return
+        
+        available_tags = forum_channel.available_tags
+        tag_found = False
+        tag_name = None
+        
+        for tag in available_tags:
+            if tag.id == tag_id_int:
+                tag_found = True
+                tag_name = tag.name
+                break
+        
+        if not tag_found:
+            await interaction.followup.send(
+                f"❌ Tag ID {tag_id} not found in forum channel.\n"
+                f"Use `/list_forum_tags` to see available tag IDs.",
+                ephemeral=True
+            )
+            return
+        
+        BOT_SETTINGS['crash_tag_id'] = str(tag_id_int)
+        await save_bot_settings_to_api()
+        
+        embed = discord.Embed(
+            title="✅ Crash Tag ID Set",
+            description=f"Set tag ID for crash reports to `{tag_id_int}`",
+            color=0x2ECC71
+        )
+        embed.add_field(name="Tag Name", value=tag_name, inline=True)
+        embed.add_field(name="Tag ID", value=str(tag_id_int), inline=True)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"set_crash_tag_id command used by {interaction.user}: {tag_id_int}")
+        
+    except ValueError:
+        await interaction.followup.send(f"❌ Invalid tag ID. Tag ID must be a number.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_crash_tag_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="set_rdp_tag_id", description="Set the Discord tag ID for RDP issues (Admin only).")
+async def set_rdp_tag_id(interaction: discord.Interaction, tag_id: str):
+    """Set the tag ID for RDP issues"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        tag_id_int = int(tag_id)
+        
+        # Verify tag exists
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        forum_channel = bot.get_channel(forum_channel_id)
+        
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            await interaction.followup.send(f"❌ Forum channel not found. Channel ID: {forum_channel_id}", ephemeral=True)
+            return
+        
+        available_tags = forum_channel.available_tags
+        tag_found = False
+        tag_name = None
+        
+        for tag in available_tags:
+            if tag.id == tag_id_int:
+                tag_found = True
+                tag_name = tag.name
+                break
+        
+        if not tag_found:
+            await interaction.followup.send(
+                f"❌ Tag ID {tag_id} not found in forum channel.\n"
+                f"Use `/list_forum_tags` to see available tag IDs.",
+                ephemeral=True
+            )
+            return
+        
+        BOT_SETTINGS['rdp_tag_id'] = str(tag_id_int)
+        await save_bot_settings_to_api()
+        
+        embed = discord.Embed(
+            title="✅ RDP Tag ID Set",
+            description=f"Set tag ID for RDP issues to `{tag_id_int}`",
+            color=0x2ECC71
+        )
+        embed.add_field(name="Tag Name", value=tag_name, inline=True)
+        embed.add_field(name="Tag ID", value=str(tag_id_int), inline=True)
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+        print(f"set_rdp_tag_id command used by {interaction.user}: {tag_id_int}")
+        
+    except ValueError:
+        await interaction.followup.send(f"❌ Invalid tag ID. Tag ID must be a number.", ephemeral=True)
+    except Exception as e:
+        print(f"Error in set_rdp_tag_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_satisfaction_delay", description="Set the delay (in seconds) before analyzing user satisfaction (Admin only).")
