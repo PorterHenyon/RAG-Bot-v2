@@ -47,39 +47,53 @@ for i, test_key in enumerate(GEMINI_API_KEYS, 1):
     
     print(f"Testing Key {i} ({key_name}): {key_short}")
     
-    try:
-        # Configure genai with this key
-        genai.configure(api_key=test_key)
-        
-        # Try to create a model
-        test_model = genai.GenerativeModel('gemini-1.5-flash')
-        
-        # Try to generate a simple response
-        test_response = test_model.generate_content("Say hello in one word")
-        
-        if test_response and hasattr(test_response, 'text') and test_response.text:
-            print(f"   ✅ WORKING! Response: {test_response.text.strip()[:50]}")
-            working_keys.append((i, key_name, key_short))
-        else:
-            print(f"   ❌ FAILED: No response text")
-            failed_keys.append((i, key_name, key_short, "No response text"))
+    # Try multiple models to find one that works
+    models_to_try = ['gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest', 'gemini-1.5-pro']
+    model_worked = False
+    working_model = None
+    
+    for model_name in models_to_try:
+        try:
+            # Configure genai with this key
+            genai.configure(api_key=test_key)
             
-    except Exception as e:
-        error_str = str(e).lower()
-        error_msg = str(e)[:200]
-        
-        if 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
-            print(f"   ❌ INVALID/LEAKED: {error_msg}")
-            failed_keys.append((i, key_name, key_short, f"Invalid/Leaked: {error_msg}"))
-        elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
-            print(f"   ⚠️ RATE LIMITED (but key is valid): {error_msg}")
-            working_keys.append((i, key_name, key_short))  # Rate limited but key works
-        elif 'not found' in error_str or 'invalid' in error_str:
-            print(f"   ⚠️ MODEL NOT FOUND (key might work with different model): {error_msg}")
-            failed_keys.append((i, key_name, key_short, f"Model issue: {error_msg}"))
-        else:
-            print(f"   ❌ FAILED: {error_msg}")
-            failed_keys.append((i, key_name, key_short, error_msg))
+            # Try to create a model
+            test_model = genai.GenerativeModel(model_name)
+            
+            # Try to generate a simple response
+            test_response = test_model.generate_content("Say hello in one word")
+            
+            if test_response and hasattr(test_response, 'text') and test_response.text:
+                print(f"   ✅ WORKING with {model_name}! Response: {test_response.text.strip()[:50]}")
+                working_keys.append((i, key_name, key_short, model_name))
+                model_worked = True
+                working_model = model_name
+                break
+        except Exception as model_error:
+            error_str = str(model_error).lower()
+            error_msg = str(model_error)[:200]
+            
+            if 'not found' in error_str or '404' in error_str:
+                # Model not available, try next one
+                continue
+            elif 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
+                # Key is invalid, don't try other models
+                failed_keys.append((i, key_name, key_short, f"Invalid/Leaked: {error_msg}"))
+                break
+            elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+                # Rate limited but key works
+                print(f"   ⚠️ RATE LIMITED with {model_name} (but key is valid)")
+                working_keys.append((i, key_name, key_short, f"{model_name} (rate limited)"))
+                model_worked = True
+                break
+            else:
+                # Other error, try next model
+                continue
+    
+    if not model_worked:
+        # None of the models worked
+        print(f"   ❌ FAILED: No models available for this key")
+        failed_keys.append((i, key_name, key_short, "No models available"))
 
 print(f"\n{'='*60}")
 print(f"RESULTS SUMMARY")
@@ -87,8 +101,8 @@ print(f"{'='*60}\n")
 
 print(f"✅ WORKING KEYS ({len(working_keys)}):")
 if working_keys:
-    for idx, key_name, key_short in working_keys:
-        print(f"   {idx}. {key_name} ({key_short})")
+    for idx, key_name, key_short, model in working_keys:
+        print(f"   {idx}. {key_name} ({key_short}) - Works with {model}")
 else:
     print("   None")
 

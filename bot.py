@@ -5449,25 +5449,44 @@ async def test_api_keys(interaction: discord.Interaction):
         key_short = test_key[:15] + '...' if len(test_key) > 15 else test_key
         key_name = f"GEMINI_API_KEY" if i == 1 else f"GEMINI_API_KEY_{i}"
         
-        try:
-            genai.configure(api_key=test_key)
-            test_model = genai.GenerativeModel('gemini-1.5-flash')
-            test_response = test_model.generate_content("Say hello")
-            
-            if test_response and hasattr(test_response, 'text') and test_response.text:
-                working_keys.append((i, key_name, key_short))
-            else:
-                failed_keys.append((i, key_name, key_short, "No response text"))
-        except Exception as e:
-            error_str = str(e).lower()
-            error_msg = str(e)[:200]
-            
-            if 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
-                failed_keys.append((i, key_name, key_short, f"Invalid/Leaked: {error_msg}"))
-            elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
-                working_keys.append((i, key_name, key_short))  # Rate limited but key works
-            else:
-                failed_keys.append((i, key_name, key_short, error_msg))
+        # Try multiple models to find one that works
+        models_to_try = ['gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest', 'gemini-1.5-pro']
+        model_worked = False
+        working_model = None
+        
+        for model_name in models_to_try:
+            try:
+                genai.configure(api_key=test_key)
+                test_model = genai.GenerativeModel(model_name)
+                test_response = test_model.generate_content("Say hello")
+                
+                if test_response and hasattr(test_response, 'text') and test_response.text:
+                    working_keys.append((i, key_name, key_short, model_name))
+                    model_worked = True
+                    working_model = model_name
+                    break
+            except Exception as e:
+                error_str = str(e).lower()
+                error_msg = str(e)[:200]
+                
+                if 'not found' in error_str or '404' in error_str:
+                    # Model not available, try next one
+                    continue
+                elif 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
+                    # Key is invalid, don't try other models
+                    failed_keys.append((i, key_name, key_short, f"Invalid/Leaked: {error_msg}"))
+                    break
+                elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+                    # Rate limited but key works
+                    working_keys.append((i, key_name, key_short, f"{model_name} (rate limited)"))
+                    model_worked = True
+                    break
+                else:
+                    # Other error, try next model
+                    continue
+        
+        if not model_worked:
+            failed_keys.append((i, key_name, key_short, "No models available"))
     
     # Build result embed
     result_embed = discord.Embed(
@@ -5476,7 +5495,7 @@ async def test_api_keys(interaction: discord.Interaction):
     )
     
     if working_keys:
-        working_text = "\n".join([f"✅ {idx}. {name} ({short})" for idx, name, short in working_keys])
+        working_text = "\n".join([f"✅ {idx}. {name} ({short})\n   Model: {model}" for idx, name, short, model in working_keys])
         result_embed.add_field(name=f"Working Keys ({len(working_keys)})", value=working_text[:1024], inline=False)
     
     if failed_keys:
