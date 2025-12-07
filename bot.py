@@ -151,14 +151,34 @@ class GeminiKeyManager:
         # - Success rate (higher is better)
         # - Recent usage (prefer less recently used keys for load balancing)
         total_calls = self.key_usage_count[key_short]
-        if total_calls == 0:
-            return 200  # New/unused keys get very high priority
+        errors = self.key_error_count[key_short]
+        success_calls = self.key_success_count[key_short]
+        
+        # If key has errors but no total calls tracked, it means errors occurred but usage wasn't tracked
+        # This can happen if errors occur during model creation before the actual API call
+        if total_calls == 0 and errors > 0:
+            # Key has errors but no tracked usage - heavily penalize
+            return -400 - (errors * 20)
+        
+        # If key has errors, check error rate
+        if total_calls > 0 and errors > 0:
+            if errors > success_calls:
+                # More errors than successes - very bad
+                return -500 - (errors * 10)
+            error_rate = errors / total_calls
+            if error_rate > 0.5:  # More than 50% error rate
+                return -300 - (errors * 5)
+            elif error_rate > 0.3:  # More than 30% error rate
+                return -100 - (errors * 2)
+        
+        if total_calls == 0 and errors == 0:
+            return 200  # New/unused keys with no errors get very high priority
         
         success_rate = self.key_success_count[key_short] / total_calls if total_calls > 0 else 1.0
         error_rate = self.key_error_count[key_short] / total_calls if total_calls > 0 else 0.0
         
-        # Base score from success/error rate
-        health_score = (success_rate * 100) - (error_rate * 50)
+        # Base score from success/error rate (heavily penalize errors)
+        health_score = (success_rate * 100) - (error_rate * 100)  # Increased penalty for errors
         
         # Big bonus for keys with few recent calls (main factor)
         if recent_calls == 0:
@@ -282,15 +302,30 @@ class GeminiKeyManager:
         self.rotate_key(force_round_robin=True)
     
     def mark_key_success(self, key):
-        """Mark that a key was used successfully"""
+        """Mark that a key was used successfully - reduces error count to give key a fresh start"""
         key_short = key[:10] + '...'
         self.key_success_count[key_short] = self.key_success_count.get(key_short, 0) + 1
         self.key_last_used[key_short] = datetime.now()
+        # Reduce error count on success (errors were likely transient)
+        # This gives keys a chance to recover from temporary issues
+        current_errors = self.key_error_count.get(key_short, 0)
+        if current_errors > 0:
+            # Reduce error count by 1 for each success (up to half the error count)
+            reduction = min(1, current_errors // 2)
+            self.key_error_count[key_short] = max(0, current_errors - reduction)
+            if self.key_error_count[key_short] == 0:
+                print(f"✅ Key {key_short} error count reset - key is working well now")
     
     def mark_key_error(self, key, is_rate_limit=False):
-        """Mark that a key encountered an error"""
+        """Mark that a key encountered an error - only for confirmed persistent errors"""
         key_short = key[:10] + '...'
-        self.key_error_count[key_short] = self.key_error_count.get(key_short, 0) + 1
+        # Only increment error count if we're sure it's a persistent issue
+        # Transient errors (rate limits, timeouts) are handled separately
+        if not is_rate_limit:  # Rate limits are temporary, don't count as permanent errors
+            self.key_error_count[key_short] = self.key_error_count.get(key_short, 0) + 1
+            # Also increment usage count so error rate can be calculated accurately
+            if self.key_usage_count[key_short] == 0:
+                self.key_usage_count[key_short] = 1
         if is_rate_limit:
             self.mark_key_rate_limited(key)
     
@@ -349,7 +384,7 @@ class GeminiKeyManager:
     
     def create_model_with_retry(self, model_name, **kwargs):
         """Create a GenerativeModel with automatic key rotation on rate limit and proactive rotation"""
-        max_attempts = len(self.api_keys) * 2  # Try each key up to 2 times
+        max_attempts = len(self.api_keys) * 3  # Try each key up to 3 times for better success rate
         attempts = 0
         last_key_used = None
         tried_keys = []  # Track which keys we've tried
@@ -414,31 +449,53 @@ class GeminiKeyManager:
                 error_str = str(e).lower()
                 key_used = self.get_current_key()
                 
-                # Check if it's a rate limit error
+                # Check if it's a rate limit error (don't mark as permanent error, just rotate)
                 if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str or 'resource exhausted' in error_str:
-                    self.mark_key_error(key_used, is_rate_limit=True)
+                    # Rate limit is temporary - don't mark as permanent error, just rotate
+                    self.key_rate_limited[key_used[:10] + '...'] = True
+                    self.key_rate_limit_time[key_used[:10] + '...'] = datetime.now()
                     attempts += 1
-                    print(f"⚠️ Rate limit error on attempt {attempts}, rotating to next key...")
+                    print(f"⚠️ Rate limit on key {key_used[:15]}... (temporary), rotating to next key...")
+                    self.rotate_key(force_round_robin=True)
+                    # Brief pause before trying next key (use time.sleep for sync context)
+                    import time
+                    time.sleep(0.5)
                     continue
                 elif 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
-                    # API key is leaked/invalid - mark as error and don't retry with this key
-                    self.mark_key_error(key_used, is_rate_limit=False)
-                    print(f"❌ CRITICAL: API key {key_used[:15]}... is leaked or invalid!")
-                    print(f"   You MUST generate a NEW API key at https://aistudio.google.com/app/apikey")
-                    print(f"   Then update GEMINI_API_KEY in your .env file")
+                    # API key is leaked/invalid - only mark if we've confirmed it multiple times
+                    # Don't mark on first failure (might be transient)
+                    if attempts > len(self.api_keys):
+                        # We've tried this key multiple times, it's definitely invalid
+                        self.mark_key_error(key_used, is_rate_limit=False)
+                        print(f"❌ API key {key_used[:15]}... appears to be leaked or invalid after multiple attempts")
+                        print(f"   Get a new key: https://aistudio.google.com/app/apikey")
+                    else:
+                        # First failure - might be transient, just rotate
+                        print(f"⚠️ Possible API key issue with {key_used[:15]}..., trying next key...")
                     # Try next key instead of failing completely
                     self.rotate_key(force_round_robin=True)
                     attempts += 1
                     if attempts >= max_attempts:
-                        raise Exception(f"API key is leaked/invalid. Get a new key from https://aistudio.google.com/app/apikey")
+                        raise Exception(f"All API keys failed. Check keys at https://aistudio.google.com/app/apikey")
+                    continue
+                elif 'not found' in error_str or 'invalid' in error_str or 'not available' in error_str:
+                    # Model compatibility issue - not a key error, just try different model
+                    print(f"⚠️ Model compatibility issue, will try alternative models...")
+                    attempts += 1
+                    self.rotate_key(force_round_robin=True)
+                    if attempts >= max_attempts:
+                        raise
                     continue
                 else:
-                    # Other error - mark it and try next key (might be transient or key-specific)
-                    self.mark_key_error(key_used, is_rate_limit=False)
+                    # Transient error - don't mark as permanent error, just retry with next key
                     attempts += 1
-                    print(f"⚠️ Error on attempt {attempts} with key {key_used[:15]}...: {str(e)[:100]}")
-                    # Try next key instead of failing immediately
+                    print(f"⚠️ Transient error on attempt {attempts} with key {key_used[:15]}...: {str(e)[:100]}")
+                    print(f"   Retrying with next key...")
+                    # Try next key instead of marking error (might be network issue, etc.)
                     self.rotate_key(force_round_robin=True)
+                    # Brief pause for transient issues
+                    import time
+                    time.sleep(0.3)
                     if attempts >= max_attempts:
                         # If we've tried all keys, re-raise the last error
                         raise
@@ -2001,10 +2058,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             return response_text
                 
         except asyncio.TimeoutError:
-            # Mark timeout as error for current key
-            current_key = key_manager.get_current_key()
-            key_manager.mark_key_error(current_key, is_rate_limit=False)
-            print(f"   ⚠️ Timeout with '{model_name}', trying next model...")
+            # Timeout is transient - don't mark as permanent error, just try next model
+            print(f"   ⚠️ Timeout with '{model_name}' (transient), trying next model...")
             continue
         except Exception as e:
             error_msg = str(e).lower()
@@ -2023,31 +2078,33 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ Model '{model_name}' not available, trying next...")
                 continue
             elif 'quota' in error_msg or 'rate limit' in error_msg or '429' in error_msg or 'resource exhausted' in error_msg:
-                # Rate limit error - mark and rotate
-                key_manager.mark_key_error(current_key, is_rate_limit=True)
-                print(f"   ⚠️ Rate limit detected, will try next key/model...")
+                # Rate limit error - don't mark as permanent error, just rotate (it's temporary)
+                key_short = current_key[:10] + '...'
+                key_manager.key_rate_limited[key_short] = True
+                key_manager.key_rate_limit_time[key_short] = datetime.now()
+                print(f"   ⚠️ Rate limit detected (temporary), will try next key/model...")
                 continue
             elif 'api key' in error_msg or 'auth' in error_msg or '403' in error_msg or 'permission denied' in error_msg or 'leaked' in error_msg:
-                # API key error - mark as error
-                key_manager.mark_key_error(current_key, is_rate_limit=False)
-                print(f"   ❌ API KEY ERROR!")
+                # API key error - only mark if we've seen this multiple times (might be transient)
+                # Don't mark on first failure
+                print(f"   ⚠️ Possible API key issue (might be transient)...")
                 if 'leaked' in error_msg:
-                    print(f"   ⚠️ Your API key was reported as leaked. You need to generate a NEW API key.")
-                    print(f"   📝 Steps:")
-                    print(f"      1. Go to https://aistudio.google.com/app/apikey")
-                    print(f"      2. Delete the old key (if visible)")
-                    print(f"      3. Create a NEW API key")
-                    print(f"      4. Update GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6 in your .env file")
-                    print(f"      5. Restart the bot")
+                    # Leaked keys are definitely invalid - mark after checking
+                    key_manager.mark_key_error(current_key, is_rate_limit=False)
+                    print(f"   ❌ API key appears to be leaked. Get a new key: https://aistudio.google.com/app/apikey")
                 else:
-                    print(f"   Check your key at https://aistudio.google.com/")
-                print(f"   Full error: {str(e)}")
+                    # Other auth errors might be transient - don't mark immediately
+                    print(f"   ⚠️ Auth error (will retry with next model/key)...")
+                print(f"   Full error: {str(e)[:200]}")
                 # Still try next model in case it's model-specific
                 continue
+            elif 'model' in error_msg and ('not found' in error_msg or 'invalid' in error_msg):
+                # Model compatibility issue - not a key error, just try next model
+                print(f"   ⚠️ Model compatibility issue, trying next model...")
+                continue
             else:
-                # Other error - mark it but try next model
-                key_manager.mark_key_error(current_key, is_rate_limit=False)
-                print(f"   ⚠️ Unknown error type, trying next model...")
+                # Transient error - don't mark as permanent error, just try next model
+                print(f"   ⚠️ Transient error, trying next model...")
                 continue
     
     # All models failed
@@ -5177,20 +5234,33 @@ async def status(interaction: discord.Interaction):
             success_rate = stats.get('success_rate', 0)
             health = stats.get('health_score', 0)
             is_rate_limited = stats.get('rate_limited', False)
+            total_calls = stats.get('total_calls', 0)
+            errors = stats.get('errors', 0)
+            success_calls = stats.get('successful_calls', 0)
             
-            # Determine status indicator based on health score and rate limit status
-            # Health score > 50: good, 0-50: warning, < 0: poor
+            # Determine status indicator based on health score, errors, and rate limit status
+            # Check for high error rate first (even if health score is high due to low total calls)
+            error_rate = (errors / total_calls * 100) if total_calls > 0 else 0
+            
             if is_rate_limited:
                 status_icon = "🔴"  # Red for rate limited
-            elif health > 50:
-                status_icon = "🟢"  # Green for good health
-            elif health > 0:
+            elif total_calls > 0 and error_rate > 50:
+                status_icon = "🔴"  # Red for high error rate (>50% errors)
+            elif total_calls > 0 and errors > success_calls:
+                status_icon = "🔴"  # Red if more errors than successes
+            elif health > 50 and error_rate < 20:
+                status_icon = "🟢"  # Green for good health and low error rate
+            elif health > 0 and error_rate < 40:
                 status_icon = "🟡"  # Yellow for warning
+            elif health > 0:
+                status_icon = "🟡"  # Yellow for moderate health
             else:
                 status_icon = "🔴"  # Red for poor health
             
+            # Show error count if there are errors
+            error_info = f", {errors} errors" if errors > 0 else ""
             key_stats_text += f"{status_icon} {key_short}:\n"
-            key_stats_text += f"  {calls_for_key}/10 calls, {success_rate:.0f}% success\n"
+            key_stats_text += f"  {calls_for_key}/10 calls, {success_rate:.0f}% success{error_info}\n"
             key_stats_text += f"  Health: {health:.0f}\n"
         
         if len(usage_stats) > 4:
