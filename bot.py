@@ -48,7 +48,17 @@ if not GEMINI_API_KEYS:
     print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6")
     exit()
 
-print(f"✓ Loaded {len(GEMINI_API_KEYS)} API key(s) for all operations (forum posts, /ask, etc.)")
+# Validate keys are not empty
+valid_keys = [key for key in GEMINI_API_KEYS if key and len(key.strip()) > 10]
+if len(valid_keys) != len(GEMINI_API_KEYS):
+    print(f"⚠️ WARNING: Some API keys are invalid (empty or too short)")
+    print(f"   Loaded {len(valid_keys)} valid key(s) out of {len(GEMINI_API_KEYS)} total")
+    GEMINI_API_KEYS = valid_keys
+    if not GEMINI_API_KEYS:
+        print("FATAL ERROR: No valid API keys found after validation")
+        exit()
+
+print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (forum posts, /ask, etc.)")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
@@ -407,13 +417,28 @@ class GeminiKeyManager:
                     key_short = current_key[:15] + '...'
                 
                 tried_keys.append(current_key)
-                genai.configure(api_key=current_key)
+                
+                # Configure genai with current key BEFORE creating model
+                try:
+                    genai.configure(api_key=current_key)
+                except Exception as config_error:
+                    print(f"❌ CRITICAL: Failed to configure genai with key {key_short}: {config_error}")
+                    print(f"   This is a configuration error, not an API error")
+                    attempts += 1
+                    self.rotate_key(force_round_robin=True)
+                    if attempts >= max_attempts:
+                        raise Exception(f"Failed to configure genai with any key. Configuration error: {config_error}")
+                    continue
                 
                 print(f"🔑 Attempt {attempts + 1}/{max_attempts}: Trying key {key_short} for model {model_name}")
                 
                 # Create model - if this succeeds, mark key as successful
                 # Handle different model versions: if model_name is 2.5 but key only supports 1.5, try 1.5
                 try:
+                    # Verify key is configured
+                    if not current_key or len(current_key.strip()) < 10:
+                        raise Exception(f"Invalid API key: key is too short or empty")
+                    
                     model = genai.GenerativeModel(model_name, **kwargs)
                     # Mark success (we'll mark it again when the actual API call succeeds)
                     last_key_used = current_key
@@ -487,18 +512,19 @@ class GeminiKeyManager:
                         raise
                     continue
                 else:
-                    # Transient error - don't mark as permanent error, just retry with next key
+                    # Transient error - log it but don't mark as permanent error
                     attempts += 1
-                    print(f"⚠️ Transient error on attempt {attempts} with key {key_used[:15]}...: {str(e)[:100]}")
-                    print(f"   Retrying with next key...")
+                    print(f"⚠️ Error on attempt {attempts} with key {key_used[:15]}...: {type(e).__name__}: {str(e)[:150]}")
+                    print(f"   Error details: {str(e)}")
                     # Try next key instead of marking error (might be network issue, etc.)
                     self.rotate_key(force_round_robin=True)
                     # Brief pause for transient issues
                     import time
                     time.sleep(0.3)
                     if attempts >= max_attempts:
-                        # If we've tried all keys, re-raise the last error
-                        raise
+                        # If we've tried all keys, re-raise the last error with full details
+                        print(f"❌ All {max_attempts} attempts exhausted. Last error: {type(e).__name__}: {str(e)}")
+                        raise Exception(f"Failed to create model after {max_attempts} attempts. Last error: {str(e)[:200]}")
                     continue
         
         # All keys exhausted
@@ -507,8 +533,14 @@ class GeminiKeyManager:
 # Initialize key manager (all keys used for all operations)
 gemini_key_manager = GeminiKeyManager(GEMINI_API_KEYS)
 
-# Configure with first key
-genai.configure(api_key=gemini_key_manager.get_current_key())
+# Configure with first key (will be reconfigured per-request)
+if gemini_key_manager.api_keys:
+    try:
+        genai.configure(api_key=gemini_key_manager.get_current_key())
+        print(f"✓ Initialized genai with first key")
+    except Exception as e:
+        print(f"⚠️ Failed to configure genai with first key: {e}")
+        print(f"   Will configure per-request instead")
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -1970,26 +2002,30 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 error_str = str(e).lower()
                 model_error = e
                 
+                print(f"   ⚠️ Failed to create model with system_instruction: {type(e).__name__}: {str(e)[:200]}")
+                
                 # If it's a leaked key error, don't try without system_instruction - it won't help
                 if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
                     print(f"   ❌ API KEY IS LEAKED/INVALID!")
                     print(f"   📝 You MUST get a NEW key: https://aistudio.google.com/app/apikey")
                     print(f"   Then update GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6 in your .env file and restart the bot")
                     print(f"   Full error: {str(e)}")
-                    raise  # Re-raise to stop trying other models
+                    # Don't raise - try next model instead
+                    continue
                 
                 # Try without system_instruction for other errors
-                print(f"   ⚠️ Failed with system_instruction: {str(e)[:150]}")
                 print(f"   Trying without system_instruction...")
                 try:
                     model = key_manager.create_model_with_retry(model_name)
                     print(f"   ✓ Model created without system_instruction")
                 except Exception as e2:
-                    print(f"   ❌ Also failed without system_instruction: {str(e2)[:150]}")
-                    raise e2  # Re-raise the second error
+                    print(f"   ❌ Also failed without system_instruction: {type(e2).__name__}: {str(e2)[:200]}")
+                    # Don't raise - try next model instead
+                    continue
             
             if model is None:
-                raise Exception(f"Failed to create model: {model_error}")
+                print(f"   ❌ Model is None after creation attempts, trying next model...")
+                continue
             
             # Configure generation settings
             generation_config = genai.types.GenerationConfig(
@@ -2003,7 +2039,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             # Generate response - log which key is being used
             current_key = key_manager.get_current_key()
             key_short = current_key[:15] + '...'
-            print(f"💬 Calling Gemini API with {key_type} key {key_short} and model {model_name}...")
+            print(f"💬 Calling Gemini API with key {key_short} and model {model_name}...")
             
             # Track the API call BEFORE making it to prevent race conditions
             # This ensures concurrent requests see the updated count immediately
@@ -2015,22 +2051,42 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             def generate_sync():
                 return model.generate_content(user_context, generation_config=generation_config)
             
-            response = await asyncio.wait_for(
-                loop.run_in_executor(None, generate_sync),
-                timeout=30.0
-            )
+            try:
+                response = await asyncio.wait_for(
+                    loop.run_in_executor(None, generate_sync),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                print(f"   ⚠️ Timeout waiting for API response from '{model_name}' (30s)")
+                key_manager.mark_key_error(current_key, is_rate_limit=False)
+                continue
+            except Exception as api_error:
+                error_str = str(api_error).lower()
+                print(f"   ❌ API call failed: {type(api_error).__name__}: {str(api_error)[:200]}")
+                # Check error type and handle accordingly
+                if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+                    key_short_err = current_key[:10] + '...'
+                    key_manager.key_rate_limited[key_short_err] = True
+                    key_manager.key_rate_limit_time[key_short_err] = datetime.now()
+                    print(f"   ⚠️ Rate limit detected, will try next key/model...")
+                elif 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str:
+                    print(f"   ❌ API key issue detected")
+                    key_manager.mark_key_error(current_key, is_rate_limit=False)
+                else:
+                    # Other error - mark it
+                    key_manager.mark_key_error(current_key, is_rate_limit=False)
+                continue
             
-            # SUCCESS! Get response text
+            # Check if response has text attribute BEFORE marking success
+            if not hasattr(response, 'text'):
+                print(f"   ⚠️ Response object missing 'text' attribute: {type(response)}")
+                print(f"   Response object: {response}")
+                key_manager.mark_key_error(current_key, is_rate_limit=False)
+                continue
             
             # Mark the current key as successful (API call succeeded)
             key_manager.mark_key_success(current_key)
             print(f"✅ API call succeeded with key {key_short}")
-            
-            # Check if response has text attribute
-            if not hasattr(response, 'text'):
-                print(f"   ⚠️ Response object missing 'text' attribute: {type(response)}")
-                print(f"   Response object: {response}")
-                continue
             
             response_text = response.text
             
