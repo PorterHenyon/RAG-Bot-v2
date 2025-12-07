@@ -31,8 +31,9 @@ if env_key:
     GEMINI_API_KEYS.append(env_key)
     print(f"✓ Loaded API key from GEMINI_API_KEY")
 
-# Load additional keys (GEMINI_API_KEY_2 through GEMINI_API_KEY_6)
-for i in range(2, 7):
+# Load additional keys (GEMINI_API_KEY_2 through GEMINI_API_KEY_20 - supports up to 20 keys)
+# The system will automatically use all available keys for rotation
+for i in range(2, 21):  # Support up to 20 keys total (GEMINI_API_KEY + GEMINI_API_KEY_2 through GEMINI_API_KEY_20)
     additional_key = os.getenv(f'GEMINI_API_KEY_{i}')
     if additional_key and additional_key not in GEMINI_API_KEYS:
         GEMINI_API_KEYS.append(additional_key)
@@ -45,7 +46,7 @@ if not DISCORD_BOT_TOKEN:
 
 if not GEMINI_API_KEYS:
     print("FATAL ERROR: No Gemini API keys found in environment.")
-    print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6")
+    print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_20")
     exit()
 
 # Validate keys are not empty
@@ -94,14 +95,16 @@ class GeminiKeyManager:
         self.key_last_used = {name: None for name in key_short_names}  # Last usage timestamp
         
         # Optimize rotation based on number of keys
-        # With 6 keys, rotate every 3-4 calls to distribute load evenly
+        # More keys = more frequent rotation to distribute load evenly
         # This ensures each key gets roughly equal usage over time
-        if len(api_keys) >= 6:
-            self.calls_per_key = 3  # More frequent rotation with more keys
+        if len(api_keys) >= 10:
+            self.calls_per_key = 2  # Very frequent rotation with many keys
+        elif len(api_keys) >= 6:
+            self.calls_per_key = 3  # Frequent rotation with 6+ keys
         elif len(api_keys) >= 3:
-            self.calls_per_key = 4
+            self.calls_per_key = 4  # Moderate rotation with 3-5 keys
         else:
-            self.calls_per_key = 5
+            self.calls_per_key = 5  # Less frequent with 1-2 keys
         
         self.current_key_calls = 0  # Track calls on current key
         self.rate_limit_cooldown = 60  # Seconds to wait before retrying rate-limited key
@@ -1928,6 +1931,12 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     if not key_manager:
         raise Exception("No key manager available")
     
+    if not key_manager.api_keys or len(key_manager.api_keys) == 0:
+        print("❌ CRITICAL: No API keys available in key manager!")
+        return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
+    
+    print(f"🔑 Key manager has {len(key_manager.api_keys)} key(s) available")
+    
     # Check cache first (skip if images provided)
     if not image_parts:
         # Create cache key from query + context IDs
@@ -1995,23 +2004,19 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             model = None
             model_error = None
             
+            # Try to create model with system_instruction
+            model = None
             try:
                 model = key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
                 print(f"   ✓ Model created with system_instruction")
             except Exception as e:
                 error_str = str(e).lower()
-                model_error = e
+                print(f"   ⚠️ Failed with system_instruction: {type(e).__name__}: {str(e)[:200]}")
                 
-                print(f"   ⚠️ Failed to create model with system_instruction: {type(e).__name__}: {str(e)[:200]}")
-                
-                # If it's a leaked key error, don't try without system_instruction - it won't help
+                # If it's a leaked/invalid key error, log it but try next model
                 if 'leaked' in error_str or ('permission denied' in error_str and '403' in str(e)):
-                    print(f"   ❌ API KEY IS LEAKED/INVALID!")
-                    print(f"   📝 You MUST get a NEW key: https://aistudio.google.com/app/apikey")
-                    print(f"   Then update GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_6 in your .env file and restart the bot")
-                    print(f"   Full error: {str(e)}")
-                    # Don't raise - try next model instead
-                    continue
+                    print(f"   ❌ API KEY ISSUE DETECTED!")
+                    print(f"   📝 Check your keys at: https://aistudio.google.com/app/apikey")
                 
                 # Try without system_instruction for other errors
                 print(f"   Trying without system_instruction...")
@@ -2020,11 +2025,11 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                     print(f"   ✓ Model created without system_instruction")
                 except Exception as e2:
                     print(f"   ❌ Also failed without system_instruction: {type(e2).__name__}: {str(e2)[:200]}")
-                    # Don't raise - try next model instead
-                    continue
+                    # Model creation failed - continue to next model
+                    model = None
             
             if model is None:
-                print(f"   ❌ Model is None after creation attempts, trying next model...")
+                print(f"   ❌ Could not create model '{model_name}', trying next model...")
                 continue
             
             # Configure generation settings
@@ -2049,31 +2054,48 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             
             # Define function outside lambda to avoid closure issues
             def generate_sync():
-                return model.generate_content(user_context, generation_config=generation_config)
+                try:
+                    return model.generate_content(user_context, generation_config=generation_config)
+                except Exception as sync_error:
+                    # Re-raise with more context
+                    raise Exception(f"API call failed in sync context: {type(sync_error).__name__}: {str(sync_error)}") from sync_error
             
             try:
+                print(f"   📡 Making API call to Gemini...")
                 response = await asyncio.wait_for(
                     loop.run_in_executor(None, generate_sync),
                     timeout=30.0
                 )
+                print(f"   ✓ Received response from API")
             except asyncio.TimeoutError:
                 print(f"   ⚠️ Timeout waiting for API response from '{model_name}' (30s)")
                 key_manager.mark_key_error(current_key, is_rate_limit=False)
                 continue
             except Exception as api_error:
                 error_str = str(api_error).lower()
-                print(f"   ❌ API call failed: {type(api_error).__name__}: {str(api_error)[:200]}")
+                error_full = str(api_error)
+                print(f"   ❌ API call failed: {type(api_error).__name__}: {error_full[:300]}")
+                
+                # Print the full error for debugging
+                import traceback
+                print(f"   Full error traceback:")
+                traceback.print_exc()
+                
                 # Check error type and handle accordingly
                 if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
                     key_short_err = current_key[:10] + '...'
                     key_manager.key_rate_limited[key_short_err] = True
                     key_manager.key_rate_limit_time[key_short_err] = datetime.now()
                     print(f"   ⚠️ Rate limit detected, will try next key/model...")
-                elif 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str:
-                    print(f"   ❌ API key issue detected")
+                elif 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
+                    print(f"   ❌ API key authentication issue detected")
+                    print(f"   Error: {error_full[:200]}")
                     key_manager.mark_key_error(current_key, is_rate_limit=False)
+                elif 'timeout' in error_str:
+                    print(f"   ⚠️ Request timeout, trying next model...")
                 else:
-                    # Other error - mark it
+                    # Other error - log it and try next model
+                    print(f"   ⚠️ Unknown error type, trying next model...")
                     key_manager.mark_key_error(current_key, is_rate_limit=False)
                 continue
             
