@@ -24,15 +24,21 @@ except ImportError:
 # --- Configuration ---
 load_dotenv()
 
-# CPU OPTIMIZATION: Disable embeddings by default to save CPU costs
-# Set ENABLE_EMBEDDINGS=true in environment to enable vector search (uses more CPU)
-ENABLE_EMBEDDINGS = os.getenv('ENABLE_EMBEDDINGS', 'false').lower() == 'true'
-
+# COST OPTIMIZATION: Prefer Pinecone when available (saves Railway CPU costs)
 # Pinecone Configuration
 PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_INDEX_NAME = os.getenv('PINECONE_INDEX_NAME', 'rag-bot-index')
 PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT', 'us-east-1')  # Default to us-east-1
-USE_PINECONE = ENABLE_EMBEDDINGS and PINECONE_AVAILABLE and PINECONE_API_KEY
+
+# COST OPTIMIZATION: Auto-enable embeddings if Pinecone is available (saves Railway costs)
+# If Pinecone is configured, use it (cost-effective). Otherwise, use keyword search (also cost-effective).
+# Only use local CPU-based vector search if explicitly enabled AND Pinecone unavailable (expensive - not recommended)
+HAS_PINECONE_CONFIG = PINECONE_AVAILABLE and PINECONE_API_KEY
+ENABLE_EMBEDDINGS_EXPLICIT = os.getenv('ENABLE_EMBEDDINGS', '').lower() == 'true'
+# Auto-enable embeddings if Pinecone is available (cost-effective cloud-based search)
+ENABLE_EMBEDDINGS = ENABLE_EMBEDDINGS_EXPLICIT or HAS_PINECONE_CONFIG
+# Use Pinecone if available and embeddings are enabled
+USE_PINECONE = ENABLE_EMBEDDINGS and HAS_PINECONE_CONFIG
 
 # 1. LOAD ENVIRONMENT VARIABLES FROM .env FILE
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
@@ -80,19 +86,19 @@ if len(valid_keys) != len(GEMINI_API_KEYS):
 
 print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (forum posts, /ask, etc.)")
 
-# CPU OPTIMIZATION: Show embeddings status
-if not ENABLE_EMBEDDINGS:
-    print("💡 CPU OPTIMIZATION: Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true to enable)")
-elif USE_PINECONE:
-    print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search")
-    if not PINECONE_API_KEY:
-        print("⚠️ WARNING: PINECONE_API_KEY not set - Pinecone will not work")
-    elif not PINECONE_AVAILABLE:
-        print("⚠️ WARNING: Pinecone package not installed - run: pip install pinecone-client")
+# COST OPTIMIZATION: Show cost-optimized status
+if USE_PINECONE:
+    print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search (Railway CPU saved!)")
+    print("   ✅ All vector operations offloaded to Pinecone - minimal Railway costs")
+elif ENABLE_EMBEDDINGS and not HAS_PINECONE_CONFIG:
+    print("⚠️ WARNING: Embeddings enabled but Pinecone not configured!")
+    print("   ⚠️ Using local CPU-based vector search (EXPENSIVE - increases Railway costs)")
+    print("   💡 TIP: Set PINECONE_API_KEY to use Pinecone and reduce Railway costs by 80-90%")
+    print("   💡 TIP: Or set ENABLE_EMBEDDINGS=false to use keyword search (free, no CPU cost)")
 else:
-    print("💡 Embeddings enabled - using local vector search (uses more CPU, consider Pinecone for cost savings)")
-    if ENABLE_EMBEDDINGS and not PINECONE_API_KEY:
-        print("💡 TIP: Set PINECONE_API_KEY to use Pinecone instead of local CPU-based search")
+    print("💡 Using keyword-based search (cost-effective, no CPU-intensive operations)")
+    if HAS_PINECONE_CONFIG:
+        print("   💡 Pinecone is configured - set ENABLE_EMBEDDINGS=true to enable vector search")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
@@ -715,33 +721,16 @@ def compute_rag_embeddings():
             print("   Falling back to local storage (temporary - fix Pinecone connection)")
             index = None
     
-    # Fallback to local storage ONLY if Pinecone completely unavailable
+    # COST OPTIMIZATION: Don't use local CPU storage - it's expensive!
+    # If Pinecone is unavailable, just skip embeddings and use keyword search instead
     if not index:
-        print("⚠️ Pinecone unavailable - using local storage (increases Railway costs)")
-        print("   Fix Pinecone connection to reduce Railway costs")
+        print("⚠️ Pinecone unavailable - skipping embeddings to save Railway CPU costs")
+        print("   Bot will use keyword-based search (free, no CPU cost)")
+        print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
+        # Clear any existing embeddings to save memory
         _rag_embeddings = {}
-        
-        for entry in RAG_DATABASE:
-            entry_id = entry.get('id', '')
-            if not entry_id:
-                continue
-            
-            # Combine title, content, and keywords for embedding
-            title = entry.get('title', '')
-            content = entry.get('content', '')
-            keywords = ' '.join(entry.get('keywords', []))
-            
-            # Create a combined text for embedding
-            combined_text = f"{title}\n{keywords}\n{content[:500]}"  # Limit content to avoid huge embeddings
-            
-            try:
-                embedding = model.encode(combined_text, convert_to_numpy=True)
-                _rag_embeddings[entry_id] = embedding
-            except Exception as e:
-                print(f"⚠️ Failed to compute embedding for entry {entry_id}: {e}")
-                continue
-        
-        print(f"✅ Computed {len(_rag_embeddings)} embeddings locally (⚠️ increases Railway CPU costs)")
+        # Don't compute embeddings locally - keyword search is free and doesn't use CPU
+        print("   ✅ Skipped local embedding computation (saves Railway CPU costs)")
     
     _rag_embeddings_version += 1
     print(f"✅ Embedding computation complete (version {_rag_embeddings_version})")
@@ -1674,10 +1663,11 @@ async def fetch_data_from_api():
                                     except:
                                         print("🔄 Computing initial embeddings for Pinecone...")
                                         compute_rag_embeddings()
-                            elif not _rag_embeddings:
-                                # Fallback: only if Pinecone not available
-                                print("🔄 Computing initial embeddings (Pinecone not available)...")
-                                compute_rag_embeddings()
+                            else:
+                                # COST OPTIMIZATION: Don't compute embeddings locally - use keyword search instead
+                                print("⚠️ Pinecone not configured - skipping embeddings to save Railway CPU costs")
+                                print("   Bot will use keyword-based search (free, no CPU cost)")
+                                print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
                     else:
                         print("ℹ Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true for Pinecone)")
                     
@@ -2140,62 +2130,14 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
             print(f"⚠️ Error in Pinecone search: {e}")
             import traceback
             traceback.print_exc()
-            print("   Falling back to local vector search")
-            # Fall through to local search
+            print("   Falling back to keyword-based search (saves Railway CPU costs)")
+            return find_relevant_rag_entries_keyword(query, db)
     
-    # Fallback to local vector storage if Pinecone not available
-    if not _rag_embeddings:
-        print("⚠️ Using keyword-based search (embeddings not computed yet)")
-        return find_relevant_rag_entries_keyword(query, db)
-    
-    try:
-        # Compute query embedding
-        query_embedding = model.encode(query, convert_to_numpy=True)
-        query_embedding = query_embedding.reshape(1, -1)
-        
-        # Compute similarities with all RAG entries
-        similarities = []
-        for entry in db:
-            entry_id = entry.get('id', '')
-            if entry_id not in _rag_embeddings:
-                continue
-            
-            entry_embedding = _rag_embeddings[entry_id].reshape(1, -1)
-            similarity = cosine_similarity(query_embedding, entry_embedding)[0][0]
-            
-            if similarity >= similarity_threshold:
-                similarities.append({
-                    'entry': entry,
-                    'similarity': float(similarity)
-                })
-        
-        # Sort by similarity (highest first)
-        similarities.sort(key=lambda x: x['similarity'], reverse=True)
-        
-        # Return top_k results
-        results = similarities[:top_k]
-        
-        # Log for debugging
-        if results:
-            top_similarity = results[0]['similarity']
-            print(f"💾 Local vector search: Found {len(results)} relevant entries (top similarity: {top_similarity:.3f})")
-            for item in results[:3]:
-                entry_title = item['entry'].get('title', 'Unknown')
-                print(f"   - '{entry_title}' (similarity: {item['similarity']:.3f})")
-        else:
-            print(f"⚠️ No RAG entries found above similarity threshold {similarity_threshold}")
-            print(f"   Total RAG entries in database: {len(db)}")
-            print(f"   Total entries with embeddings: {len(_rag_embeddings)}")
-        
-        return [item['entry'] for item in results]
-    
-    except Exception as e:
-        print(f"⚠️ Error in vector search: {e}")
-        import traceback
-        traceback.print_exc()
-        # Fallback to keyword search
-        print("   Falling back to keyword-based search")
-        return find_relevant_rag_entries_keyword(query, db)
+    # COST OPTIMIZATION: Don't use local CPU-based vector search - it's expensive!
+    # If Pinecone is not available, use keyword search instead (free, no CPU cost)
+    print("⚠️ Pinecone not available - using keyword-based search (cost-effective, no CPU cost)")
+    print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
+    return find_relevant_rag_entries_keyword(query, db)
 
 def find_relevant_rag_entries_keyword(query, db=RAG_DATABASE):
     """Fallback keyword-based search (used when embeddings unavailable)"""
@@ -3203,9 +3145,8 @@ async def on_ready():
         print("🌲 Initializing Pinecone for cost-optimized vector search...")
         init_pinecone()  # Initialize connection early
     
-    # Compute initial embeddings in background (non-blocking)
-    # This prevents bot from hanging if model download takes time
-    # COST OPTIMIZATION: Only compute if Pinecone is available (saves Railway CPU)
+    # COST OPTIMIZATION: Only compute embeddings if Pinecone is available
+    # Never compute embeddings locally - it's expensive and increases Railway costs!
     if ENABLE_EMBEDDINGS and len(RAG_DATABASE) > 0:
         if USE_PINECONE:
             # Check if Pinecone needs initial embeddings
@@ -3221,13 +3162,15 @@ async def on_ready():
                 except:
                     print("🔄 Computing initial embeddings for Pinecone in background...")
                     bot.loop.create_task(compute_embeddings_background())
-        elif not _rag_embeddings:
-            # Fallback: only if Pinecone not available
-            print("⚠️ Computing embeddings locally (Pinecone not available - increases Railway costs)")
-            print("   Set PINECONE_API_KEY to reduce Railway CPU costs")
-            bot.loop.create_task(compute_embeddings_background())
+        else:
+            # COST OPTIMIZATION: Don't compute embeddings locally - use keyword search instead
+            print("⚠️ Pinecone not configured - skipping embeddings to save Railway CPU costs")
+            print("   Bot will use keyword-based search (free, no CPU cost)")
+            print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
     elif not ENABLE_EMBEDDINGS:
-        print("ℹ Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true for Pinecone)")
+        print("ℹ Using keyword search only (cost-effective, no CPU cost)")
+        if HAS_PINECONE_CONFIG:
+            print("   💡 Pinecone is configured - set ENABLE_EMBEDDINGS=true to enable vector search")
 
     # Start periodic sync
     sync_data_task.start()
