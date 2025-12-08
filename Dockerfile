@@ -10,7 +10,9 @@ COPY bot.py .
 COPY bot_settings.json* ./
 
 # Install Python dependencies
+# Remove old pinecone-client package if it exists (conflicts with new pinecone package)
 RUN pip install --no-cache-dir --upgrade pip && \
+    pip uninstall -y pinecone-client 2>/dev/null || true && \
     pip install --no-cache-dir -r requirements.txt
 
 # Pre-download sentence-transformers model to cache it in Docker image

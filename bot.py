@@ -19,7 +19,12 @@ try:
     PINECONE_AVAILABLE = True
 except ImportError:
     PINECONE_AVAILABLE = False
-    print("⚠️ Pinecone not installed - install with: pip install pinecone-client")
+    print("⚠️ Pinecone not installed - install with: pip install pinecone")
+except Exception as e:
+    # Handle case where pinecone-client is still installed (conflict)
+    PINECONE_AVAILABLE = False
+    print(f"⚠️ Pinecone import error: {e}")
+    print("   Remove pinecone-client and install pinecone: pip uninstall pinecone-client && pip install pinecone")
 
 # --- Configuration ---
 load_dotenv()
