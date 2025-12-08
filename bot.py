@@ -35,13 +35,23 @@ PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_INDEX_NAME = os.getenv('PINECONE_INDEX_NAME', 'rag-bot-index')
 PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT', 'us-east-1')  # Default to us-east-1
 
-# COST OPTIMIZATION: Auto-enable embeddings if Pinecone is available (saves Railway costs)
-# If Pinecone is configured, use it (cost-effective). Otherwise, use keyword search (also cost-effective).
-# Only use local CPU-based vector search if explicitly enabled AND Pinecone unavailable (expensive - not recommended)
+# COST OPTIMIZATION: ONLY enable embeddings if Pinecone is configured (prevents expensive local CPU usage)
+# NEVER use local CPU-based vector search - it's too expensive!
+# If Pinecone is configured, use it (cost-effective). Otherwise, use keyword search (free, no CPU cost).
 HAS_PINECONE_CONFIG = PINECONE_AVAILABLE and PINECONE_API_KEY
 ENABLE_EMBEDDINGS_EXPLICIT = os.getenv('ENABLE_EMBEDDINGS', '').lower() == 'true'
-# Auto-enable embeddings if Pinecone is available (cost-effective cloud-based search)
-ENABLE_EMBEDDINGS = ENABLE_EMBEDDINGS_EXPLICIT or HAS_PINECONE_CONFIG
+
+# CRITICAL: Only enable embeddings if Pinecone is configured (prevents expensive Railway CPU usage)
+# Even if ENABLE_EMBEDDINGS=true is set, don't enable if Pinecone isn't configured
+if ENABLE_EMBEDDINGS_EXPLICIT and not HAS_PINECONE_CONFIG:
+    print("⚠️ WARNING: ENABLE_EMBEDDINGS=true but Pinecone not configured!")
+    print("   ⚠️ Disabling embeddings to prevent expensive Railway CPU usage")
+    print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
+    ENABLE_EMBEDDINGS = False
+else:
+    # Auto-enable embeddings if Pinecone is available (cost-effective cloud-based search)
+    ENABLE_EMBEDDINGS = ENABLE_EMBEDDINGS_EXPLICIT or HAS_PINECONE_CONFIG
+
 # Use Pinecone if available and embeddings are enabled
 USE_PINECONE = ENABLE_EMBEDDINGS and HAS_PINECONE_CONFIG
 
@@ -95,11 +105,11 @@ print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (f
 if USE_PINECONE:
     print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search (Railway CPU saved!)")
     print("   ✅ All vector operations offloaded to Pinecone - minimal Railway costs")
-elif ENABLE_EMBEDDINGS and not HAS_PINECONE_CONFIG:
+# This should never happen now due to the fix above, but keep as safety check
+if ENABLE_EMBEDDINGS and not HAS_PINECONE_CONFIG:
     print("⚠️ WARNING: Embeddings enabled but Pinecone not configured!")
-    print("   ⚠️ Using local CPU-based vector search (EXPENSIVE - increases Railway costs)")
-    print("   💡 TIP: Set PINECONE_API_KEY to use Pinecone and reduce Railway costs by 80-90%")
-    print("   💡 TIP: Or set ENABLE_EMBEDDINGS=false to use keyword search (free, no CPU cost)")
+    print("   ⚠️ This should not happen - embeddings disabled to prevent expensive Railway CPU usage")
+    print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
 else:
     print("💡 Using keyword-based search (cost-effective, no CPU-intensive operations)")
     if HAS_PINECONE_CONFIG:
