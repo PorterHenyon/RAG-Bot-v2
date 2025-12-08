@@ -3364,6 +3364,44 @@ async def on_ready():
     print('Bot is ready and listening for new forum posts.')
     print('-------------------')
 
+@bot.tree.error
+async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
+    """Global error handler for all slash commands - ensures commands always respond"""
+    print(f"❌ Error in slash command '{interaction.command.name if interaction.command else 'unknown'}': {type(error).__name__}: {str(error)}")
+    import traceback
+    traceback.print_exc()
+    
+    # Try to respond to the interaction if it hasn't been responded to yet
+    try:
+        if not interaction.response.is_done():
+            await interaction.response.send_message(
+                f"❌ An error occurred: {str(error)[:200]}",
+                ephemeral=True
+            )
+        else:
+            # Already responded, try followup
+            await interaction.followup.send(
+                f"❌ An error occurred: {str(error)[:200]}",
+                ephemeral=True
+            )
+    except discord.errors.InteractionResponded:
+        # Already responded, try followup
+        try:
+            await interaction.followup.send(
+                f"❌ An error occurred: {str(error)[:200]}",
+                ephemeral=True
+            )
+        except:
+            pass
+    except Exception as e:
+        print(f"⚠ Failed to send error message to user: {e}")
+        # Last resort: try to edit if possible
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send("❌ An error occurred. Please try again.", ephemeral=True)
+        except:
+            pass
+
 async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url, initial_message):
     """Send forum post data to the dashboard API with full Discord information"""
     # Skip API call if URL is still the placeholder
