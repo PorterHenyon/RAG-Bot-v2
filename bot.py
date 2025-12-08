@@ -14,6 +14,12 @@ import aiohttp
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
+try:
+    from pinecone import Pinecone, ServerlessSpec
+    PINECONE_AVAILABLE = True
+except ImportError:
+    PINECONE_AVAILABLE = False
+    print("⚠️ Pinecone not installed - install with: pip install pinecone-client")
 
 # --- Configuration ---
 load_dotenv()
@@ -21,6 +27,12 @@ load_dotenv()
 # CPU OPTIMIZATION: Disable embeddings by default to save CPU costs
 # Set ENABLE_EMBEDDINGS=true in environment to enable vector search (uses more CPU)
 ENABLE_EMBEDDINGS = os.getenv('ENABLE_EMBEDDINGS', 'false').lower() == 'true'
+
+# Pinecone Configuration
+PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
+PINECONE_INDEX_NAME = os.getenv('PINECONE_INDEX_NAME', 'rag-bot-index')
+PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT', 'us-east-1')  # Default to us-east-1
+USE_PINECONE = ENABLE_EMBEDDINGS and PINECONE_AVAILABLE and PINECONE_API_KEY
 
 # 1. LOAD ENVIRONMENT VARIABLES FROM .env FILE
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
@@ -71,8 +83,16 @@ print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (f
 # CPU OPTIMIZATION: Show embeddings status
 if not ENABLE_EMBEDDINGS:
     print("💡 CPU OPTIMIZATION: Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true to enable)")
+elif USE_PINECONE:
+    print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search")
+    if not PINECONE_API_KEY:
+        print("⚠️ WARNING: PINECONE_API_KEY not set - Pinecone will not work")
+    elif not PINECONE_AVAILABLE:
+        print("⚠️ WARNING: Pinecone package not installed - run: pip install pinecone-client")
 else:
-    print("💡 Embeddings enabled - vector search active (uses more CPU)")
+    print("💡 Embeddings enabled - using local vector search (uses more CPU, consider Pinecone for cost savings)")
+    if ENABLE_EMBEDDINGS and not PINECONE_API_KEY:
+        print("💡 TIP: Set PINECONE_API_KEY to use Pinecone instead of local CPU-based search")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
@@ -544,7 +564,8 @@ LEADERBOARD_DATA = {
 # --- VECTOR EMBEDDINGS FOR RAG ---
 # Initialize embedding model (lazy load on first use)
 _embedding_model = None
-_rag_embeddings = {}  # {entry_id: embedding_vector}
+_pinecone_index = None
+_rag_embeddings = {}  # {entry_id: embedding_vector} - Fallback for non-Pinecone mode
 _rag_embeddings_version = 0  # Increment when RAG database changes
 
 def get_embedding_model():
@@ -569,8 +590,64 @@ def get_embedding_model():
             return None
     return _embedding_model
 
+def init_pinecone():
+    """Initialize Pinecone connection and index"""
+    global _pinecone_index
+    
+    if not USE_PINECONE:
+        return None
+    
+    if _pinecone_index is not None:
+        return _pinecone_index
+    
+    try:
+        print("🌲 Initializing Pinecone connection...")
+        pc = Pinecone(api_key=PINECONE_API_KEY)
+        
+        # Check if index exists, create if not
+        existing_indexes = [idx.name for idx in pc.list_indexes()]
+        
+        if PINECONE_INDEX_NAME not in existing_indexes:
+            print(f"🌲 Creating Pinecone index '{PINECONE_INDEX_NAME}'...")
+            # Get embedding dimension from model
+            model = get_embedding_model()
+            if model is None:
+                # Default dimension for all-MiniLM-L6-v2
+                dimension = 384
+            else:
+                # Test encode to get dimension
+                test_embedding = model.encode("test", convert_to_numpy=True)
+                dimension = len(test_embedding)
+            
+            pc.create_index(
+                name=PINECONE_INDEX_NAME,
+                dimension=dimension,
+                metric="cosine",
+                spec=ServerlessSpec(
+                    cloud="aws",
+                    region=PINECONE_ENVIRONMENT
+                )
+            )
+            print(f"✅ Created Pinecone index '{PINECONE_INDEX_NAME}' with dimension {dimension}")
+        else:
+            print(f"✅ Using existing Pinecone index '{PINECONE_INDEX_NAME}'")
+        
+        _pinecone_index = pc.Index(PINECONE_INDEX_NAME)
+        print("✅ Pinecone initialized successfully")
+        return _pinecone_index
+        
+    except Exception as e:
+        print(f"⚠️ Failed to initialize Pinecone: {e}")
+        print("   Falling back to local vector storage")
+        _pinecone_index = None
+        return None
+
 def compute_rag_embeddings():
-    """Compute embeddings for all RAG entries (called when RAG database updates)"""
+    """Compute embeddings for all RAG entries and store ONLY in Pinecone (cost optimization)
+    
+    Railway cost optimization: All vector storage and search happens in Pinecone.
+    No local storage unless Pinecone is completely unavailable.
+    """
     global _rag_embeddings, _rag_embeddings_version
     
     model = get_embedding_model()
@@ -578,30 +655,96 @@ def compute_rag_embeddings():
         return
     
     print(f"🔄 Computing embeddings for {len(RAG_DATABASE)} RAG entries...")
-    _rag_embeddings = {}
     
-    for entry in RAG_DATABASE:
-        entry_id = entry.get('id', '')
-        if not entry_id:
-            continue
+    # COST OPTIMIZATION: Always try Pinecone first - it's much cheaper than Railway CPU
+    index = init_pinecone() if USE_PINECONE else None
+    
+    if index:
+        # Use Pinecone for storage (cost-effective - offloads from Railway)
+        print("🌲 Storing embeddings in Pinecone (cost-optimized - Railway CPU saved)...")
+        vectors_to_upsert = []
         
-        # Combine title, content, and keywords for embedding
-        title = entry.get('title', '')
-        content = entry.get('content', '')
-        keywords = ' '.join(entry.get('keywords', []))
+        for entry in RAG_DATABASE:
+            entry_id = entry.get('id', '')
+            if not entry_id:
+                continue
+            
+            # Combine title, content, and keywords for embedding
+            title = entry.get('title', '')
+            content = entry.get('content', '')
+            keywords = ' '.join(entry.get('keywords', []))
+            
+            # Create a combined text for embedding
+            combined_text = f"{title}\n{keywords}\n{content[:500]}"  # Limit content to avoid huge embeddings
+            
+            try:
+                # Compute embedding (minimal CPU - just encoding)
+                embedding = model.encode(combined_text, convert_to_numpy=True)
+                embedding_list = embedding.tolist()
+                
+                # Prepare metadata (store full entry data in Pinecone)
+                metadata = {
+                    'title': title[:1000],  # Pinecone metadata limit
+                    'content': content[:1000],
+                    'keywords': ' '.join(entry.get('keywords', []))[:500],
+                    'entry_id': entry_id  # Store ID for reference
+                }
+                
+                vectors_to_upsert.append({
+                    'id': entry_id,
+                    'values': embedding_list,
+                    'metadata': metadata
+                })
+            except Exception as e:
+                print(f"⚠️ Failed to compute embedding for entry {entry_id}: {e}")
+                continue
         
-        # Create a combined text for embedding
-        combined_text = f"{title}\n{keywords}\n{content[:500]}"  # Limit content to avoid huge embeddings
-        
+        # Batch upsert to Pinecone (upsert in chunks of 100 for efficiency)
         try:
-            embedding = model.encode(combined_text, convert_to_numpy=True)
-            _rag_embeddings[entry_id] = embedding
+            chunk_size = 100
+            for i in range(0, len(vectors_to_upsert), chunk_size):
+                chunk = vectors_to_upsert[i:i + chunk_size]
+                index.upsert(vectors=chunk)
+            print(f"✅ Upserted {len(vectors_to_upsert)} embeddings to Pinecone (Railway CPU saved!)")
+            
+            # COST OPTIMIZATION: Clear local storage when using Pinecone to save Railway memory
+            _rag_embeddings = {}
+            print("💡 Cleared local embeddings cache (using Pinecone only - saves Railway memory)")
         except Exception as e:
-            print(f"⚠️ Failed to compute embedding for entry {entry_id}: {e}")
-            continue
+            print(f"⚠️ Failed to upsert to Pinecone: {e}")
+            print("   Falling back to local storage (temporary - fix Pinecone connection)")
+            index = None
+    
+    # Fallback to local storage ONLY if Pinecone completely unavailable
+    if not index:
+        print("⚠️ Pinecone unavailable - using local storage (increases Railway costs)")
+        print("   Fix Pinecone connection to reduce Railway costs")
+        _rag_embeddings = {}
+        
+        for entry in RAG_DATABASE:
+            entry_id = entry.get('id', '')
+            if not entry_id:
+                continue
+            
+            # Combine title, content, and keywords for embedding
+            title = entry.get('title', '')
+            content = entry.get('content', '')
+            keywords = ' '.join(entry.get('keywords', []))
+            
+            # Create a combined text for embedding
+            combined_text = f"{title}\n{keywords}\n{content[:500]}"  # Limit content to avoid huge embeddings
+            
+            try:
+                embedding = model.encode(combined_text, convert_to_numpy=True)
+                _rag_embeddings[entry_id] = embedding
+            except Exception as e:
+                print(f"⚠️ Failed to compute embedding for entry {entry_id}: {e}")
+                continue
+        
+        print(f"✅ Computed {len(_rag_embeddings)} embeddings locally (⚠️ increases Railway CPU costs)")
     
     _rag_embeddings_version += 1
-    print(f"✅ Computed {len(_rag_embeddings)} embeddings (version {_rag_embeddings_version})")
+    print(f"✅ Embedding computation complete (version {_rag_embeddings_version})")
 
 async def compute_embeddings_background():
     """Background task to compute embeddings without blocking bot startup"""
@@ -1105,6 +1248,13 @@ class SolvedButton(discord.ui.View):
         if current_retry_count >= 1:
             print(f"🔄 User clicked NOT SOLVED for the second time - escalating to human support")
             user_who_clicked = interaction.user if hasattr(interaction, 'user') else None
+            
+            # Send followup to complete the deferred interaction (fixes "thinking" issue)
+            try:
+                await interaction.followup.send("🔄 Escalating to human support...", ephemeral=True)
+            except Exception as followup_error:
+                print(f"⚠ Could not send followup message: {followup_error}")
+            
             await self._escalate_to_human(thread, user_who_clicked)
             return
         
@@ -1181,8 +1331,43 @@ class SolvedButton(discord.ui.View):
             await thread.send(embed=ai_embed, view=solved_view)
             thread_response_type[self.thread_id] = 'ai'
             
+            # Classify issue and apply tag (same as first response)
+            issue_type = classify_issue(user_question)
+            await apply_issue_type_tag(thread, issue_type)
+            
+            # Update forum post with classification
+            if 'your-vercel-app' not in DATA_API_URL:
+                try:
+                    forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+                    async with aiohttp.ClientSession() as session:
+                        async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
+                            if get_resp.status == 200:
+                                all_posts = await get_resp.json()
+                                current_post = None
+                                for p in all_posts:
+                                    if p.get('postId') == str(self.thread_id) or p.get('id') == f'POST-{self.thread_id}':
+                                        current_post = p
+                                        break
+                                
+                                if current_post:
+                                    current_post['issueType'] = issue_type
+                                    update_payload = {'action': 'update', 'post': current_post}
+                                    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                    async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
+                                        if post_response.status == 200:
+                                            print(f"✓ Classified issue as: {issue_type} (second attempt)")
+                except Exception as e:
+                    print(f"⚠ Could not update issue classification: {e}")
+            
             await update_forum_post_status(self.thread_id, 'AI Response')
-            print(f"✅ Sent AI follow-up response to thread {self.thread_id}")
+            
+            # Send followup to complete the deferred interaction (fixes "thinking" issue)
+            try:
+                await interaction.followup.send("✅ Generated a new response below!", ephemeral=True)
+            except Exception as followup_error:
+                print(f"⚠ Could not send followup message: {followup_error}")
+            
+            print(f"✅ Sent AI follow-up response to thread {self.thread_id} (with classification and tagging)")
             
         except Exception as ai_error:
             print(f"❌ Error generating AI follow-up: {ai_error}")
@@ -1468,17 +1653,33 @@ async def fetch_data_from_api():
                     LEADERBOARD_DATA = new_leaderboard
                     last_data_hash = current_hash
                     
-                    # CPU OPTIMIZATION: Only recompute embeddings if enabled and actually needed
+                    # COST OPTIMIZATION: Only recompute embeddings if RAG data changed
+                    # All embeddings stored in Pinecone (saves Railway CPU/memory costs)
                     if ENABLE_EMBEDDINGS:
                         if rag_changed:
-                            print("🔄 RAG database changed - recomputing embeddings...")
-                            compute_rag_embeddings()
-                        elif len(RAG_DATABASE) > 0 and not _rag_embeddings:
-                            # Compute embeddings on first load if we have RAG entries but no embeddings yet
-                            print("🔄 Computing initial embeddings for RAG database...")
-                            compute_rag_embeddings()
+                            print("🔄 RAG database changed - uploading embeddings to Pinecone...")
+                            compute_rag_embeddings()  # Stores in Pinecone, not Railway memory
+                        elif len(RAG_DATABASE) > 0:
+                            # Check if Pinecone has embeddings, if not compute them
+                            if USE_PINECONE:
+                                index = init_pinecone()
+                                if index:
+                                    try:
+                                        stats = index.describe_index_stats()
+                                        if stats.total_vector_count == 0:
+                                            print("🔄 Pinecone index empty - uploading initial embeddings...")
+                                            compute_rag_embeddings()
+                                        else:
+                                            print(f"✅ Pinecone has {stats.total_vector_count} vectors - no recompute needed")
+                                    except:
+                                        print("🔄 Computing initial embeddings for Pinecone...")
+                                        compute_rag_embeddings()
+                            elif not _rag_embeddings:
+                                # Fallback: only if Pinecone not available
+                                print("🔄 Computing initial embeddings (Pinecone not available)...")
+                                compute_rag_embeddings()
                     else:
-                        print("ℹ Embeddings disabled (CPU optimization) - using keyword search only")
+                        print("ℹ Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true for Pinecone)")
                     
                     # Update system prompt if available
                     if new_settings and 'systemPrompt' in new_settings:
@@ -1860,7 +2061,7 @@ def get_auto_response(query: str) -> str | None:
     return None
 
 def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_threshold=0.3):
-    """Find relevant RAG entries using vector similarity search (proper RAG with embeddings)
+    """Find relevant RAG entries using vector similarity search (Pinecone or local fallback)
     
     Args:
         query: User's question
@@ -1874,8 +2075,77 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
     model = get_embedding_model()
     
     # Fallback to keyword search if embeddings not available
-    if model is None or not _rag_embeddings:
+    if model is None:
         print("⚠️ Using keyword-based search (embeddings not available)")
+        return find_relevant_rag_entries_keyword(query, db)
+    
+    # Try Pinecone first if available
+    index = init_pinecone() if USE_PINECONE else None
+    
+    if index:
+        try:
+            # COST OPTIMIZATION: Use Pinecone for all vector operations (saves Railway CPU)
+            # Compute query embedding (minimal CPU - just encoding)
+            query_embedding = model.encode(query, convert_to_numpy=True)
+            query_embedding_list = query_embedding.tolist()
+            
+            # Query Pinecone (all similarity computation happens in Pinecone cloud)
+            query_results = index.query(
+                vector=query_embedding_list,
+                top_k=top_k,
+                include_metadata=True,
+                include_values=False
+            )
+            
+            # Process results - reconstruct entries from Pinecone metadata
+            # This avoids needing to store full entries in Railway memory
+            results = []
+            for match in query_results.matches:
+                # Pinecone returns scores as similarity (0-1), filter by threshold
+                if match.score >= similarity_threshold:
+                    entry_id = match.id
+                    metadata = match.metadata or {}
+                    
+                    # Reconstruct entry from Pinecone metadata (saves Railway memory)
+                    # Try to get full entry from db first (for complete data), fallback to metadata
+                    entry = next((e for e in db if e.get('id') == entry_id), None)
+                    if not entry:
+                        # Fallback: reconstruct from metadata if not in local db
+                        entry = {
+                            'id': entry_id,
+                            'title': metadata.get('title', 'Unknown'),
+                            'content': metadata.get('content', ''),
+                            'keywords': metadata.get('keywords', '').split() if metadata.get('keywords') else []
+                        }
+                    
+                    results.append({
+                        'entry': entry,
+                        'similarity': float(match.score)
+                    })
+            
+            # Log for debugging
+            if results:
+                top_similarity = results[0]['similarity']
+                print(f"🌲 Pinecone search: Found {len(results)} relevant entries (top similarity: {top_similarity:.3f}) [Railway CPU saved!]")
+                for item in results[:3]:
+                    entry_title = item['entry'].get('title', 'Unknown')
+                    print(f"   - '{entry_title}' (similarity: {item['similarity']:.3f})")
+            else:
+                print(f"⚠️ No RAG entries found above similarity threshold {similarity_threshold}")
+                print(f"   Total RAG entries in database: {len(db)}")
+            
+            return [item['entry'] for item in results]
+            
+        except Exception as e:
+            print(f"⚠️ Error in Pinecone search: {e}")
+            import traceback
+            traceback.print_exc()
+            print("   Falling back to local vector search")
+            # Fall through to local search
+    
+    # Fallback to local vector storage if Pinecone not available
+    if not _rag_embeddings:
+        print("⚠️ Using keyword-based search (embeddings not computed yet)")
         return find_relevant_rag_entries_keyword(query, db)
     
     try:
@@ -1908,7 +2178,7 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
         # Log for debugging
         if results:
             top_similarity = results[0]['similarity']
-            print(f"🔍 Vector search: Found {len(results)} relevant entries (top similarity: {top_similarity:.3f})")
+            print(f"💾 Local vector search: Found {len(results)} relevant entries (top similarity: {top_similarity:.3f})")
             for item in results[:3]:
                 entry_title = item['entry'].get('title', 'Unknown')
                 print(f"   - '{entry_title}' (similarity: {item['similarity']:.3f})")
@@ -2927,14 +3197,37 @@ async def on_ready():
     await fetch_data_from_api()
     
     # CPU OPTIMIZATION: Only compute embeddings if enabled
+    # COST OPTIMIZATION: Initialize Pinecone on startup if enabled
+    # This ensures all vector operations use Pinecone (saves Railway CPU costs)
+    if USE_PINECONE:
+        print("🌲 Initializing Pinecone for cost-optimized vector search...")
+        init_pinecone()  # Initialize connection early
+    
     # Compute initial embeddings in background (non-blocking)
     # This prevents bot from hanging if model download takes time
-    if ENABLE_EMBEDDINGS and len(RAG_DATABASE) > 0 and not _rag_embeddings:
-        print("🔄 Computing initial embeddings in background (non-blocking)...")
-        # Run in background task to avoid blocking bot startup
-        bot.loop.create_task(compute_embeddings_background())
+    # COST OPTIMIZATION: Only compute if Pinecone is available (saves Railway CPU)
+    if ENABLE_EMBEDDINGS and len(RAG_DATABASE) > 0:
+        if USE_PINECONE:
+            # Check if Pinecone needs initial embeddings
+            index = init_pinecone()
+            if index:
+                try:
+                    stats = index.describe_index_stats()
+                    if stats.total_vector_count == 0:
+                        print("🔄 Pinecone index empty - computing initial embeddings in background...")
+                        bot.loop.create_task(compute_embeddings_background())
+                    else:
+                        print(f"✅ Pinecone already has {stats.total_vector_count} vectors - ready to use!")
+                except:
+                    print("🔄 Computing initial embeddings for Pinecone in background...")
+                    bot.loop.create_task(compute_embeddings_background())
+        elif not _rag_embeddings:
+            # Fallback: only if Pinecone not available
+            print("⚠️ Computing embeddings locally (Pinecone not available - increases Railway costs)")
+            print("   Set PINECONE_API_KEY to reduce Railway CPU costs")
+            bot.loop.create_task(compute_embeddings_background())
     elif not ENABLE_EMBEDDINGS:
-        print("ℹ Embeddings disabled (CPU optimization) - using keyword search only")
+        print("ℹ Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true for Pinecone)")
 
     # Start periodic sync
     sync_data_task.start()
@@ -4737,6 +5030,144 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
             await interaction.followup.send("⚠️ Failed to save settings to API.", ephemeral=False)
     except Exception as e:
         print(f"Error in set_ignore_post_id: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="purge_forum_posts", description="Delete all forum posts except the main ones (ignored posts) (Admin only).")
+async def purge_forum_posts(interaction: discord.Interaction):
+    """Purge all forum posts except those in the ignore list"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Skip API call if URL is not configured
+        if 'your-vercel-app' in DATA_API_URL:
+            await interaction.followup.send("⚠️ Dashboard API not configured. Cannot purge forum posts.", ephemeral=False)
+            return
+        
+        # Get ignored post IDs (these are the "main" posts to keep)
+        ignored_post_ids = BOT_SETTINGS.get('ignored_post_ids', [])
+        
+        # Fetch all forum posts from API
+        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+        
+        async with aiohttp.ClientSession() as session:
+            # Get all posts
+            async with session.get(forum_api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
+                if get_resp.status != 200:
+                    await interaction.followup.send(f"❌ Failed to fetch forum posts from API. Status: {get_resp.status}", ephemeral=False)
+                    return
+                
+                all_posts = await get_resp.json()
+                
+                if not all_posts or len(all_posts) == 0:
+                    await interaction.followup.send("ℹ️ No forum posts found to purge.", ephemeral=False)
+                    return
+                
+                # Filter posts to delete (exclude ignored ones)
+                posts_to_delete = []
+                posts_to_keep = []
+                
+                for post in all_posts:
+                    post_id = str(post.get('postId', ''))
+                    post_id_with_prefix = post.get('id', '')  # Format: POST-123456
+                    
+                    # Check if this post should be kept (is in ignore list)
+                    should_keep = False
+                    if post_id in ignored_post_ids:
+                        should_keep = True
+                    elif post_id_with_prefix.replace('POST-', '') in ignored_post_ids:
+                        should_keep = True
+                    elif post_id_with_prefix in ignored_post_ids:
+                        should_keep = True
+                    
+                    if should_keep:
+                        posts_to_keep.append(post)
+                    else:
+                        posts_to_delete.append(post)
+                
+                if len(posts_to_delete) == 0:
+                    await interaction.followup.send(
+                        f"ℹ️ No posts to delete. All {len(posts_to_keep)} post(s) are in the ignore list (main posts).",
+                        ephemeral=False
+                    )
+                    return
+                
+                # Delete each post
+                deleted_count = 0
+                failed_count = 0
+                
+                for post in posts_to_delete:
+                    post_id = post.get('id', post.get('postId', ''))
+                    if not post_id:
+                        continue
+                    
+                    try:
+                        # Use DELETE method
+                        delete_data = {'postId': post_id}
+                        async with session.delete(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as delete_resp:
+                            if delete_resp.status == 200:
+                                deleted_count += 1
+                            else:
+                                # Try POST method with action='delete' as fallback
+                                delete_data_post = {'action': 'delete', 'postId': post_id}
+                                async with session.post(forum_api_url, json=delete_data_post, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_resp:
+                                    if post_resp.status == 200:
+                                        deleted_count += 1
+                                    else:
+                                        failed_count += 1
+                                        print(f"⚠ Failed to delete post {post_id}: {post_resp.status}")
+                    except Exception as delete_error:
+                        failed_count += 1
+                        print(f"⚠ Error deleting post {post_id}: {delete_error}")
+                
+                # Create result embed
+                result_embed = discord.Embed(
+                    title="🗑️ Forum Posts Purge Complete",
+                    color=0xFF6B6B if failed_count > 0 else 0x2ECC71
+                )
+                
+                result_embed.add_field(
+                    name="📊 Summary",
+                    value=(
+                        f"**Total posts:** {len(all_posts)}\n"
+                        f"**Kept (main posts):** {len(posts_to_keep)}\n"
+                        f"**Deleted:** {deleted_count}\n"
+                        f"**Failed:** {failed_count}"
+                    ),
+                    inline=False
+                )
+                
+                if len(posts_to_keep) > 0:
+                    kept_list = []
+                    for post in posts_to_keep[:10]:  # Show max 10
+                        post_title = post.get('postTitle', 'Unknown')[:50]
+                        post_id = post.get('postId', post.get('id', 'Unknown'))
+                        kept_list.append(f"• {post_title} (ID: {post_id})")
+                    
+                    if len(posts_to_keep) > 10:
+                        kept_list.append(f"... and {len(posts_to_keep) - 10} more")
+                    
+                    result_embed.add_field(
+                        name="✅ Kept Posts (Main Posts)",
+                        value="\n".join(kept_list) if kept_list else "None",
+                        inline=False
+                    )
+                
+                result_embed.set_footer(text="Revolution Macro Bot")
+                
+                await interaction.followup.send(embed=result_embed, ephemeral=False)
+                print(f"✓ Purged {deleted_count} forum posts (kept {len(posts_to_keep)} main posts) by {interaction.user}")
+                
+    except Exception as e:
+        print(f"Error in purge_forum_posts: {e}")
+        import traceback
+        traceback.print_exc()
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
 @bot.tree.command(name="set_unsolved_tag_id", description="Set the Discord tag ID for 'Unsolved' posts (Admin only).")
