@@ -34,6 +34,8 @@ load_dotenv()
 PINECONE_API_KEY = os.getenv('PINECONE_API_KEY')
 PINECONE_INDEX_NAME = os.getenv('PINECONE_INDEX_NAME', 'rag-bot-index')
 PINECONE_ENVIRONMENT = os.getenv('PINECONE_ENVIRONMENT', 'us-east-1')  # Default to us-east-1
+# Optional: skip embedding bootstrap on this worker to avoid CPU/memory load
+SKIP_EMBEDDING_BOOTSTRAP = os.getenv('SKIP_EMBEDDING_BOOTSTRAP', '').lower() == 'true'
 
 # COST OPTIMIZATION: ONLY enable embeddings if Pinecone is configured (prevents expensive local CPU usage)
 # NEVER use local CPU-based vector search - it's too expensive!
@@ -478,7 +480,13 @@ class GeminiKeyManager:
                 # If it's a model not found error, try alternative models
                 if 'not found' in error_str or 'invalid' in error_str or 'not available' in error_str:
                     # Try alternative models
-                    alternatives = ['gemini-1.5-flash', 'gemini-flash-latest', 'gemini-pro-latest']
+                    alternatives = [
+                        'gemini-1.5-flash-latest',
+                        'gemini-1.5-flash-002',
+                        'gemini-flash-1.5',
+                        'gemini-1.5-flash',
+                        'gemini-pro-latest'
+                    ]
                     for alt_model in alternatives:
                         if alt_model != model_name:
                             try:
@@ -512,7 +520,7 @@ for i, test_key in enumerate(GEMINI_API_KEYS, 1):
         key_short = test_key[:15] + '...'
         genai.configure(api_key=test_key)
         # Try to create a simple model to verify the key works (quick test)
-        test_model = genai.GenerativeModel('gemini-1.5-flash')
+        test_model = genai.GenerativeModel('gemini-1.5-flash-latest')
         # Simple test - just try to generate content (no timeout option, let it use default)
         test_response = test_model.generate_content("Hi")
         if test_response and hasattr(test_response, 'text') and test_response.text:
@@ -670,6 +678,10 @@ def compute_rag_embeddings():
     No local storage unless Pinecone is completely unavailable.
     """
     global _rag_embeddings, _rag_embeddings_version
+    
+    if SKIP_EMBEDDING_BOOTSTRAP:
+        print("⚠️ SKIP_EMBEDDING_BOOTSTRAP=true - skipping embedding computation on this worker. Seed Pinecone externally.")
+        return
     
     model = get_embedding_model()
     if model is None:
@@ -917,6 +929,32 @@ no_review_threads = set()  # {thread_id}
 not_solved_retry_count = {}  # {thread_id: count}
 
 # REMOVED: No local storage - all data in Vercel KV API only
+
+# --- SIMPLE, LOW-COST SATISFACTION ANALYZER (prevents NameError and avoids heavy API calls) ---
+async def analyze_user_satisfaction(user_messages):
+    """Lightweight heuristic satisfaction analysis to keep flow running without external calls."""
+    if not user_messages:
+        return {'satisfied': False, 'wants_human': False, 'confidence': 0}
+    
+    text = " ".join(m.lower() for m in user_messages if m)
+    satisfied_keywords = ["thanks", "thank you", "fixed", "resolved", "works now", "great", "appreciate"]
+    unhappy_keywords = ["not working", "still", "doesn't", "broken", "issue", "problem", "help", "wtf", "no", "not fixed"]
+    wants_human_keywords = ["human", "agent", "support", "escalate", "talk to", "someone"]
+    
+    score = 0
+    if any(k in text for k in satisfied_keywords):
+        score += 2
+    if any(k in text for k in unhappy_keywords):
+        score -= 2
+    wants_human = any(k in text for k in wants_human_keywords) or score < 0
+    
+    satisfied = score > 0
+    confidence = min(100, max(10, 60 + (score * 10))) if score != 0 else 40
+    return {
+        'satisfied': satisfied,
+        'wants_human': wants_human,
+        'confidence': confidence
+    }
 
 # --- PAGINATED HIGH PRIORITY POSTS VIEW ---
 class HighPriorityPostsView(discord.ui.View):
@@ -1660,7 +1698,9 @@ async def fetch_data_from_api():
                     # COST OPTIMIZATION: Only recompute embeddings if RAG data changed
                     # All embeddings stored in Pinecone (saves Railway CPU/memory costs)
                     if ENABLE_EMBEDDINGS:
-                        if rag_changed:
+                        if SKIP_EMBEDDING_BOOTSTRAP:
+                            print("⚠️ Embeddings enabled but SKIP_EMBEDDING_BOOTSTRAP=true. Not computing embeddings on this worker. Seed Pinecone externally.")
+                        elif rag_changed:
                             print("🔄 RAG database changed - uploading embeddings to Pinecone...")
                             compute_rag_embeddings()  # Stores in Pinecone, not Railway memory
                         elif len(RAG_DATABASE) > 0:
@@ -3170,13 +3210,19 @@ async def on_ready():
                 try:
                     stats = index.describe_index_stats()
                     if stats.total_vector_count == 0:
-                        print("🔄 Pinecone index empty - computing initial embeddings in background...")
-                        bot.loop.create_task(compute_embeddings_background())
+                        if SKIP_EMBEDDING_BOOTSTRAP:
+                            print("⚠️ Pinecone index empty, but SKIP_EMBEDDING_BOOTSTRAP=true. Skipping compute to avoid worker CPU usage. Seed index externally.")
+                        else:
+                            print("🔄 Pinecone index empty - computing initial embeddings in background...")
+                            bot.loop.create_task(compute_embeddings_background())
                     else:
                         print(f"✅ Pinecone already has {stats.total_vector_count} vectors - ready to use!")
                 except:
-                    print("🔄 Computing initial embeddings for Pinecone in background...")
-                    bot.loop.create_task(compute_embeddings_background())
+                    if SKIP_EMBEDDING_BOOTSTRAP:
+                        print("⚠️ Could not describe Pinecone index and bootstrap is skipped. Seed index externally.")
+                    else:
+                        print("🔄 Computing initial embeddings for Pinecone in background...")
+                        bot.loop.create_task(compute_embeddings_background())
         else:
             # COST OPTIMIZATION: Don't compute embeddings locally - use keyword search instead
             print("⚠️ Pinecone not configured - skipping embeddings to save Railway CPU costs")
@@ -6562,7 +6608,15 @@ async def test_api_keys(interaction: discord.Interaction):
         key_name = f"GEMINI_API_KEY" if i == 1 else f"GEMINI_API_KEY_{i}"
         
         # Try multiple models to find one that works
-        models_to_try = ['gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-pro-latest', 'gemini-1.5-pro']
+        models_to_try = [
+            'gemini-1.5-flash-latest',
+            'gemini-1.5-flash-002',
+            'gemini-flash-1.5',
+            'gemini-2.5-flash',
+            'gemini-flash-latest',
+            'gemini-pro-latest',
+            'gemini-1.5-pro'
+        ]
         model_worked = False
         working_model = None
         
