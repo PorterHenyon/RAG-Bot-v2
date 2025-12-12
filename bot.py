@@ -835,10 +835,11 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
         stats = index.describe_index_stats()
         existing_count = stats.total_vector_count
         
-        # If Pinecone is empty, upload all entries
+        # If Pinecone is empty, upload all entries (but don't block - run in background)
         if existing_count == 0:
-            print("🌲 Pinecone is empty - uploading all entries...")
-            compute_rag_embeddings()
+            print("🌲 Pinecone is empty - uploading all entries in background...")
+            # Run in background to avoid blocking
+            bot.loop.create_task(asyncio.to_thread(compute_rag_embeddings))
             return
         
         # Compare entry IDs to find truly new entries
@@ -5326,11 +5327,21 @@ async def reload(interaction: discord.Interaction):
         await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
         return
     
-    success = await fetch_data_from_api()
-    if success:
-        await interaction.followup.send(f"✅ Data reloaded successfully from dashboard! Loaded {len(RAG_DATABASE)} RAG entries into memory.", ephemeral=False)
-    else:
-        await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
+    # Send initial response to avoid timeout
+    await interaction.followup.send("🔄 Reloading data from dashboard...", ephemeral=False)
+    
+    try:
+        success = await fetch_data_from_api()
+        if success:
+            await interaction.followup.send(f"✅ Data reloaded successfully! Loaded {len(RAG_DATABASE)} RAG entries into memory.", ephemeral=False)
+        else:
+            await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
+    except Exception as e:
+        print(f"❌ Error during reload: {e}")
+        import traceback
+        traceback.print_exc()
+        await interaction.followup.send(f"❌ Error reloading data: {str(e)[:200]}", ephemeral=False)
+    
     print(f"Reload command issued by {interaction.user}.")
 
 @bot.tree.command(name="fix_duplicate_commands", description="Clear ALL slash commands and re-sync (fixes duplicates) (Admin only).")
