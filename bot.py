@@ -2520,8 +2520,16 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 error_str = str(api_error).lower()
                 print(f"   ⚠️ API call failed: {str(api_error)[:200]}")
                 
-                # Handle rate limits
-                if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+                # Handle quota vs rate limits differently
+                if 'resource exhausted' in error_str and 'quota' in error_str:
+                    # Billing quota exceeded
+                    key_short_err = current_key[:10] + '...'
+                    print(f"   ❌ QUOTA EXCEEDED (billing): All keys from same account share quota")
+                    key_manager.key_rate_limited[key_short_err] = True
+                    key_manager.key_rate_limit_time[key_short_err] = datetime.now()
+                    key_manager.rotate_key(force_round_robin=True)
+                elif 'rate limit' in error_str or ('429' in error_str and 'quota' not in error_str):
+                    # Per-minute rate limit (temporary)
                     key_short_err = current_key[:10] + '...'
                     key_manager.key_rate_limited[key_short_err] = True
                     key_manager.key_rate_limit_time[key_short_err] = datetime.now()
@@ -2596,12 +2604,23 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             if 'model' in error_msg and ('not found' in error_msg or 'invalid' in error_msg):
                 print(f"   ⚠️ Model '{model_name}' not available, trying next...")
                 continue
-            elif 'quota' in error_msg or 'rate limit' in error_msg or '429' in error_msg or 'resource exhausted' in error_msg:
-                # Rate limit error - don't mark as permanent error, just rotate (it's temporary)
+            elif 'resource exhausted' in error_msg.lower() and 'quota' in error_msg.lower():
+                # Billing quota exceeded (not rate limit) - all keys from same account share quota
+                key_short = current_key[:10] + '...'
+                print(f"   ❌ QUOTA EXCEEDED (billing limit): {error_msg[:150]}")
+                print(f"   💡 All keys from the same Google account share the same quota.")
+                print(f"   💡 Check billing: https://console.cloud.google.com/billing")
+                print(f"   💡 Or use keys from different Google accounts.")
+                # Mark as rate limited temporarily so we don't keep trying this key
+                key_manager.key_rate_limited[key_short] = True
+                key_manager.key_rate_limit_time[key_short] = datetime.now()
+                continue
+            elif 'rate limit' in error_msg.lower() or ('429' in error_msg and 'quota' not in error_msg.lower()):
+                # Actual rate limit (per-minute) - temporary, will reset
                 key_short = current_key[:10] + '...'
                 key_manager.key_rate_limited[key_short] = True
                 key_manager.key_rate_limit_time[key_short] = datetime.now()
-                print(f"   ⚠️ Rate limit detected (temporary), will try next key/model...")
+                print(f"   ⚠️ Rate limit detected (temporary, per-minute), will try next key/model...")
                 continue
             elif 'api key' in error_msg or 'auth' in error_msg or '403' in error_msg or 'permission denied' in error_msg or 'leaked' in error_msg:
                 # API key error - only mark if we've seen this multiple times (might be transient)
@@ -2642,15 +2661,24 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         
         # Show key health status
         print(f"\n   Key Health Status:")
+        all_quota_limited = True
         for key_short, stats in usage_stats.items():
             rate_limited = "🔴 RATE LIMITED" if stats.get('rate_limited', False) else "🟢 OK"
             success_rate = stats.get('success_rate', 0)
             total_calls = stats.get('total_calls', 0)
             print(f"     {key_short}: {rate_limited} | {total_calls} calls | {success_rate:.0f}% success")
+            if not stats.get('rate_limited', False):
+                all_quota_limited = False
         
-        print(f"\n   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
-        print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
-        print(f"   Then update GEMINI_API_KEY in Railway environment variables and restart the bot.")
+        if all_quota_limited and total_keys > 1:
+            print(f"\n   ⚠️ ALL KEYS HITTING QUOTA LIMITS!")
+            print(f"   💡 All API keys from the same Google account share the same billing quota.")
+            print(f"   💡 Check your quota/billing: https://console.cloud.google.com/billing")
+            print(f"   💡 Or use keys from different Google accounts (different billing).")
+        else:
+            print(f"\n   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
+            print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
+            print(f"   Then update GEMINI_API_KEY in Railway environment variables and restart the bot.")
     except Exception as e:
         print(f"   ERROR getting key info: {e}")
         import traceback
