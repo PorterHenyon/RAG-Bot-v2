@@ -2122,7 +2122,7 @@ def get_auto_response(query: str) -> str | None:
     
     return None
 
-def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_threshold=0.3):
+def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_threshold=0.2):
     """Find relevant RAG entries using vector similarity search (Pinecone or local fallback)
     
     Args:
@@ -2162,39 +2162,53 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
             # Process results - reconstruct entries from Pinecone metadata
             # This avoids needing to store full entries in Railway memory
             results = []
+            all_matches = []
             for match in query_results.matches:
+                entry_id = match.id
+                metadata = match.metadata or {}
+                similarity_score = float(match.score)
+                
+                # Reconstruct entry from Pinecone metadata (saves Railway memory)
+                # Try to get full entry from db first (for complete data), fallback to metadata
+                entry = next((e for e in db if e.get('id') == entry_id), None)
+                if not entry:
+                    # Fallback: reconstruct from metadata if not in local db
+                    entry = {
+                        'id': entry_id,
+                        'title': metadata.get('title', 'Unknown'),
+                        'content': metadata.get('content', ''),
+                        'keywords': metadata.get('keywords', '').split() if metadata.get('keywords') else []
+                    }
+                
+                all_matches.append({
+                    'entry': entry,
+                    'similarity': similarity_score
+                })
+                
                 # Pinecone returns scores as similarity (0-1), filter by threshold
-                if match.score >= similarity_threshold:
-                    entry_id = match.id
-                    metadata = match.metadata or {}
-                    
-                    # Reconstruct entry from Pinecone metadata (saves Railway memory)
-                    # Try to get full entry from db first (for complete data), fallback to metadata
-                    entry = next((e for e in db if e.get('id') == entry_id), None)
-                    if not entry:
-                        # Fallback: reconstruct from metadata if not in local db
-                        entry = {
-                            'id': entry_id,
-                            'title': metadata.get('title', 'Unknown'),
-                            'content': metadata.get('content', ''),
-                            'keywords': metadata.get('keywords', '').split() if metadata.get('keywords') else []
-                        }
-                    
+                if similarity_score >= similarity_threshold:
                     results.append({
                         'entry': entry,
-                        'similarity': float(match.score)
+                        'similarity': similarity_score
                     })
             
-            # Log for debugging
-            if results:
-                top_similarity = results[0]['similarity']
-                print(f"🌲 Pinecone search: Found {len(results)} relevant entries (top similarity: {top_similarity:.3f}) [Railway CPU saved!]")
-                for item in results[:3]:
+            # Log all matches for debugging (even below threshold)
+            if all_matches:
+                top_similarity = all_matches[0]['similarity']
+                print(f"🌲 Pinecone search: Found {len(query_results.matches)} total matches, {len(results)} above threshold {similarity_threshold}")
+                print(f"   Top similarity: {top_similarity:.3f}")
+                for i, item in enumerate(all_matches[:5], 1):
                     entry_title = item['entry'].get('title', 'Unknown')
-                    print(f"   - '{entry_title}' (similarity: {item['similarity']:.3f})")
+                    above_threshold = "✓" if item['similarity'] >= similarity_threshold else "⚠"
+                    print(f"   {above_threshold} {i}. '{entry_title}' (similarity: {item['similarity']:.3f})")
             else:
-                print(f"⚠️ No RAG entries found above similarity threshold {similarity_threshold}")
+                print(f"⚠️ Pinecone returned no matches at all")
                 print(f"   Total RAG entries in database: {len(db)}")
+            
+            # If no results above threshold but we have matches, use top match anyway (lenient fallback)
+            if not results and all_matches:
+                print(f"⚠️ No matches above threshold {similarity_threshold}, but using top match anyway (similarity: {all_matches[0]['similarity']:.3f})")
+                results = [all_matches[0]]
             
             return [item['entry'] for item in results]
             
@@ -3904,7 +3918,7 @@ async def on_thread_create(thread):
     else:
         # PRIORITIZE PINECONE: Use Pinecone vector search first (same as /ask command)
         print(f"🔍 Forum post: Searching RAG database for: '{user_question[:50]}...'")
-        relevant_docs = find_relevant_rag_entries(user_question, RAG_DATABASE, top_k=5, similarity_threshold=0.3)
+        relevant_docs = find_relevant_rag_entries(user_question, RAG_DATABASE, top_k=5, similarity_threshold=0.2)
         
         # Log Pinecone results
         if relevant_docs:
@@ -7099,7 +7113,7 @@ async def ask(interaction: discord.Interaction, question: str):
         # Step 2: No auto-response found - use RAG knowledgebase with Pinecone (same as forum posts)
         # Use the same find_relevant_rag_entries function that prioritizes Pinecone
         print(f"🔍 /ask: Searching RAG database for: '{question[:50]}...'")
-        relevant_docs = find_relevant_rag_entries(question, RAG_DATABASE, top_k=5, similarity_threshold=0.3)
+        relevant_docs = find_relevant_rag_entries(question, RAG_DATABASE, top_k=5, similarity_threshold=0.2)
         
         # Log for debugging
         if relevant_docs:
