@@ -43,19 +43,28 @@ SKIP_EMBEDDING_BOOTSTRAP = os.getenv('SKIP_EMBEDDING_BOOTSTRAP', '').lower() == 
 HAS_PINECONE_CONFIG = PINECONE_AVAILABLE and PINECONE_API_KEY
 ENABLE_EMBEDDINGS_EXPLICIT = os.getenv('ENABLE_EMBEDDINGS', '').lower() == 'true'
 
+# CRITICAL COST OPTIMIZATION: Even with Pinecone, encoding queries uses CPU
+# Set FORCE_KEYWORD_SEARCH=true to completely disable embeddings and save Railway CPU
+FORCE_KEYWORD_SEARCH = os.getenv('FORCE_KEYWORD_SEARCH', '').lower() == 'true'
+
 # CRITICAL: Only enable embeddings if Pinecone is configured (prevents expensive Railway CPU usage)
 # Even if ENABLE_EMBEDDINGS=true is set, don't enable if Pinecone isn't configured
-if ENABLE_EMBEDDINGS_EXPLICIT and not HAS_PINECONE_CONFIG:
+if FORCE_KEYWORD_SEARCH:
+    print("💰 FORCE_KEYWORD_SEARCH=true - Using keyword search only to save Railway CPU costs")
+    print("   💡 Embeddings disabled (no model loading, no query encoding = zero CPU cost)")
+    ENABLE_EMBEDDINGS = False
+elif ENABLE_EMBEDDINGS_EXPLICIT and not HAS_PINECONE_CONFIG:
     print("⚠️ WARNING: ENABLE_EMBEDDINGS=true but Pinecone not configured!")
     print("   ⚠️ Disabling embeddings to prevent expensive Railway CPU usage")
     print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
     ENABLE_EMBEDDINGS = False
 else:
     # Auto-enable embeddings if Pinecone is available (cost-effective cloud-based search)
+    # NOTE: Even with Pinecone, query encoding uses CPU. Set FORCE_KEYWORD_SEARCH=true to disable.
     ENABLE_EMBEDDINGS = ENABLE_EMBEDDINGS_EXPLICIT or HAS_PINECONE_CONFIG
 
 # Use Pinecone if available and embeddings are enabled
-USE_PINECONE = ENABLE_EMBEDDINGS and HAS_PINECONE_CONFIG
+USE_PINECONE = ENABLE_EMBEDDINGS and HAS_PINECONE_CONFIG and not FORCE_KEYWORD_SEARCH
 
 # 1. LOAD ENVIRONMENT VARIABLES FROM .env FILE
 DISCORD_BOT_TOKEN = os.getenv('DISCORD_BOT_TOKEN')
@@ -104,14 +113,13 @@ if len(valid_keys) != len(GEMINI_API_KEYS):
 print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (forum posts, /ask, etc.)")
 
 # COST OPTIMIZATION: Show cost-optimized status
-# Debug: Log actual values to diagnose
-env_enable = os.getenv('ENABLE_EMBEDDINGS', 'NOT_SET')
-print(f"🔍 DEBUG: ENABLE_EMBEDDINGS env='{env_enable}', ENABLE_EMBEDDINGS_EXPLICIT={ENABLE_EMBEDDINGS_EXPLICIT}, HAS_PINECONE_CONFIG={HAS_PINECONE_CONFIG}")
-print(f"🔍 DEBUG: ENABLE_EMBEDDINGS={ENABLE_EMBEDDINGS}, USE_PINECONE={USE_PINECONE}")
-
-if USE_PINECONE:
-    print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search (Railway CPU saved!)")
-    print("   ✅ All vector operations offloaded to Pinecone - minimal Railway costs")
+if FORCE_KEYWORD_SEARCH:
+    print("💰 FORCE_KEYWORD_SEARCH=true - Using keyword search only (ZERO CPU cost)")
+    print("   ✅ No embedding model loading, no query encoding = minimal Railway costs")
+elif USE_PINECONE:
+    print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search")
+    print("   ⚠️ NOTE: Query encoding still uses CPU (minimal per query)")
+    print("   💡 Set FORCE_KEYWORD_SEARCH=true to disable embeddings completely and save CPU")
 elif ENABLE_EMBEDDINGS and not HAS_PINECONE_CONFIG:
     print("⚠️ WARNING: Embeddings enabled but Pinecone not configured!")
     print("   ⚠️ This should not happen - embeddings disabled to prevent expensive Railway CPU usage")
@@ -120,7 +128,8 @@ else:
     print("💡 Using keyword-based search (cost-effective, no CPU-intensive operations)")
     if HAS_PINECONE_CONFIG:
         print(f"   💡 Pinecone is configured (API key present) but ENABLE_EMBEDDINGS={ENABLE_EMBEDDINGS}")
-        print(f"   💡 Set ENABLE_EMBEDDINGS=true in Railway to enable vector search")
+        print(f"   💡 Set ENABLE_EMBEDDINGS=true to enable vector search (uses CPU for query encoding)")
+        print(f"   💡 Or set FORCE_KEYWORD_SEARCH=true to use keyword search only (zero CPU cost)")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
