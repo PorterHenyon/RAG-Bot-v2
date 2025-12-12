@@ -7104,54 +7104,39 @@ async def ask(interaction: discord.Interaction, question: str):
             await interaction.followup.send(embed=embed, ephemeral=False)
             return
         
-        # Step 2: No auto-response found - use RAG knowledgebase
-        # Find relevant RAG entries with scoring
-        query_words = set(question.lower().split())
-        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
-        query_words = {word for word in query_words if word not in stopwords}
-        
-        scored_entries = []
-        for entry in RAG_DATABASE:
-            score = 0
-            entry_title = entry.get('title', '').lower()
-            entry_content = entry.get('content', '').lower()
-            entry_keywords = ' '.join(entry.get('keywords', [])).lower()
-            
-            # Weighted scoring (same as dashboard):
-            # - Title match: 5 points (highest priority)
-            # - Keyword match: 3 points (high priority)
-            # - Content match: 1 point (lower priority)
-            for word in query_words:
-                if word in entry_title:
-                    score += 5
-                if word in entry_keywords:
-                    score += 3
-                if word in entry_content:
-                    score += 1
-            
-            if score > 0:
-                scored_entries.append({'entry': entry, 'score': score})
-        
-        # Sort by score (highest first)
-        scored_entries.sort(key=lambda x: x['score'], reverse=True)
-        
-        # Filter by confidence threshold (5 = at least a title match)
-        SCORE_THRESHOLD = 5
-        relevant_docs = [item['entry'] for item in scored_entries if item['score'] >= SCORE_THRESHOLD]
+        # Step 2: No auto-response found - use RAG knowledgebase with Pinecone (same as forum posts)
+        # Use the same find_relevant_rag_entries function that prioritizes Pinecone
+        print(f"🔍 /ask: Searching RAG database for: '{question[:50]}...'")
+        relevant_docs = find_relevant_rag_entries(question, RAG_DATABASE, top_k=5, similarity_threshold=0.3)
         
         # Log for debugging
-        if scored_entries:
-            top_score = scored_entries[0]['score']
-            print(f"📊 /ask: Found {len(scored_entries)} RAG entries (top score: {top_score}), {len(relevant_docs)} above threshold")
+        if relevant_docs:
+            print(f"📊 /ask: Found {len(relevant_docs)} relevant RAG entries using {'Pinecone' if USE_PINECONE else 'keyword'} search")
+            for i, doc in enumerate(relevant_docs[:3], 1):
+                print(f"   {i}. '{doc.get('title', 'Unknown')}'")
         else:
-            print(f"⚠ /ask: No RAG entries matched query: '{question[:50]}...'")
+            print(f"⚠ /ask: No RAG entries found for query: '{question[:50]}...'")
         
         # Step 3: Generate AI response using RAG knowledgebase if available
-        # Use top 2 RAG entries if we have confident matches
+        # Use top 2 RAG entries if we have matches
         rag_context = relevant_docs[:2] if relevant_docs else []
         
         # Generate AI response (/ask command doesn't have access to images)
-        ai_response = await generate_ai_response(question, rag_context, None)
+        try:
+            ai_response = await generate_ai_response(question, rag_context, None)
+            if not ai_response or len(ai_response.strip()) == 0:
+                raise Exception("Empty response from AI")
+        except Exception as ai_error:
+            print(f"⚠️ /ask: AI generation failed: {ai_error}")
+            # If we have RAG matches, show them directly as fallback
+            if relevant_docs:
+                top_doc = relevant_docs[0]
+                doc_title = top_doc.get('title', 'Relevant Entry')
+                doc_content = top_doc.get('content', '')
+                content_preview = doc_content[:1500] + "..." if len(doc_content) > 1500 else doc_content
+                ai_response = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
+            else:
+                ai_response = "I couldn't find any relevant information in my knowledge base for your question, and I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
         
         # Truncate description if too long (Discord limit is 4096 characters)
         max_description_length = 4096
@@ -7173,9 +7158,9 @@ async def ask(interaction: discord.Interaction, question: str):
                 value="\n".join([f"• {title}" for title in doc_titles]),
                 inline=False
             )
-            embed.set_footer(text=f"Based on {len(relevant_docs)} knowledge base entries")
+            embed.set_footer(text=f"Based on {len(relevant_docs)} knowledge base entries • {'Pinecone' if USE_PINECONE else 'Keyword'} search")
         else:
-            embed.set_footer(text="AI-generated response (no confident RAG matches found)")
+            embed.set_footer(text="AI-generated response (no RAG matches found)")
         
         await interaction.followup.send(embed=embed, ephemeral=False)
             
