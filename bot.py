@@ -4360,6 +4360,30 @@ async def on_thread_create(thread):
 @bot.event
 async def on_message(message):
     """Listen for new messages in threads and update forum posts in real-time"""
+    
+    # 🎭 Easter egg: Funny response to "goon mode" requests
+    if message.content and isinstance(message.content, str):
+        content_lower = message.content.lower()
+        if 'goon mode' in content_lower or 'goonmode' in content_lower:
+            # Only respond if it's a direct request (not in a long conversation)
+            if any(phrase in content_lower for phrase in ['add', 'enable', 'turn on', 'activate', 'can you', 'please']):
+                funny_responses = [
+                    "🎭 *adjusts virtual monocle* I'm a sophisticated support bot, not a goon! But I appreciate the enthusiasm! 😄",
+                    "🤖 Sorry, I'm more of a 'helpful assistant' bot than a 'goon mode' bot. But I'm here to help with your questions!",
+                    "💼 *straightens virtual tie* I'm a professional support bot, but I can still be fun! What do you need help with?",
+                    "🎩 *tips virtual hat* No goon mode here, but I'm ready to help with anything else! What's your question?"
+                ]
+                import random
+                response = random.choice(funny_responses)
+                try:
+                    await message.channel.send(response)
+                    print(f"🎭 Sent funny 'goon mode' easter egg response to {message.author.name}")
+                except Exception as e:
+                    print(f"⚠️ Couldn't send easter egg response: {e}")
+                # Continue processing the message normally
+                await bot.process_commands(message)
+                return
+    
     # Only process messages in threads within our forum channel or category
     if not message.channel or not hasattr(message.channel, 'parent_id') or not message.channel.parent_id:
         await bot.process_commands(message)
