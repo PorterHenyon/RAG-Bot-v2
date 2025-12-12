@@ -2561,6 +2561,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             except asyncio.TimeoutError:
                 print(f"   ⚠️ Timeout waiting for API response from '{model_name}' (30s)")
                 key_manager.mark_key_error(current_key, is_rate_limit=False)
+                await asyncio.sleep(0.5)  # Brief delay before trying next model
                 continue
             except Exception as api_error:
                 error_str = str(api_error).lower()
@@ -2580,7 +2581,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                     key_manager.key_rate_limited[key_short_err] = True
                     key_manager.key_rate_limit_time[key_short_err] = datetime.now()
                     key_manager.rotate_key(force_round_robin=True)
-                # Try next model
+                # Try next model (with brief delay to avoid rate limit hammering)
+                await asyncio.sleep(0.3)
                 continue
             
             # Check if response has text attribute BEFORE marking success
@@ -2698,9 +2700,72 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ Transient error, trying next model...")
                 continue
     
-    # All models failed
+    # All models failed - try one more round with all keys before giving up
+    print(f"\n⚠️ First round of models failed, trying all keys one more time...")
+    await asyncio.sleep(1)  # Brief delay to avoid rate limit hammering
+    
+    # Try one more round with all available keys
+    for attempt in range(len(key_manager.api_keys)):
+        current_key = key_manager.get_current_key()
+        if not current_key:
+            break
+            
+        key_short = current_key[:15] + '...'
+        print(f"🔄 Retry attempt {attempt + 1}: Trying key {key_short} with fallback models...")
+        
+        # Try the most reliable models first
+        retry_models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash']
+        
+        for model_name in retry_models:
+            try:
+                genai.configure(api_key=current_key)
+                model = genai.GenerativeModel(model_name)
+                
+                generation_config = genai.types.GenerationConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens
+                )
+                
+                user_context = build_user_context(query, context_entries)
+                
+                print(f"   🔄 Retrying with {model_name}...")
+                loop = asyncio.get_event_loop()
+                
+                def generate_sync():
+                    try:
+                        return model.generate_content(user_context, generation_config=generation_config)
+                    except Exception as sync_error:
+                        raise Exception(f"API call failed: {type(sync_error).__name__}: {str(sync_error)}") from sync_error
+                
+                try:
+                    response = await asyncio.wait_for(
+                        loop.run_in_executor(None, generate_sync),
+                        timeout=30.0
+                    )
+                    
+                    if hasattr(response, 'text') and response.text and len(response.text.strip()) > 0:
+                        key_manager.mark_key_success(current_key)
+                        print(f"✅ RETRY SUCCESS! Got response from {model_name} on retry attempt {attempt + 1}")
+                        if context_entries:
+                            print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
+                        return response.text
+                except Exception as retry_error:
+                    error_str = str(retry_error).lower()
+                    if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
+                        print(f"   ⚠️ Key still rate limited, trying next key...")
+                        key_manager.rotate_key(force_round_robin=True)
+                        break  # Try next key
+                    continue  # Try next model
+            except Exception as e:
+                continue  # Try next model
+        
+        # Rotate to next key for next attempt
+        key_manager.rotate_key(force_round_robin=True)
+        await asyncio.sleep(0.5)  # Small delay between key rotations
+    
+    # All retries failed
     print(f"\n{'='*60}")
-    print(f"❌ ALL MODELS FAILED!")
+    print(f"❌ ALL MODELS AND RETRIES FAILED!")
     print(f"{'='*60}")
     try:
         current_key_short = key_manager.get_current_key()[:20] if key_manager.get_current_key() else "N/A"
@@ -2737,20 +2802,6 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         import traceback
         traceback.print_exc()
     print(f"{'='*60}\n")
-    
-    # Try one final direct test to see if API works at all
-    try:
-        print("🔍 Running final diagnostic test...")
-        test_key = key_manager.get_current_key()
-        genai.configure(api_key=test_key)
-        test_model = genai.GenerativeModel('gemini-2.5-flash')
-        test_response = test_model.generate_content("Say hello")
-        print(f"   ✓ Direct API test SUCCEEDED: {test_response.text[:50]}")
-        print(f"   ⚠️ This means the API works, but something in generate_ai_response failed")
-    except Exception as test_error:
-        print(f"   ✗ Direct API test FAILED: {test_error}")
-        import traceback
-        traceback.print_exc()
     
     return "I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
 
