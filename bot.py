@@ -2605,12 +2605,19 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ Model '{model_name}' not available, trying next...")
                 continue
             elif 'resource exhausted' in error_msg.lower() and 'quota' in error_msg.lower():
-                # Billing quota exceeded (not rate limit) - all keys from same account share quota
+                # Check if it's free tier limit (20/day) vs paid tier quota
+                is_free_tier = 'free_tier' in error_msg.lower() or 'free tier' in error_msg.lower() or 'limit: 20' in error_msg
                 key_short = current_key[:10] + '...'
-                print(f"   ❌ QUOTA EXCEEDED (billing limit): {error_msg[:150]}")
-                print(f"   💡 All keys from the same Google account share the same quota.")
-                print(f"   💡 Check billing: https://console.cloud.google.com/billing")
-                print(f"   💡 Or use keys from different Google accounts.")
+                if is_free_tier:
+                    print(f"   ❌ FREE TIER LIMIT EXCEEDED (20 requests/day per model)")
+                    print(f"   💡 This key is on the FREE tier - only 20 requests/day allowed!")
+                    print(f"   💡 Upgrade to PAID tier: https://aistudio.google.com/app/apikey")
+                    print(f"   💡 Paid tier has 1500 requests/minute - much higher limits")
+                else:
+                    print(f"   ❌ QUOTA EXCEEDED (billing limit): {error_msg[:150]}")
+                    print(f"   💡 All keys from the same Google account share the same quota.")
+                    print(f"   💡 Check billing: https://console.cloud.google.com/billing")
+                    print(f"   💡 Or use keys from different Google accounts.")
                 # Mark as rate limited temporarily so we don't keep trying this key
                 key_manager.key_rate_limited[key_short] = True
                 key_manager.key_rate_limit_time[key_short] = datetime.now()
@@ -3960,8 +3967,13 @@ async def on_thread_create(thread):
                 print(f"❌ Error generating AI response: {ai_error}")
                 import traceback
                 traceback.print_exc()
-                # Fallback response with RAG entry info
-                bot_response_text = f"I found information about '{confident_docs[0].get('title', 'your question')}' in my knowledge base, but I'm having trouble connecting to my AI service. Here's what I found:\n\n**{confident_docs[0].get('title', 'Relevant Entry')}**\n{confident_docs[0].get('content', '')[:500]}..."
+                # Fallback response with RAG entry info - show actual content from knowledge base
+                top_doc = confident_docs[0]
+                doc_title = top_doc.get('title', 'Relevant Entry')
+                doc_content = top_doc.get('content', '')
+                # Show first 800 chars of content (Discord embed limit is 4096, but keep it reasonable)
+                content_preview = doc_content[:800] + "..." if len(doc_content) > 800 else doc_content
+                bot_response_text = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
             
             # Ensure we have a response before sending
             if not bot_response_text or len(bot_response_text.strip()) == 0:
