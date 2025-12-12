@@ -3950,7 +3950,23 @@ async def on_thread_create(thread):
         if confident_docs:
             # Found matches in knowledge base - use top entries
             num_to_use = min(3, len(confident_docs))  # Use up to 3 best matches
-            bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use], image_parts)
+            try:
+                bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use], image_parts)
+                if not bot_response_text or len(bot_response_text.strip()) == 0:
+                    # Fallback if response is empty
+                    bot_response_text = f"I found relevant information about '{confident_docs[0].get('title', 'your question')}' in my knowledge base, but I'm having trouble generating a response right now. Please check the knowledge base entry or contact support."
+                    print(f"⚠️ generate_ai_response returned empty, using fallback")
+            except Exception as ai_error:
+                print(f"❌ Error generating AI response: {ai_error}")
+                import traceback
+                traceback.print_exc()
+                # Fallback response with RAG entry info
+                bot_response_text = f"I found information about '{confident_docs[0].get('title', 'your question')}' in my knowledge base, but I'm having trouble connecting to my AI service. Here's what I found:\n\n**{confident_docs[0].get('title', 'Relevant Entry')}**\n{confident_docs[0].get('content', '')[:500]}..."
+            
+            # Ensure we have a response before sending
+            if not bot_response_text or len(bot_response_text.strip()) == 0:
+                bot_response_text = f"I found information about '{confident_docs[0].get('title', 'your question')}' but couldn't generate a response. Please check the knowledge base or contact support."
+                print(f"⚠️ bot_response_text was empty, using final fallback")
             
             # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
