@@ -827,21 +827,77 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
         return
     
     try:
-        # Get existing vector IDs from Pinecone to find new entries
+        # Get existing vector count from Pinecone
         stats = index.describe_index_stats()
         existing_count = stats.total_vector_count
         
-        # If Pinecone is empty or we have more entries than Pinecone, sync new ones
+        # If Pinecone is empty, upload all entries
         if existing_count == 0:
             print("🌲 Pinecone is empty - uploading all entries...")
             compute_rag_embeddings()
             return
         
-        # Find entries that might be new (simple check: if count increased, upload new ones)
-        if len(new_rag_entries) > existing_count:
-            new_entries = new_rag_entries[existing_count:]  # Get entries after existing count
-            print(f"🌲 Found {len(new_entries)} new RAG entries - uploading to Pinecone...")
+        # Get all entry IDs from new RAG entries
+        new_entry_ids = {entry.get('id') for entry in new_rag_entries if entry.get('id')}
+        
+        # Try to fetch existing IDs from Pinecone to see which ones already exist
+        # We'll fetch a sample to check, then upload entries that might be new
+        # Since fetch requires IDs, we'll use a different approach: compare counts and upload missing ones
+        
+        # If we have more entries than Pinecone, find which ones are missing
+        if len(new_entry_ids) > existing_count:
+            # Fetch all existing IDs from Pinecone by querying with a dummy vector
+            # Actually, simpler: just try to fetch the new entry IDs to see which exist
+            # But fetch requires knowing IDs... so we'll upload entries that are in new list
             
+            # Better approach: Get all entry IDs from current RAG_DATABASE (old) and compare
+            old_entry_ids = {entry.get('id') for entry in RAG_DATABASE if entry.get('id')}
+            truly_new_ids = new_entry_ids - old_entry_ids
+            
+            if truly_new_ids:
+                print(f"🌲 Found {len(truly_new_ids)} new RAG entries by ID comparison - uploading to Pinecone...")
+                new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
+            else:
+                # Fallback: if count increased but IDs match, might be updates - upload all to be safe
+                print(f"🌲 RAG count increased ({len(new_entry_ids)} vs {existing_count}) - checking for new entries...")
+                # Try fetching a few IDs to see if they exist
+                sample_ids = list(new_entry_ids)[:min(10, len(new_entry_ids))]
+                try:
+                    fetched = index.fetch(ids=sample_ids)
+                    existing_ids_in_pinecone = set(fetched.vectors.keys()) if fetched.vectors else set()
+                    # If sample exists, assume we need to check all
+                    # Otherwise, upload entries that aren't in the sample
+                    if existing_ids_in_pinecone:
+                        # Some exist, find truly new ones by checking all
+                        all_existing_ids = set()
+                        # Fetch in batches to check all IDs
+                        batch_size = 100
+                        entry_id_list = list(new_entry_ids)
+                        for i in range(0, len(entry_id_list), batch_size):
+                            batch = entry_id_list[i:i + batch_size]
+                            try:
+                                fetched_batch = index.fetch(ids=batch)
+                                if fetched_batch.vectors:
+                                    all_existing_ids.update(fetched_batch.vectors.keys())
+                            except:
+                                pass  # If fetch fails, assume they don't exist
+                        
+                        truly_new_ids = new_entry_ids - all_existing_ids
+                        new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
+                    else:
+                        # Sample doesn't exist, upload all new entries
+                        new_entries = new_rag_entries
+                except Exception as fetch_error:
+                    print(f"⚠️ Could not check existing IDs in Pinecone: {fetch_error}")
+                    # Fallback: upload entries that are in new list but not in old list
+                    truly_new_ids = new_entry_ids - old_entry_ids
+                    new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
+            
+            if not new_entries:
+                print(f"✅ All {len(new_entry_ids)} entries already exist in Pinecone - no sync needed")
+                return
+            
+            print(f"🌲 Uploading {len(new_entries)} new/updated entries to Pinecone...")
             vectors_to_upsert = []
             for entry in new_entries:
                 entry_id = entry.get('id', '')
@@ -872,7 +928,7 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
                         'metadata': metadata
                     })
                 except Exception as e:
-                    print(f"⚠️ Failed to compute embedding for new entry {entry_id}: {e}")
+                    print(f"⚠️ Failed to compute embedding for entry {entry_id}: {e}")
                     continue
             
             # Upload new entries to Pinecone
@@ -883,9 +939,9 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
                     index.upsert(vectors=chunk)
                 print(f"✅ Synced {len(vectors_to_upsert)} new entries to Pinecone")
             else:
-                print("⚠️ No new entries to sync (all entries may already be in Pinecone)")
+                print("⚠️ No entries to sync after processing")
         else:
-            print(f"✅ Pinecone has {existing_count} vectors, RAG has {len(new_rag_entries)} entries - no sync needed")
+            print(f"✅ Pinecone has {existing_count} vectors, RAG has {len(new_entry_ids)} entries - no sync needed")
     except Exception as e:
         print(f"⚠️ Error syncing new entries to Pinecone: {e}")
         import traceback
