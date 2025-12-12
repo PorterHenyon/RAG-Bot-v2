@@ -838,8 +838,25 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
         # If Pinecone is empty, upload all entries (but don't block - run in background)
         if existing_count == 0:
             print("🌲 Pinecone is empty - uploading all entries in background...")
-            # Run in background to avoid blocking
-            bot.loop.create_task(asyncio.to_thread(compute_rag_embeddings))
+            # Run in background to avoid blocking - use safe background task
+            try:
+                async def background_embed():
+                    try:
+                        compute_rag_embeddings()
+                    except Exception as bg_error:
+                        print(f"⚠️ Error in background embedding computation: {bg_error}")
+                
+                # Create background task safely
+                if hasattr(bot, 'loop') and bot.loop and not bot.loop.is_closed():
+                    bot.loop.create_task(background_embed())
+                else:
+                    # Fallback: run synchronously but log warning
+                    print("⚠️ Bot loop not available, running embeddings synchronously...")
+                    compute_rag_embeddings()
+            except Exception as task_error:
+                print(f"⚠️ Could not create background task: {task_error}")
+                # Fallback: run synchronously
+                compute_rag_embeddings()
             return
         
         # Compare entry IDs to find truly new entries
@@ -853,16 +870,25 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
             if len(new_entry_ids) > existing_count:
                 print(f"⚠️ RAG has {len(new_entry_ids)} entries but Pinecone has {existing_count} - checking Pinecone...")
                 # Fetch all new entry IDs from Pinecone to see which are missing
+                # MEMORY OPTIMIZATION: Limit fetch to avoid memory spike
                 try:
-                    batch_size = 100
+                    batch_size = 50  # Reduced from 100 to save memory
                     entry_id_list = list(new_entry_ids)
                     existing_ids_in_pinecone = set()
-                    for i in range(0, len(entry_id_list), batch_size):
+                    max_batches = 10  # Limit to first 500 IDs to avoid timeout/memory issues
+                    for i in range(0, min(len(entry_id_list), max_batches * batch_size), batch_size):
                         batch = entry_id_list[i:i + batch_size]
                         try:
-                            fetched_batch = index.fetch(ids=batch)
+                            # Add timeout to avoid hanging
+                            fetched_batch = await asyncio.wait_for(
+                                asyncio.to_thread(index.fetch, ids=batch),
+                                timeout=5.0
+                            )
                             if fetched_batch.vectors:
                                 existing_ids_in_pinecone.update(fetched_batch.vectors.keys())
+                        except asyncio.TimeoutError:
+                            print(f"⚠️ Timeout fetching batch {i//batch_size + 1}, skipping...")
+                            break
                         except Exception as fetch_err:
                             print(f"⚠️ Error fetching batch: {fetch_err}")
                             # If fetch fails, assume they don't exist and upload them
@@ -876,7 +902,11 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
                         return
                 except Exception as e:
                     print(f"⚠️ Could not verify entries in Pinecone: {e}")
-                    return
+                    # Fallback: if we can't verify, just upload entries that are new by ID comparison
+                    if truly_new_ids:
+                        print(f"🌲 Will upload {len(truly_new_ids)} entries based on ID comparison")
+                    else:
+                        return
             else:
                 return
         
@@ -897,8 +927,11 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
                 combined_text = f"{title}\n{keywords}\n{content[:500]}"
                 
                 try:
-                    # Compute embedding for new entry only
-                    embedding = model.encode(combined_text, convert_to_numpy=True)
+                    # Compute embedding for new entry only (run in thread to avoid blocking)
+                    # MEMORY OPTIMIZATION: Use asyncio.to_thread to avoid blocking event loop
+                    embedding = await asyncio.to_thread(
+                        lambda: model.encode(combined_text, convert_to_numpy=True)
+                    )
                     embedding_list = embedding.tolist()
                     
                     metadata = {
