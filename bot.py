@@ -4368,10 +4368,14 @@ async def on_message(message):
             # Only respond if it's a direct request (not in a long conversation)
             if any(phrase in content_lower for phrase in ['add', 'enable', 'turn on', 'activate', 'can you', 'please']):
                 funny_responses = [
-                    "🎭 *adjusts virtual monocle* I'm a sophisticated support bot, not a goon! But I appreciate the enthusiasm! 😄",
-                    "🤖 Sorry, I'm more of a 'helpful assistant' bot than a 'goon mode' bot. But I'm here to help with your questions!",
-                    "💼 *straightens virtual tie* I'm a professional support bot, but I can still be fun! What do you need help with?",
-                    "🎩 *tips virtual hat* No goon mode here, but I'm ready to help with anything else! What's your question?"
+                    "🎭 *dramatically gasps* A goon mode? *clutches virtual pearls* I'm a respectable support bot! I have standards! ...Okay fine, I'm intrigued. But no. 😏",
+                    "🤖 *beep boop* ERROR: 'goon_mode.exe' not found. *beep* Did you mean: 'helpful_support_mode.exe'? *beep boop*",
+                    "💀 Bro... I'm literally just trying to help people with their questions. I'm not built for that kind of chaos. *sweats in binary*",
+                    "🎪 *circus music plays* Welcome to the show! Unfortunately, 'Goon Mode' is currently under maintenance... forever. But I can help with other things! 🎩",
+                    "😎 *puts on sunglasses* Look, I appreciate the vibe, but I'm more of a 'solve your problems' bot than a 'cause chaos' bot. Respect. ✊",
+                    "🤡 *honks nose* That's a hard no from me, chief. I'm a professional! ...Okay maybe a little unprofessional, but still no goon mode. 😂",
+                    "🦸 *strikes heroic pose* I fight for justice, truth, and helping users! Not... whatever goon mode is. *adjusts cape*",
+                    "🎰 *slot machine sounds* You've rolled: [NO GOON MODE] [HELPFUL BOT] [SORRY NOT SORRY] Better luck next time! 🎲"
                 ]
                 import random
                 response = random.choice(funny_responses)
