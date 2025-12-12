@@ -519,8 +519,19 @@ for i, test_key in enumerate(GEMINI_API_KEYS, 1):
     try:
         key_short = test_key[:15] + '...'
         genai.configure(api_key=test_key)
-        # Try to create a simple model to verify the key works (quick test)
-        test_model = genai.GenerativeModel('gemini-1.5-flash-latest')
+        # Try multiple model names to find one that works
+        test_models = ['gemini-1.5-flash', 'gemini-1.5-flash-002', 'gemini-1.5-pro', 'gemini-pro']
+        test_model = None
+        for model_name in test_models:
+            try:
+                test_model = genai.GenerativeModel(model_name)
+                break  # Found a working model
+            except:
+                continue
+        
+        if test_model is None:
+            raise Exception("No working model found")
+        
         # Simple test - just try to generate content (no timeout option, let it use default)
         test_response = test_model.generate_content("Hi")
         if test_response and hasattr(test_response, 'text') and test_response.text:
