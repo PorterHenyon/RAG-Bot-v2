@@ -3966,25 +3966,20 @@ async def on_thread_create(thread):
         if confident_docs:
             # Found matches in knowledge base - use top entries
             num_to_use = min(3, len(confident_docs))  # Use up to 3 best matches
+            bot_response_text = None
             try:
                 bot_response_text = await generate_ai_response(user_question, confident_docs[:num_to_use], image_parts)
                 if not bot_response_text or len(bot_response_text.strip()) == 0:
                     # Fallback if response is empty
-                    bot_response_text = f"I found relevant information about '{confident_docs[0].get('title', 'your question')}' in my knowledge base, but I'm having trouble generating a response right now. Please check the knowledge base entry or contact support."
+                    bot_response_text = None  # Will trigger fallback below
                     print(f"⚠️ generate_ai_response returned empty, using fallback")
             except Exception as ai_error:
                 print(f"❌ Error generating AI response: {ai_error}")
                 import traceback
                 traceback.print_exc()
-                # Fallback response with RAG entry info - show actual content from knowledge base
-                top_doc = confident_docs[0]
-                doc_title = top_doc.get('title', 'Relevant Entry')
-                doc_content = top_doc.get('content', '')
-                # Show first 1500 chars of content (Discord embed limit is 4096, but keep it reasonable)
-                content_preview = doc_content[:1500] + "..." if len(doc_content) > 1500 else doc_content
-                bot_response_text = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
+                bot_response_text = None  # Will trigger fallback below
             
-            # Ensure we have a response before sending
+            # Ensure we have a response before sending - show RAG content directly if AI failed
             if not bot_response_text or len(bot_response_text.strip()) == 0:
                 # Final fallback - show RAG content directly
                 top_doc = confident_docs[0]
@@ -3992,49 +3987,60 @@ async def on_thread_create(thread):
                 doc_content = top_doc.get('content', '')
                 content_preview = doc_content[:1500] + "..." if len(doc_content) > 1500 else doc_content
                 bot_response_text = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
-                print(f"⚠️ bot_response_text was empty, using final fallback with RAG content")
+                print(f"⚠️ Using RAG content fallback for '{thread.name}'")
             
             # Send AI response - SHORTER AND SIMPLER
-            ai_embed = discord.Embed(
-                title="✅ Solution",
-                description=bot_response_text,
-                color=0x2ECC71
-            )
-            ai_embed.add_field(
-                name="💬 Did this help?",
-                value="Let me know by clicking a button below!",
-                inline=False
-            )
-            ai_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
-            
-            # Create conversation for button handler
-            conversation = [
-                {
-                    'author': 'User',
-                    'content': initial_message,
-                    'timestamp': datetime.now().isoformat()
-                },
-                {
-                    'author': 'Bot',
-                    'content': bot_response_text,
-                    'timestamp': datetime.now().isoformat()
-                }
-            ]
-            
-            # Store images for potential escalation
-            if image_parts:
-                thread_images[thread_id] = image_parts
-                print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
-            
-            # Add solved button
-            solved_view = SolvedButton(thread_id)
-            await thread.send(embed=ai_embed, view=solved_view)
-            thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
-            
-            # Show which entries were used in terminal
-            print(f"✅ Responded to '{thread.name}' with RAG-based answer using {num_to_use} knowledge base {'entry' if num_to_use == 1 else 'entries'}:")
-            for i, doc in enumerate(confident_docs[:num_to_use], 1):
-                print(f"   {i}. '{doc.get('title', 'Unknown')}'")
+            try:
+                ai_embed = discord.Embed(
+                    title="✅ Solution",
+                    description=bot_response_text,
+                    color=0x2ECC71
+                )
+                ai_embed.add_field(
+                    name="💬 Did this help?",
+                    value="Let me know by clicking a button below!",
+                    inline=False
+                )
+                ai_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
+                
+                # Create conversation for button handler
+                conversation = [
+                    {
+                        'author': 'User',
+                        'content': initial_message,
+                        'timestamp': datetime.now().isoformat()
+                    },
+                    {
+                        'author': 'Bot',
+                        'content': bot_response_text,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                ]
+                
+                # Store images for potential escalation
+                if image_parts:
+                    thread_images[thread_id] = image_parts
+                    print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
+                
+                # Add solved button
+                solved_view = SolvedButton(thread_id)
+                await thread.send(embed=ai_embed, view=solved_view)
+                thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
+                
+                # Show which entries were used in terminal
+                print(f"✅ Responded to '{thread.name}' with RAG-based answer using {num_to_use} knowledge base {'entry' if num_to_use == 1 else 'entries'}:")
+                for i, doc in enumerate(confident_docs[:num_to_use], 1):
+                    print(f"   {i}. '{doc.get('title', 'Unknown')}'")
+            except Exception as send_error:
+                print(f"❌ CRITICAL: Failed to send response embed to thread {thread_id}: {send_error}")
+                import traceback
+                traceback.print_exc()
+                # Last resort: try to send plain text
+                try:
+                    await thread.send(f"✅ **Solution**\n\n{bot_response_text[:1900]}\n\n*I found this in my knowledge base but had trouble formatting it properly.*")
+                    print(f"⚠️ Sent plain text fallback for '{thread.name}'")
+                except Exception as final_error:
+                    print(f"❌ CRITICAL: Even plain text send failed: {final_error}")
             
             # Classify issue and remove notification if present
             issue_type = classify_issue(user_question)
@@ -4165,39 +4171,50 @@ async def on_thread_create(thread):
                 
             except Exception as e:
                 print(f"⚠ Error generating general AI response: {e}")
+                import traceback
+                traceback.print_exc()
                 # Fallback: shorter message
-                bot_response_text = "Not sure about this. Can you give more details or wait for our support team?"
+                bot_response_text = "I couldn't find specific information in my knowledge base for your question, and I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
                 
-                fallback_embed = discord.Embed(
-                    title="🤔 Need More Info",
-                    description=bot_response_text,
-                    color=0xF39C12
-                )
-                fallback_embed.set_footer(text="Revolution Macro")
-                
-                # Create conversation for button handler
-                conversation = [
-                    {
-                        'author': 'User',
-                        'content': initial_message,
-                        'timestamp': datetime.now().isoformat()
-                    },
-                    {
-                        'author': 'Bot',
-                        'content': bot_response_text,
-                        'timestamp': datetime.now().isoformat()
-                    }
-                ]
-                
-                # Store images for potential escalation (even for fallback)
-                if image_parts:
-                    thread_images[thread_id] = image_parts
-                
-                # Add satisfaction buttons (pass images for escalation)
-                button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
-                await thread.send(embed=fallback_embed, view=button_view)
-                thread_response_type[thread_id] = 'ai'  # Track as AI attempt
-                print(f"⚠ Sent fallback response for '{thread.name}' (AI generation failed).")
+                try:
+                    fallback_embed = discord.Embed(
+                        title="🤔 Need More Info",
+                        description=bot_response_text,
+                        color=0xF39C12
+                    )
+                    fallback_embed.set_footer(text="Revolution Macro")
+                    
+                    # Create conversation for button handler
+                    conversation = [
+                        {
+                            'author': 'User',
+                            'content': initial_message,
+                            'timestamp': datetime.now().isoformat()
+                        },
+                        {
+                            'author': 'Bot',
+                            'content': bot_response_text,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                    ]
+                    
+                    # Store images for potential escalation (even for fallback)
+                    if image_parts:
+                        thread_images[thread_id] = image_parts
+                    
+                    # Add satisfaction buttons (pass images for escalation)
+                    button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
+                    await thread.send(embed=fallback_embed, view=button_view)
+                    thread_response_type[thread_id] = 'ai'  # Track as AI attempt
+                    print(f"⚠ Sent fallback response for '{thread.name}' (AI generation failed).")
+                except Exception as send_error:
+                    print(f"❌ CRITICAL: Failed to send fallback embed to thread {thread_id}: {send_error}")
+                    # Last resort: try plain text
+                    try:
+                        await thread.send(bot_response_text)
+                        print(f"⚠️ Sent plain text fallback for '{thread.name}'")
+                    except Exception as final_error:
+                        print(f"❌ CRITICAL: Even plain text send failed: {final_error}")
     
         # Update forum post in API with bot response (must include all post data for full update)
         if bot_response_text and 'your-vercel-app' not in DATA_API_URL:
