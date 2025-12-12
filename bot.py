@@ -807,6 +807,90 @@ async def compute_embeddings_background():
         print(f"⚠️ Error in background embedding computation: {e}")
         print("   Bot will continue with keyword-based search until embeddings are ready")
 
+async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
+    """MEMORY OPTIMIZATION: Incrementally sync only new RAG entries to Pinecone
+    
+    This avoids recomputing all embeddings when only a few entries are added.
+    Works even with SKIP_EMBEDDING_BOOTSTRAP=true to save Railway CPU.
+    """
+    if not USE_PINECONE or not ENABLE_EMBEDDINGS:
+        return
+    
+    model = get_embedding_model()
+    if model is None:
+        print("⚠️ Cannot sync to Pinecone - embedding model not loaded")
+        return
+    
+    index = init_pinecone()
+    if not index:
+        print("⚠️ Cannot sync to Pinecone - index not available")
+        return
+    
+    try:
+        # Get existing vector IDs from Pinecone to find new entries
+        stats = index.describe_index_stats()
+        existing_count = stats.total_vector_count
+        
+        # If Pinecone is empty or we have more entries than Pinecone, sync new ones
+        if existing_count == 0:
+            print("🌲 Pinecone is empty - uploading all entries...")
+            compute_rag_embeddings()
+            return
+        
+        # Find entries that might be new (simple check: if count increased, upload new ones)
+        if len(new_rag_entries) > existing_count:
+            new_entries = new_rag_entries[existing_count:]  # Get entries after existing count
+            print(f"🌲 Found {len(new_entries)} new RAG entries - uploading to Pinecone...")
+            
+            vectors_to_upsert = []
+            for entry in new_entries:
+                entry_id = entry.get('id', '')
+                if not entry_id:
+                    continue
+                
+                # Combine title, content, and keywords for embedding
+                title = entry.get('title', '')
+                content = entry.get('content', '')
+                keywords = ' '.join(entry.get('keywords', []))
+                combined_text = f"{title}\n{keywords}\n{content[:500]}"
+                
+                try:
+                    # Compute embedding for new entry only
+                    embedding = model.encode(combined_text, convert_to_numpy=True)
+                    embedding_list = embedding.tolist()
+                    
+                    metadata = {
+                        'title': title[:1000],
+                        'content': content[:1000],
+                        'keywords': ' '.join(entry.get('keywords', []))[:500],
+                        'entry_id': entry_id
+                    }
+                    
+                    vectors_to_upsert.append({
+                        'id': entry_id,
+                        'values': embedding_list,
+                        'metadata': metadata
+                    })
+                except Exception as e:
+                    print(f"⚠️ Failed to compute embedding for new entry {entry_id}: {e}")
+                    continue
+            
+            # Upload new entries to Pinecone
+            if vectors_to_upsert:
+                chunk_size = 100
+                for i in range(0, len(vectors_to_upsert), chunk_size):
+                    chunk = vectors_to_upsert[i:i + chunk_size]
+                    index.upsert(vectors=chunk)
+                print(f"✅ Synced {len(vectors_to_upsert)} new entries to Pinecone")
+            else:
+                print("⚠️ No new entries to sync (all entries may already be in Pinecone)")
+        else:
+            print(f"✅ Pinecone has {existing_count} vectors, RAG has {len(new_rag_entries)} entries - no sync needed")
+    except Exception as e:
+        print(f"⚠️ Error syncing new entries to Pinecone: {e}")
+        import traceback
+        traceback.print_exc()
+
 # Cooldown tracking for /ask command on friends server (1 minute cooldown)
 ask_cooldowns = {}  # {user_id: last_used_timestamp}
 
