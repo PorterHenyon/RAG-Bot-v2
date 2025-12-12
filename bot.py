@@ -807,11 +807,15 @@ async def compute_embeddings_background():
         print(f"⚠️ Error in background embedding computation: {e}")
         print("   Bot will continue with keyword-based search until embeddings are ready")
 
-async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
+async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
     """MEMORY OPTIMIZATION: Incrementally sync only new RAG entries to Pinecone
     
     This avoids recomputing all embeddings when only a few entries are added.
     Works even with SKIP_EMBEDDING_BOOTSTRAP=true to save Railway CPU.
+    
+    Args:
+        new_rag_entries: List of new RAG entries from API
+        old_rag_entries: List of old RAG entries (before update)
     """
     if not USE_PINECONE or not ENABLE_EMBEDDINGS:
         return
@@ -837,67 +841,48 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
             compute_rag_embeddings()
             return
         
-        # Get all entry IDs from new RAG entries
+        # Compare entry IDs to find truly new entries
+        old_entry_ids = {entry.get('id') for entry in old_rag_entries if entry.get('id')}
         new_entry_ids = {entry.get('id') for entry in new_rag_entries if entry.get('id')}
+        truly_new_ids = new_entry_ids - old_entry_ids
         
-        # Try to fetch existing IDs from Pinecone to see which ones already exist
-        # We'll fetch a sample to check, then upload entries that might be new
-        # Since fetch requires IDs, we'll use a different approach: compare counts and upload missing ones
-        
-        # If we have more entries than Pinecone, find which ones are missing
-        if len(new_entry_ids) > existing_count:
-            # Fetch all existing IDs from Pinecone by querying with a dummy vector
-            # Actually, simpler: just try to fetch the new entry IDs to see which exist
-            # But fetch requires knowing IDs... so we'll upload entries that are in new list
-            
-            # Better approach: Get all entry IDs from current RAG_DATABASE (old) and compare
-            old_entry_ids = {entry.get('id') for entry in RAG_DATABASE if entry.get('id')}
-            truly_new_ids = new_entry_ids - old_entry_ids
-            
-            if truly_new_ids:
-                print(f"🌲 Found {len(truly_new_ids)} new RAG entries by ID comparison - uploading to Pinecone...")
-                new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
-            else:
-                # Fallback: if count increased but IDs match, might be updates - upload all to be safe
-                print(f"🌲 RAG count increased ({len(new_entry_ids)} vs {existing_count}) - checking for new entries...")
-                # Try fetching a few IDs to see if they exist
-                sample_ids = list(new_entry_ids)[:min(10, len(new_entry_ids))]
+        if not truly_new_ids:
+            print(f"✅ No new entry IDs detected (all {len(new_entry_ids)} entries already in RAG database)")
+            # Still check Pinecone in case entries were added but RAG_DATABASE wasn't updated properly
+            if len(new_entry_ids) > existing_count:
+                print(f"⚠️ RAG has {len(new_entry_ids)} entries but Pinecone has {existing_count} - checking Pinecone...")
+                # Fetch all new entry IDs from Pinecone to see which are missing
                 try:
-                    fetched = index.fetch(ids=sample_ids)
-                    existing_ids_in_pinecone = set(fetched.vectors.keys()) if fetched.vectors else set()
-                    # If sample exists, assume we need to check all
-                    # Otherwise, upload entries that aren't in the sample
-                    if existing_ids_in_pinecone:
-                        # Some exist, find truly new ones by checking all
-                        all_existing_ids = set()
-                        # Fetch in batches to check all IDs
-                        batch_size = 100
-                        entry_id_list = list(new_entry_ids)
-                        for i in range(0, len(entry_id_list), batch_size):
-                            batch = entry_id_list[i:i + batch_size]
-                            try:
-                                fetched_batch = index.fetch(ids=batch)
-                                if fetched_batch.vectors:
-                                    all_existing_ids.update(fetched_batch.vectors.keys())
-                            except:
-                                pass  # If fetch fails, assume they don't exist
-                        
-                        truly_new_ids = new_entry_ids - all_existing_ids
-                        new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
+                    batch_size = 100
+                    entry_id_list = list(new_entry_ids)
+                    existing_ids_in_pinecone = set()
+                    for i in range(0, len(entry_id_list), batch_size):
+                        batch = entry_id_list[i:i + batch_size]
+                        try:
+                            fetched_batch = index.fetch(ids=batch)
+                            if fetched_batch.vectors:
+                                existing_ids_in_pinecone.update(fetched_batch.vectors.keys())
+                        except Exception as fetch_err:
+                            print(f"⚠️ Error fetching batch: {fetch_err}")
+                            # If fetch fails, assume they don't exist and upload them
+                    
+                    missing_ids = new_entry_ids - existing_ids_in_pinecone
+                    if missing_ids:
+                        truly_new_ids = missing_ids
+                        print(f"🌲 Found {len(missing_ids)} entries missing from Pinecone")
                     else:
-                        # Sample doesn't exist, upload all new entries
-                        new_entries = new_rag_entries
-                except Exception as fetch_error:
-                    print(f"⚠️ Could not check existing IDs in Pinecone: {fetch_error}")
-                    # Fallback: upload entries that are in new list but not in old list
-                    truly_new_ids = new_entry_ids - old_entry_ids
-                    new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
-            
-            if not new_entries:
-                print(f"✅ All {len(new_entry_ids)} entries already exist in Pinecone - no sync needed")
+                        print(f"✅ All entries already in Pinecone")
+                        return
+                except Exception as e:
+                    print(f"⚠️ Could not verify entries in Pinecone: {e}")
+                    return
+            else:
                 return
+        
+        if truly_new_ids:
+            print(f"🌲 Found {len(truly_new_ids)} new RAG entries by ID comparison - uploading to Pinecone...")
+            new_entries = [entry for entry in new_rag_entries if entry.get('id') in truly_new_ids]
             
-            print(f"🌲 Uploading {len(new_entries)} new/updated entries to Pinecone...")
             vectors_to_upsert = []
             for entry in new_entries:
                 entry_id = entry.get('id', '')
@@ -941,7 +926,7 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_count):
             else:
                 print("⚠️ No entries to sync after processing")
         else:
-            print(f"✅ Pinecone has {existing_count} vectors, RAG has {len(new_entry_ids)} entries - no sync needed")
+            print(f"✅ All entries already synced to Pinecone")
     except Exception as e:
         print(f"⚠️ Error syncing new entries to Pinecone: {e}")
         import traceback
@@ -1873,11 +1858,22 @@ async def fetch_data_from_api():
                         print(f"✓ Data unchanged (hash match) - skipping update to save resources")
                         return True
                     
+                    # MEMORY OPTIMIZATION: Truncate RAG entry content in memory (full content stored in Pinecone)
+                    # Keep only first 500 chars of content for keyword search, rest is in Pinecone metadata
+                    optimized_rag = []
+                    for entry in new_rag:
+                        optimized_entry = entry.copy()
+                        # Truncate content to save memory (full content available from Pinecone)
+                        if 'content' in optimized_entry and len(optimized_entry['content']) > 500:
+                            optimized_entry['content'] = optimized_entry['content'][:500] + "..."
+                        optimized_rag.append(optimized_entry)
+                    
                     # Update data
-                    RAG_DATABASE = new_rag
+                    RAG_DATABASE = optimized_rag
                     AUTO_RESPONSES = new_auto
                     LEADERBOARD_DATA = new_leaderboard
                     last_data_hash = current_hash
+                    print(f"💾 Memory optimized: RAG entries truncated to 500 chars (full content in Pinecone)")
                     
                     # COST OPTIMIZATION: Only recompute embeddings if RAG data changed
                     # All embeddings stored in Pinecone (saves Railway CPU/memory costs)
@@ -2354,10 +2350,16 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
                 metadata = match.metadata or {}
                 similarity_score = float(match.score)
                 
-                # Reconstruct entry from Pinecone metadata (saves Railway memory)
-                # Try to get full entry from db first (for complete data), fallback to metadata
-                entry = next((e for e in db if e.get('id') == entry_id), None)
-                if not entry:
+                # MEMORY OPTIMIZATION: Prefer Pinecone metadata (full content) over local db (truncated)
+                # Local db has truncated content to save memory, Pinecone has full content
+                entry = None
+                # Try to get entry from local db first (for keywords and structure)
+                local_entry = next((e for e in db if e.get('id') == entry_id), None)
+                if local_entry:
+                    # Use local entry but replace content with full content from Pinecone
+                    entry = local_entry.copy()
+                    entry['content'] = metadata.get('content', local_entry.get('content', ''))
+                else:
                     # Fallback: reconstruct from metadata if not in local db
                     entry = {
                         'id': entry_id,
@@ -2412,7 +2414,10 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
     return find_relevant_rag_entries_keyword(query, db)
 
 def find_relevant_rag_entries_keyword(query, db=RAG_DATABASE):
-    """Fallback keyword-based search (used when embeddings unavailable)"""
+    """Fallback keyword-based search (used when embeddings unavailable)
+    
+    MEMORY OPTIMIZATION: Works with truncated content (full content available from Pinecone)
+    """
     query_words = set(query.lower().split())
     stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
     query_words = {word for word in query_words if word not in stopwords}
@@ -3189,7 +3194,7 @@ async def cleanup_processed_threads():
             del ask_cooldowns[user_id]
             cleanup_count += 1
         
-        # MEMORY OPTIMIZATION: Clean up caches
+        # MEMORY OPTIMIZATION: Clean up caches aggressively
         # Clean expired AI response cache
         current_time = datetime.now()
         expired_ai_cache = [
@@ -3206,6 +3211,16 @@ async def cleanup_processed_threads():
             for _ in range(excess):
                 oldest_key = next(iter(_query_embedding_cache))
                 del _query_embedding_cache[oldest_key]
+        
+        # MEMORY OPTIMIZATION: Clear old leaderboard data (keep only current month)
+        if LEADERBOARD_DATA.get('scores'):
+            current_month = datetime.now().strftime("%Y-%m")
+            if LEADERBOARD_DATA.get('month') != current_month:
+                old_scores_count = len(LEADERBOARD_DATA['scores'])
+                LEADERBOARD_DATA['scores'] = {}
+                LEADERBOARD_DATA['month'] = current_month
+                if old_scores_count > 0:
+                    print(f"   💾 Cleared {old_scores_count} old leaderboard entries (new month)")
         
         if cleanup_count > 0 or expired_ai_cache or len(_query_embedding_cache) > _query_cache_max_size:
             print(f"🧹 Memory cleanup: Removed {len(old_threads)} threads, {len(old_notifications)} notifications, {len(old_images)} images, {len(old_response_types)} response types, {len(old_retry_counts)} retry counts, {len(old_timers)} timers, {len(old_escalated)} escalated, {len(old_no_review)} no_review, {len(old_processing)} processing, {len(old_cooldowns)} cooldowns")
