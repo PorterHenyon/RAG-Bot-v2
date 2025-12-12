@@ -1854,6 +1854,7 @@ async def fetch_data_from_api():
                     
                     # Check if data actually changed (count or content) - BEFORE updating
                     old_rag_count = len(RAG_DATABASE)
+                    old_rag_entries = RAG_DATABASE.copy()  # Save old entries for comparison
                     old_auto_count = len(AUTO_RESPONSES)
                     old_auto_ids = {a.get('id') for a in AUTO_RESPONSES if a.get('id')}
                     rag_changed = len(new_rag) != old_rag_count
@@ -1884,7 +1885,7 @@ async def fetch_data_from_api():
                         if rag_changed and USE_PINECONE:
                             # MEMORY OPTIMIZATION: Incremental sync - only upload new entries to Pinecone
                             print("🔄 RAG database changed - syncing new entries to Pinecone...")
-                            await sync_new_entries_to_pinecone(new_rag, old_rag_count)
+                            await sync_new_entries_to_pinecone(new_rag, old_rag_entries)
                         elif SKIP_EMBEDDING_BOOTSTRAP:
                             print("⚠️ Embeddings enabled but SKIP_EMBEDDING_BOOTSTRAP=true. Not computing embeddings on this worker. Seed Pinecone externally.")
                         elif len(RAG_DATABASE) > 0:
