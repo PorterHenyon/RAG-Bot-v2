@@ -15,10 +15,11 @@ RUN pip install --no-cache-dir --upgrade pip && \
     pip uninstall -y pinecone-client 2>/dev/null || true && \
     pip install --no-cache-dir -r requirements.txt
 
-# Pre-download sentence-transformers model to cache it in Docker image
-# This speeds up builds significantly (5x faster) and prevents timeout issues during bot startup
-# If download fails during build, model will be downloaded at runtime (slower but still works)
-RUN python -c "from sentence_transformers import SentenceTransformer; print('Downloading model...'); SentenceTransformer('all-MiniLM-L6-v2'); print('Model cached successfully')" 2>&1 || (echo "⚠️ Model download failed during build (will retry at runtime)" && exit 0)
+# Skip model download during build (saves ~5-10 minutes)
+# Model will be downloaded at runtime only if needed (when SKIP_EMBEDDING_BOOTSTRAP=false)
+# Since Railway uses SKIP_EMBEDDING_BOOTSTRAP=true, this is never needed on Railway
+# Uncomment below if you need to pre-cache the model for local development:
+# RUN python -c "from sentence_transformers import SentenceTransformer; print('Downloading model...'); SentenceTransformer('all-MiniLM-L6-v2'); print('Model cached successfully')" 2>&1 || (echo "⚠️ Model download failed during build (will retry at runtime)" && exit 0)
 
 # No local storage needed - all data in Vercel KV API
 

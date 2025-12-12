@@ -638,15 +638,21 @@ def init_pinecone():
         
         if PINECONE_INDEX_NAME not in existing_indexes:
             print(f"🌲 Creating Pinecone index '{PINECONE_INDEX_NAME}'...")
-            # Get embedding dimension from model
-            model = get_embedding_model()
-            if model is None:
-                # Default dimension for all-MiniLM-L6-v2
-                dimension = 384
+            # COST OPTIMIZATION: Skip loading embedding model if bootstrap is disabled
+            # Use default dimension (384 for all-MiniLM-L6-v2) to avoid blocking startup
+            if SKIP_EMBEDDING_BOOTSTRAP:
+                dimension = 384  # Default for all-MiniLM-L6-v2
+                print(f"   Using default dimension {dimension} (SKIP_EMBEDDING_BOOTSTRAP=true)")
             else:
-                # Test encode to get dimension
-                test_embedding = model.encode("test", convert_to_numpy=True)
-                dimension = len(test_embedding)
+                # Get embedding dimension from model
+                model = get_embedding_model()
+                if model is None:
+                    # Default dimension for all-MiniLM-L6-v2
+                    dimension = 384
+                else:
+                    # Test encode to get dimension
+                    test_embedding = model.encode("test", convert_to_numpy=True)
+                    dimension = len(test_embedding)
             
             pc.create_index(
                 name=PINECONE_INDEX_NAME,
