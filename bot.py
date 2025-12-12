@@ -622,16 +622,12 @@ _embedding_model = None
 _pinecone_index = None
 _rag_embeddings = {}  # {entry_id: embedding_vector} - Fallback for non-Pinecone mode
 _rag_embeddings_version = 0  # Increment when RAG database changes
-# CPU OPTIMIZATION: Cache query embeddings to avoid re-encoding same queries
+# MEMORY OPTIMIZATION: Cache query embeddings to avoid re-encoding same queries
 _query_embedding_cache = {}  # {query_hash: embedding_vector}
-_query_cache_max_size = 100  # Limit cache size to prevent memory bloat
+_query_cache_max_size = 50  # Reduced from 100 to save memory (each vector is ~1.5KB)
 
 def get_embedding_model():
-    """Lazy load the embedding model (non-blocking, will fallback if fails)
-    
-    CPU OPTIMIZATION: Model is loaded once and cached in memory.
-    Only loads when first needed, not at startup.
-    """
+    """Lazy load the embedding model (non-blocking, will fallback if fails)"""
     global _embedding_model
     
     # CPU OPTIMIZATION: Skip embeddings if disabled
@@ -639,12 +635,12 @@ def get_embedding_model():
         return None
     
     if _embedding_model is None:
-        print("🔧 Loading embedding model for vector search (one-time CPU cost)...")
+        print("🔧 Loading embedding model for vector search...")
         try:
             # Use a lightweight, fast model for embeddings
-            # Model is loaded once and stays in memory (no repeated loading)
+            # Model should be pre-cached in Docker image, so this should be fast
             _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("✅ Embedding model loaded and cached in memory")
+            print("✅ Embedding model loaded")
         except Exception as e:
             print(f"⚠️ Failed to load embedding model: {e}")
             print("   Bot will continue with keyword-based search")
@@ -2936,7 +2932,7 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
-@tasks.loop(hours=6)  # Run every 6 hours
+@tasks.loop(hours=6)  # Run every 6 hours (optimized frequency to save CPU)
 async def cleanup_processed_threads():
     """Clean up old processed threads and prevent memory leaks"""
     global processed_threads, support_notification_messages, thread_images, thread_response_type, not_solved_retry_count
