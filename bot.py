@@ -3996,9 +3996,16 @@ async def on_thread_create(thread):
             
             # Send AI response - SHORTER AND SIMPLER
             try:
+                # Discord embed limits: description max 4096, field value max 1024
+                # Truncate description if needed
+                embed_description = bot_response_text
+                if len(embed_description) > 4096:
+                    embed_description = embed_description[:4090] + "..."
+                    print(f"⚠️ Truncated embed description from {len(bot_response_text)} to 4090 chars")
+                
                 ai_embed = discord.Embed(
                     title="✅ Solution",
-                    description=bot_response_text,
+                    description=embed_description,
                     color=0x2ECC71
                 )
                 ai_embed.add_field(
@@ -4037,15 +4044,40 @@ async def on_thread_create(thread):
                 for i, doc in enumerate(confident_docs[:num_to_use], 1):
                     print(f"   {i}. '{doc.get('title', 'Unknown')}'")
             except Exception as send_error:
-                print(f"❌ CRITICAL: Failed to send response embed to thread {thread_id}: {send_error}")
+                error_msg = str(send_error)
+                print(f"❌ CRITICAL: Failed to send response embed to thread {thread_id}: {error_msg}")
+                print(f"   Response text length: {len(bot_response_text)} chars")
                 import traceback
                 traceback.print_exc()
-                # Last resort: try to send plain text
+                
+                # Try to send as embed without view first (in case view is the issue)
                 try:
-                    await thread.send(f"✅ **Solution**\n\n{bot_response_text[:1900]}\n\n*I found this in my knowledge base but had trouble formatting it properly.*")
-                    print(f"⚠️ Sent plain text fallback for '{thread.name}'")
-                except Exception as final_error:
-                    print(f"❌ CRITICAL: Even plain text send failed: {final_error}")
+                    # Create simpler embed without view
+                    simple_embed = discord.Embed(
+                        title="✅ Solution",
+                        description=bot_response_text[:4000] if len(bot_response_text) > 4000 else bot_response_text,
+                        color=0x2ECC71
+                    )
+                    simple_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
+                    await thread.send(embed=simple_embed)
+                    print(f"✅ Sent response embed (without view) for '{thread.name}'")
+                    thread_response_type[thread_id] = 'ai'
+                except Exception as embed_error:
+                    print(f"❌ Embed send failed even without view: {embed_error}")
+                    # Last resort: try to send plain text
+                    try:
+                        # Split into multiple messages if too long
+                        max_chunk = 1900
+                        chunks = [bot_response_text[i:i+max_chunk] for i in range(0, len(bot_response_text), max_chunk)]
+                        for i, chunk in enumerate(chunks):
+                            if i == 0:
+                                await thread.send(f"✅ **Solution**\n\n{chunk}\n\n*I found this in my knowledge base.*")
+                            else:
+                                await thread.send(chunk)
+                        print(f"⚠️ Sent plain text fallback ({len(chunks)} message(s)) for '{thread.name}'")
+                        thread_response_type[thread_id] = 'ai'
+                    except Exception as final_error:
+                        print(f"❌ CRITICAL: Even plain text send failed: {final_error}")
             
             # Classify issue and remove notification if present
             issue_type = classify_issue(user_question)
