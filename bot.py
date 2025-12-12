@@ -3956,15 +3956,15 @@ async def on_thread_create(thread):
         # Add solved button
         solved_view = SolvedButton(thread_id, conversation)
         await thread.send(embed=auto_embed, view=solved_view)
-            bot_response_text = auto_response
-            thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
-            
-            # Classify issue and remove notification if present
-            issue_type = classify_issue(user_question)
-            await remove_support_notification(thread_id)
-            
-            # Apply tag to Discord thread based on issue type
-            await apply_issue_type_tag(thread, issue_type)
+        bot_response_text = auto_response
+        thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
+        
+        # Classify issue and remove notification if present
+        issue_type = classify_issue(user_question)
+        await remove_support_notification(thread_id)
+        
+        # Apply tag to Discord thread based on issue type
+        await apply_issue_type_tag(thread, issue_type)
             
             # Update forum post with classification
             if 'your-vercel-app' not in DATA_API_URL:
