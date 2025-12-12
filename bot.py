@@ -622,9 +622,16 @@ _embedding_model = None
 _pinecone_index = None
 _rag_embeddings = {}  # {entry_id: embedding_vector} - Fallback for non-Pinecone mode
 _rag_embeddings_version = 0  # Increment when RAG database changes
+# CPU OPTIMIZATION: Cache query embeddings to avoid re-encoding same queries
+_query_embedding_cache = {}  # {query_hash: embedding_vector}
+_query_cache_max_size = 100  # Limit cache size to prevent memory bloat
 
 def get_embedding_model():
-    """Lazy load the embedding model (non-blocking, will fallback if fails)"""
+    """Lazy load the embedding model (non-blocking, will fallback if fails)
+    
+    CPU OPTIMIZATION: Model is loaded once and cached in memory.
+    Only loads when first needed, not at startup.
+    """
     global _embedding_model
     
     # CPU OPTIMIZATION: Skip embeddings if disabled
@@ -632,12 +639,12 @@ def get_embedding_model():
         return None
     
     if _embedding_model is None:
-        print("🔧 Loading embedding model for vector search...")
+        print("🔧 Loading embedding model for vector search (one-time CPU cost)...")
         try:
             # Use a lightweight, fast model for embeddings
-            # Model should be pre-cached in Docker image, so this should be fast
+            # Model is loaded once and stays in memory (no repeated loading)
             _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-            print("✅ Embedding model loaded")
+            print("✅ Embedding model loaded and cached in memory")
         except Exception as e:
             print(f"⚠️ Failed to load embedding model: {e}")
             print("   Bot will continue with keyword-based search")
@@ -2171,10 +2178,25 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
     
     if index:
         try:
-            # COST OPTIMIZATION: Use Pinecone for all vector operations (saves Railway CPU)
-            # Compute query embedding (minimal CPU - just encoding)
-            query_embedding = model.encode(query, convert_to_numpy=True)
-            query_embedding_list = query_embedding.tolist()
+            # CPU OPTIMIZATION: Cache query embeddings to avoid re-encoding same queries
+            import hashlib
+            query_hash = hashlib.md5(query.lower().strip().encode()).hexdigest()
+            
+            if query_hash in _query_embedding_cache:
+                query_embedding_list = _query_embedding_cache[query_hash]
+                print(f"💾 Using cached query embedding (CPU saved!)")
+            else:
+                # COST OPTIMIZATION: Use Pinecone for all vector operations (saves Railway CPU)
+                # Compute query embedding (minimal CPU - just encoding)
+                query_embedding = model.encode(query, convert_to_numpy=True)
+                query_embedding_list = query_embedding.tolist()
+                
+                # Cache the embedding (with size limit to prevent memory bloat)
+                if len(_query_embedding_cache) >= _query_cache_max_size:
+                    # Remove oldest entry (simple FIFO)
+                    oldest_key = next(iter(_query_embedding_cache))
+                    del _query_embedding_cache[oldest_key]
+                _query_embedding_cache[query_hash] = query_embedding_list
             
             # Query Pinecone (all similarity computation happens in Pinecone cloud)
             query_results = index.query(
