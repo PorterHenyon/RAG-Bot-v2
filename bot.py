@@ -104,18 +104,23 @@ if len(valid_keys) != len(GEMINI_API_KEYS):
 print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (forum posts, /ask, etc.)")
 
 # COST OPTIMIZATION: Show cost-optimized status
+# Debug: Log actual values to diagnose
+env_enable = os.getenv('ENABLE_EMBEDDINGS', 'NOT_SET')
+print(f"🔍 DEBUG: ENABLE_EMBEDDINGS env='{env_enable}', ENABLE_EMBEDDINGS_EXPLICIT={ENABLE_EMBEDDINGS_EXPLICIT}, HAS_PINECONE_CONFIG={HAS_PINECONE_CONFIG}")
+print(f"🔍 DEBUG: ENABLE_EMBEDDINGS={ENABLE_EMBEDDINGS}, USE_PINECONE={USE_PINECONE}")
+
 if USE_PINECONE:
     print("🌲 Pinecone vector search enabled - cost-effective cloud-based vector search (Railway CPU saved!)")
     print("   ✅ All vector operations offloaded to Pinecone - minimal Railway costs")
-# This should never happen now due to the fix above, but keep as safety check
-if ENABLE_EMBEDDINGS and not HAS_PINECONE_CONFIG:
+elif ENABLE_EMBEDDINGS and not HAS_PINECONE_CONFIG:
     print("⚠️ WARNING: Embeddings enabled but Pinecone not configured!")
     print("   ⚠️ This should not happen - embeddings disabled to prevent expensive Railway CPU usage")
     print("   💡 Set PINECONE_API_KEY to enable cost-effective vector search")
 else:
     print("💡 Using keyword-based search (cost-effective, no CPU-intensive operations)")
     if HAS_PINECONE_CONFIG:
-        print("   💡 Pinecone is configured - set ENABLE_EMBEDDINGS=true to enable vector search")
+        print(f"   💡 Pinecone is configured (API key present) but ENABLE_EMBEDDINGS={ENABLE_EMBEDDINGS}")
+        print(f"   💡 Set ENABLE_EMBEDDINGS=true in Railway to enable vector search")
 
 if not SUPPORT_FORUM_CHANNEL_ID_STR:
     print("FATAL ERROR: 'SUPPORT_FORUM_CHANNEL_ID' not found in environment.")
