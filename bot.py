@@ -3902,64 +3902,51 @@ async def on_thread_create(thread):
             
             print(f"⚡ Responded to '{thread.name}' with instant auto-response.")
     else:
-        relevant_docs = find_relevant_rag_entries(user_question)
+        # PRIORITIZE PINECONE: Use Pinecone vector search first (same as /ask command)
+        print(f"🔍 Forum post: Searching RAG database for: '{user_question[:50]}...'")
+        relevant_docs = find_relevant_rag_entries(user_question, RAG_DATABASE, top_k=5, similarity_threshold=0.3)
         
-        # AGGRESSIVE RAG USAGE - Use knowledge base if we have ANYTHING at all
-        # Prefer RAG over general AI responses
-        confident_docs = []
-        
-        # Prepare query words
-        query_words = set(user_question.lower().split())
-        # Remove only common stopwords, keep all actual keywords (including short ones like vpn, rbc, api, ip)
-        stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
-        query_words = {word for word in query_words if word not in stopwords}
-        
-        print(f"🔍 Searching for matches with query words: {query_words}")
-        print(f"🔍 Total RAG entries available: {len(RAG_DATABASE)}")
-        if RAG_DATABASE:
-            print(f"🔍 RAG entry examples:")
-            for entry in RAG_DATABASE[:3]:
-                print(f"   - '{entry.get('title', 'Unknown')}' | Keywords: {entry.get('keywords', [])}")
-        
-        # Score ALL entries and use ANY that have matches
-        all_scored_entries = []
-        for entry in RAG_DATABASE:
-            score = 0
-            entry_title = entry.get('title', '').lower()
-            entry_keywords = ' '.join(entry.get('keywords', [])).lower()
-            entry_content = entry.get('content', '').lower()
+        # Log Pinecone results
+        if relevant_docs:
+            print(f"📊 Forum post: Found {len(relevant_docs)} relevant RAG entries using {'Pinecone' if USE_PINECONE else 'keyword'} search")
+            for i, doc in enumerate(relevant_docs[:3], 1):
+                print(f"   {i}. '{doc.get('title', 'Unknown')}'")
+        else:
+            print(f"⚠ Forum post: No RAG entries found via {'Pinecone' if USE_PINECONE else 'keyword'} search")
+            # Fallback to keyword matching if Pinecone found nothing
+            print(f"🔍 Falling back to keyword-based search...")
+            query_words = set(user_question.lower().split())
+            stopwords = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'was', 'are', 'be'}
+            query_words = {word for word in query_words if word not in stopwords}
             
-            # More aggressive matching - check if keywords are substrings too
-            for word in query_words:
-                # Exact word matches in title (highest priority)
-                if f" {word} " in f" {entry_title} " or entry_title.startswith(word) or entry_title.endswith(word):
-                    score += 5
-                # Partial match in title
-                elif word in entry_title:
-                    score += 3
-                    
-                # Exact word matches in keywords (high priority)
-                if f" {word} " in f" {entry_keywords} " or entry_keywords.startswith(word) or entry_keywords.endswith(word):
-                    score += 4
-                # Partial match in keywords
-                elif word in entry_keywords:
-                    score += 2
-                    
-                # Any match in content
-                if word in entry_content:
-                    score += 1
+            all_scored_entries = []
+            for entry in RAG_DATABASE:
+                score = 0
+                entry_title = entry.get('title', '').lower()
+                entry_keywords = ' '.join(entry.get('keywords', [])).lower()
+                entry_content = entry.get('content', '').lower()
+                
+                for word in query_words:
+                    if f" {word} " in f" {entry_title} " or entry_title.startswith(word) or entry_title.endswith(word):
+                        score += 5
+                    elif word in entry_title:
+                        score += 3
+                    if f" {word} " in f" {entry_keywords} " or entry_keywords.startswith(word) or entry_keywords.endswith(word):
+                        score += 4
+                    elif word in entry_keywords:
+                        score += 2
+                    if word in entry_content:
+                        score += 1
+                
+                if score > 0:
+                    all_scored_entries.append({'entry': entry, 'score': score})
+                    print(f"   ✓ Keyword match: '{entry.get('title', 'Unknown')}' (score: {score})")
             
-            if score > 0:
-                all_scored_entries.append({'entry': entry, 'score': score})
-                print(f"   ✓ Match found: '{entry.get('title', 'Unknown')}' (score: {score})")
+            all_scored_entries.sort(key=lambda x: x['score'], reverse=True)
+            relevant_docs = [item['entry'] for item in all_scored_entries[:5]]
         
-        # Sort by score and use top matches
-        all_scored_entries.sort(key=lambda x: x['score'], reverse=True)
-        confident_docs = [item['entry'] for item in all_scored_entries[:5]]  # Use top 5 matches
-        
-        if not confident_docs:
-            print(f"⚠ No RAG entries had any keyword matches")
-            print(f"   This means no entry in your knowledge base contains any of the words: {query_words}")
+        # Use Pinecone results (or keyword fallback) as confident_docs
+        confident_docs = relevant_docs
 
         if confident_docs:
             # Found matches in knowledge base - use top entries
@@ -3978,14 +3965,19 @@ async def on_thread_create(thread):
                 top_doc = confident_docs[0]
                 doc_title = top_doc.get('title', 'Relevant Entry')
                 doc_content = top_doc.get('content', '')
-                # Show first 800 chars of content (Discord embed limit is 4096, but keep it reasonable)
-                content_preview = doc_content[:800] + "..." if len(doc_content) > 800 else doc_content
+                # Show first 1500 chars of content (Discord embed limit is 4096, but keep it reasonable)
+                content_preview = doc_content[:1500] + "..." if len(doc_content) > 1500 else doc_content
                 bot_response_text = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
             
             # Ensure we have a response before sending
             if not bot_response_text or len(bot_response_text.strip()) == 0:
-                bot_response_text = f"I found information about '{confident_docs[0].get('title', 'your question')}' but couldn't generate a response. Please check the knowledge base or contact support."
-                print(f"⚠️ bot_response_text was empty, using final fallback")
+                # Final fallback - show RAG content directly
+                top_doc = confident_docs[0]
+                doc_title = top_doc.get('title', 'Relevant Entry')
+                doc_content = top_doc.get('content', '')
+                content_preview = doc_content[:1500] + "..." if len(doc_content) > 1500 else doc_content
+                bot_response_text = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
+                print(f"⚠️ bot_response_text was empty, using final fallback with RAG content")
             
             # Send AI response - SHORTER AND SIMPLER
             ai_embed = discord.Embed(
