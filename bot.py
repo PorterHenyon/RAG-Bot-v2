@@ -481,10 +481,11 @@ class GeminiKeyManager:
                 if 'not found' in error_str or 'invalid' in error_str or 'not available' in error_str:
                     # Try alternative models
                     alternatives = [
-                        'gemini-1.5-flash-latest',
-                        'gemini-1.5-flash-002',
-                        'gemini-flash-1.5',
-                        'gemini-1.5-flash',
+                        'gemini-2.5-flash',  # Current model
+                        'gemini-2.5-pro',
+                        'gemini-2.5-flash-lite',
+                        'gemini-pro',
+                        'gemini-flash-latest',
                         'gemini-pro-latest'
                     ]
                     for alt_model in alternatives:
@@ -519,8 +520,8 @@ for i, test_key in enumerate(GEMINI_API_KEYS, 1):
     try:
         key_short = test_key[:15] + '...'
         genai.configure(api_key=test_key)
-        # Try multiple model names to find one that works
-        test_models = ['gemini-1.5-flash', 'gemini-1.5-flash-002', 'gemini-1.5-pro', 'gemini-pro']
+        # Try multiple model names to find one that works (Gemini 1.5 was shut down Sep 2025, use 2.5)
+        test_models = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-pro']
         test_model = None
         for model_name in test_models:
             try:
@@ -2435,14 +2436,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try models in order - start with most reliable/commonly available models
+    # Try models in order - Gemini 1.5 was shut down Sep 2025, use 2.5 models
     models_to_try = [
-        'gemini-1.5-flash',  # Most common and reliable
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-pro',
-        'gemini-pro',
-        'gemini-flash-latest',
-        'gemini-pro-latest'
+        'gemini-2.5-flash',  # Current model (replaced 1.5-flash)
+        'gemini-2.5-pro',   # Advanced model
+        'gemini-2.5-flash-lite',  # Cost-effective variant
+        'gemini-pro',  # Legacy fallback
+        'gemini-flash-latest',  # Legacy fallback
+        'gemini-pro-latest'  # Legacy fallback
     ]
     
     # Log knowledge base usage
@@ -2718,7 +2719,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         print("🔍 Running final diagnostic test...")
         test_key = key_manager.get_current_key()
         genai.configure(api_key=test_key)
-        test_model = genai.GenerativeModel('gemini-1.5-flash')
+        test_model = genai.GenerativeModel('gemini-2.5-flash')
         test_response = test_model.generate_content("Say hello")
         print(f"   ✓ Direct API test SUCCEEDED: {test_response.text[:50]}")
         print(f"   ⚠️ This means the API works, but something in generate_ai_response failed")
@@ -6695,13 +6696,12 @@ async def test_api_keys(interaction: discord.Interaction):
         
         # Try multiple models to find one that works
         models_to_try = [
-            'gemini-1.5-flash',  # Most common and reliable
-            'gemini-1.5-flash-latest',
-            'gemini-1.5-pro',
-            'gemini-pro',
-            'gemini-flash-latest',
-            'gemini-pro-latest',
-            'gemini-1.5-flash-002'
+            'gemini-2.5-flash',  # Current model (replaced 1.5-flash)
+            'gemini-2.5-pro',   # Advanced model
+            'gemini-2.5-flash-lite',  # Cost-effective variant
+            'gemini-pro',  # Legacy fallback
+            'gemini-flash-latest',  # Legacy fallback
+            'gemini-pro-latest'  # Legacy fallback
         ]
         model_worked = False
         working_model = None
