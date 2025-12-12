@@ -2161,9 +2161,12 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
     # Fallback to keyword search if embeddings not available
     if model is None:
         print("⚠️ Using keyword-based search (embeddings not available)")
+        print(f"   DEBUG: ENABLE_EMBEDDINGS={ENABLE_EMBEDDINGS}, USE_PINECONE={USE_PINECONE}, FORCE_KEYWORD_SEARCH={FORCE_KEYWORD_SEARCH}")
         return find_relevant_rag_entries_keyword(query, db)
     
     # Try Pinecone first if available
+    if USE_PINECONE:
+        print(f"🌲 Attempting Pinecone search (USE_PINECONE={USE_PINECONE}, ENABLE_EMBEDDINGS={ENABLE_EMBEDDINGS})")
     index = init_pinecone() if USE_PINECONE else None
     
     if index:
@@ -3899,9 +3902,9 @@ async def on_thread_create(thread):
             thread_images[thread_id] = image_parts
             print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id} (for escalation if needed)")
         
-            # Add solved button
-            solved_view = SolvedButton(thread_id, conversation)
-            await thread.send(embed=auto_embed, view=solved_view)
+        # Add solved button
+        solved_view = SolvedButton(thread_id, conversation)
+        await thread.send(embed=auto_embed, view=solved_view)
             bot_response_text = auto_response
             thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
             
