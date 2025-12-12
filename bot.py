@@ -1741,11 +1741,12 @@ async def fetch_data_from_api():
                     # COST OPTIMIZATION: Only recompute embeddings if RAG data changed
                     # All embeddings stored in Pinecone (saves Railway CPU/memory costs)
                     if ENABLE_EMBEDDINGS:
-                        if SKIP_EMBEDDING_BOOTSTRAP:
+                        if rag_changed and USE_PINECONE:
+                            # MEMORY OPTIMIZATION: Incremental sync - only upload new entries to Pinecone
+                            print("🔄 RAG database changed - syncing new entries to Pinecone...")
+                            await sync_new_entries_to_pinecone(new_rag, old_rag_count)
+                        elif SKIP_EMBEDDING_BOOTSTRAP:
                             print("⚠️ Embeddings enabled but SKIP_EMBEDDING_BOOTSTRAP=true. Not computing embeddings on this worker. Seed Pinecone externally.")
-                        elif rag_changed:
-                            print("🔄 RAG database changed - uploading embeddings to Pinecone...")
-                            compute_rag_embeddings()  # Stores in Pinecone, not Railway memory
                         elif len(RAG_DATABASE) > 0:
                             # Check if Pinecone has embeddings, if not compute them
                             if USE_PINECONE:
