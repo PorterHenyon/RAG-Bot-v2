@@ -1400,8 +1400,15 @@ class SolvedButton(discord.ui.View):
             else:
                 ai_embed.set_footer(text="Revolution Macro AI")
             
-            # Add solved button
-            solved_view = SolvedButton(self.thread_id)
+            # Add solved button - create conversation for follow-up response
+            followup_conversation = self.conversation + [
+                {
+                    'author': 'Bot',
+                    'content': truncated_response,
+                    'timestamp': datetime.now().isoformat()
+                }
+            ]
+            solved_view = SolvedButton(self.thread_id, followup_conversation)
             await thread.send(embed=ai_embed, view=solved_view)
             thread_response_type[self.thread_id] = 'ai'
             
@@ -3893,7 +3900,7 @@ async def on_thread_create(thread):
             print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id} (for escalation if needed)")
         
             # Add solved button
-            solved_view = SolvedButton(thread_id)
+            solved_view = SolvedButton(thread_id, conversation)
             await thread.send(embed=auto_embed, view=solved_view)
             bot_response_text = auto_response
             thread_response_type[thread_id] = 'auto'  # Track that we gave an auto-response
@@ -4044,7 +4051,7 @@ async def on_thread_create(thread):
                     print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
                 
                 # Add solved button
-                solved_view = SolvedButton(thread_id)
+                solved_view = SolvedButton(thread_id, conversation)
                 await thread.send(embed=ai_embed, view=solved_view)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
                 
@@ -4765,8 +4772,8 @@ async def on_message(message):
                                                     )
                                                     ai_embed.set_footer(text="Revolution Macro AI")
                                                     
-                                                    # Add solved button
-                                                    solved_view = SolvedButton(thread_id)
+                                                    # Add solved button - use existing conversation
+                                                    solved_view = SolvedButton(thread_id, conversation)
                                                     await thread_channel.send(embed=ai_embed, view=solved_view)
                                                     thread_response_type[thread_id] = 'ai'
                                                     updated_status = 'AI Response'
