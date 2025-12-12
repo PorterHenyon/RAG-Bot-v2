@@ -4360,34 +4360,6 @@ async def on_thread_create(thread):
 @bot.event
 async def on_message(message):
     """Listen for new messages in threads and update forum posts in real-time"""
-    
-    # 🎭 Easter egg: Funny response to "goon mode" requests
-    if message.content and isinstance(message.content, str):
-        content_lower = message.content.lower()
-        if 'goon mode' in content_lower or 'goonmode' in content_lower:
-            # Only respond if it's a direct request (not in a long conversation)
-            if any(phrase in content_lower for phrase in ['add', 'enable', 'turn on', 'activate', 'can you', 'please']):
-                funny_responses = [
-                    "🎭 *dramatically gasps* A goon mode? *clutches virtual pearls* I'm a respectable support bot! I have standards! ...Okay fine, I'm intrigued. But no. 😏",
-                    "🤖 *beep boop* ERROR: 'goon_mode.exe' not found. *beep* Did you mean: 'helpful_support_mode.exe'? *beep boop*",
-                    "💀 Bro... I'm literally just trying to help people with their questions. I'm not built for that kind of chaos. *sweats in binary*",
-                    "🎪 *circus music plays* Welcome to the show! Unfortunately, 'Goon Mode' is currently under maintenance... forever. But I can help with other things! 🎩",
-                    "😎 *puts on sunglasses* Look, I appreciate the vibe, but I'm more of a 'solve your problems' bot than a 'cause chaos' bot. Respect. ✊",
-                    "🤡 *honks nose* That's a hard no from me, chief. I'm a professional! ...Okay maybe a little unprofessional, but still no goon mode. 😂",
-                    "🦸 *strikes heroic pose* I fight for justice, truth, and helping users! Not... whatever goon mode is. *adjusts cape*",
-                    "🎰 *slot machine sounds* You've rolled: [NO GOON MODE] [HELPFUL BOT] [SORRY NOT SORRY] Better luck next time! 🎲"
-                ]
-                import random
-                response = random.choice(funny_responses)
-                try:
-                    await message.channel.send(response)
-                    print(f"🎭 Sent funny 'goon mode' easter egg response to {message.author.name}")
-                except Exception as e:
-                    print(f"⚠️ Couldn't send easter egg response: {e}")
-                # Continue processing the message normally
-                await bot.process_commands(message)
-                return
-    
     # Only process messages in threads within our forum channel or category
     if not message.channel or not hasattr(message.channel, 'parent_id') or not message.channel.parent_id:
         await bot.process_commands(message)
