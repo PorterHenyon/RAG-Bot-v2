@@ -836,9 +836,10 @@ from collections import deque
 # Track API calls per key (for monitoring)
 gemini_api_calls_by_key = {key[:10] + '...': deque(maxlen=100) for key in GEMINI_API_KEYS}
 
-# Cache for AI responses (reduces duplicate API calls)
+# MEMORY OPTIMIZATION: Cache for AI responses (reduces duplicate API calls)
 ai_response_cache = {}  # {query_hash: (response, timestamp)}
 AI_CACHE_TTL = 3600  # Cache responses for 1 hour
+AI_CACHE_MAX_SIZE = 50  # Maximum cache entries (reduced to save memory)
 
 # Hash for data change detection (skip unnecessary syncs)
 last_data_hash = None
@@ -2621,19 +2622,18 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ Empty response from '{model_name}', trying next model...")
                 continue
             
-            # Cache the response (if no images)
+            # Cache the response (if no images) - MEMORY OPTIMIZED
             if not image_parts and 'cache_key' in locals():
-                ai_response_cache[cache_key] = (response_text, datetime.now())
-                print(f"✓ Cached AI response (cache size: {len(ai_response_cache)})")
-                
-                # Clean old cache entries if cache gets too large (prevent memory leaks)
-                if len(ai_response_cache) > 100:
+                # MEMORY OPTIMIZATION: Enforce max cache size before adding
+                if len(ai_response_cache) >= AI_CACHE_MAX_SIZE:
+                    # Remove oldest entries first (FIFO)
                     sorted_cache = sorted(ai_response_cache.items(), key=lambda x: x[1][1])
-                    for old_key, _ in sorted_cache[:20]:
+                    entries_to_remove = len(ai_response_cache) - AI_CACHE_MAX_SIZE + 1
+                    for old_key, _ in sorted_cache[:entries_to_remove]:
                         del ai_response_cache[old_key]
-                    print(f"✓ Cleaned cache (now {len(ai_response_cache)} entries)")
+                    print(f"💾 Cleaned {entries_to_remove} old cache entries (memory saved)")
                 
-                # Also clean expired entries periodically (prevent memory leaks)
+                # Also clean expired entries (prevent memory leaks)
                 current_time = datetime.now()
                 expired_keys = [
                     key for key, (_, timestamp) in ai_response_cache.items()
@@ -2642,7 +2642,11 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 for key in expired_keys:
                     del ai_response_cache[key]
                 if expired_keys:
-                    print(f"✓ Cleaned {len(expired_keys)} expired cache entries")
+                    print(f"💾 Cleaned {len(expired_keys)} expired cache entries")
+                
+                # Now add new entry
+                ai_response_cache[cache_key] = (response_text, datetime.now())
+                print(f"✓ Cached AI response (cache size: {len(ai_response_cache)}/{AI_CACHE_MAX_SIZE})")
             
             # Success!
             print(f"✅ SUCCESS! Got {len(response_text)} character response from '{model_name}'")
@@ -2932,10 +2936,11 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
-@tasks.loop(hours=6)  # Run every 6 hours (optimized frequency to save CPU)
+@tasks.loop(hours=3)  # Run every 3 hours (more frequent to save memory)
 async def cleanup_processed_threads():
-    """Clean up old processed threads and prevent memory leaks"""
+    """Clean up old processed threads and prevent memory leaks - MEMORY OPTIMIZED"""
     global processed_threads, support_notification_messages, thread_images, thread_response_type, not_solved_retry_count
+    global ai_response_cache, _query_embedding_cache
     global satisfaction_timers, escalated_threads, no_review_threads, processing_threads, ask_cooldowns
     
     try:
@@ -2960,10 +2965,11 @@ async def cleanup_processed_threads():
             del support_notification_messages[thread_id]
             cleanup_count += 1
         
-        # Clean up thread_images (PIL images can be large)
+        # MEMORY OPTIMIZATION: Clean up thread_images aggressively (PIL images can be large)
+        # Reduced from 24 hours to 2 hours to save memory
         old_images = [
             thread_id for thread_id in thread_images.keys()
-            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 86400)  # 24 hours
+            if thread_id not in processed_threads or (thread_id in processed_threads and (now - processed_threads[thread_id]).total_seconds() > 7200)  # 2 hours (reduced from 24h)
         ]
         for thread_id in old_images:
             # Close PIL images before deleting to free memory
@@ -3041,8 +3047,30 @@ async def cleanup_processed_threads():
             del ask_cooldowns[user_id]
             cleanup_count += 1
         
-        if cleanup_count > 0:
+        # MEMORY OPTIMIZATION: Clean up caches
+        # Clean expired AI response cache
+        current_time = datetime.now()
+        expired_ai_cache = [
+            key for key, (_, timestamp) in ai_response_cache.items()
+            if (current_time - timestamp).total_seconds() > AI_CACHE_TTL
+        ]
+        for key in expired_ai_cache:
+            del ai_response_cache[key]
+        
+        # Limit query embedding cache size (keep it small)
+        if len(_query_embedding_cache) > _query_cache_max_size:
+            # Remove oldest entries (simple FIFO)
+            excess = len(_query_embedding_cache) - _query_cache_max_size
+            for _ in range(excess):
+                oldest_key = next(iter(_query_embedding_cache))
+                del _query_embedding_cache[oldest_key]
+        
+        if cleanup_count > 0 or expired_ai_cache or len(_query_embedding_cache) > _query_cache_max_size:
             print(f"🧹 Memory cleanup: Removed {len(old_threads)} threads, {len(old_notifications)} notifications, {len(old_images)} images, {len(old_response_types)} response types, {len(old_retry_counts)} retry counts, {len(old_timers)} timers, {len(old_escalated)} escalated, {len(old_no_review)} no_review, {len(old_processing)} processing, {len(old_cooldowns)} cooldowns")
+            if expired_ai_cache:
+                print(f"   💾 Also cleaned {len(expired_ai_cache)} expired AI cache entries")
+            if len(_query_embedding_cache) > _query_cache_max_size:
+                print(f"   💾 Trimmed query embedding cache to {_query_cache_max_size} entries")
     except Exception as e:
         print(f"⚠️ Error in cleanup_processed_threads: {e}")
         import traceback
