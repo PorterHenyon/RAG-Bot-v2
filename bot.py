@@ -444,11 +444,24 @@ class GroqKeyManager:
             errors = self.key_error_count[key_short]
             rate_limited = self.key_rate_limited[key_short]
             
+            # Calculate total calls: use max of tracked usage, or sum of success + errors
+            # This handles cases where success/errors are tracked but usage_count isn't
+            actual_total = max(total, success + errors) if (success > 0 or errors > 0) else total
+            
+            # Calculate success rate based on actual usage
+            if actual_total > 0:
+                success_rate = (success / actual_total * 100)
+            elif success > 0:
+                # If we have successes but no total tracked, assume 100% success rate
+                success_rate = 100.0
+            else:
+                success_rate = 0.0
+            
             stats[key_short] = {
-                'total_calls': total,
+                'total_calls': actual_total,
                 'successful_calls': success,
                 'errors': errors,
-                'success_rate': (success / total * 100) if total > 0 else 0,
+                'success_rate': success_rate,
                 'rate_limited': rate_limited,
                 'health_score': self.get_key_health_score(i)
             }
@@ -974,7 +987,7 @@ async def check_rate_limit(key_manager=None, api_calls_dict=None):
     
     # Proactive rotation: if we're at 7+ calls, rotate to a better key
     if recent_count >= 7:
-        print(f"⚠️ Key {key_short} has {recent_count}/10 calls - proactively rotating to better key")
+        print(f"⚠️ Key {key_short} has {recent_count}/30 calls - proactively rotating to better key")
         key_manager.rotate_key()
         new_key = key_manager.get_current_key()
         new_key_short = new_key[:10] + '...'
@@ -999,7 +1012,7 @@ async def check_rate_limit(key_manager=None, api_calls_dict=None):
                 return False
             return True
         else:
-            print(f"✓ Rotated to key {new_key_short} with {new_recent_count}/10 calls")
+            print(f"✓ Rotated to key {new_key_short} with {new_recent_count}/30 calls")
             return True
     
     # Check if we're at the hard limit (10 per minute per key)
@@ -2802,7 +2815,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                     print(f"   💡 Paid tier has 1500 requests/minute - much higher limits")
                 else:
                     print(f"   ❌ QUOTA EXCEEDED (billing limit): {error_msg[:150]}")
-                    print(f"   💡 All keys from the same Google account share the same quota.")
+                    print(f"   💡 Check your Groq API usage and rate limits: https://console.groq.com/usage")
                     print(f"   💡 Check billing: https://console.cloud.google.com/billing")
                     print(f"   💡 Or use keys from different Google accounts.")
                 # Mark as rate limited temporarily so we don't keep trying this key
@@ -6808,7 +6821,7 @@ async def status(interaction: discord.Interaction):
             # Show error count if there are errors
             error_info = f", {errors} errors" if errors > 0 else ""
             key_stats_text += f"{status_icon} {key_short}:\n"
-            key_stats_text += f"  {calls_for_key}/10 calls, {success_rate:.0f}% success{error_info}\n"
+            key_stats_text += f"  {calls_for_key}/30 calls, {success_rate:.0f}% success{error_info}\n"
             key_stats_text += f"  Health: {health:.0f}\n"
         
         if len(usage_stats) > 4:
@@ -7124,13 +7137,14 @@ async def check_api_keys(interaction: discord.Interaction):
                 inline=True
             )
         
-        # Add warning if all keys are from same account
+        # Add note about Groq API keys
         if total_keys > 1:
             key_embed.add_field(
-                name="⚠️ Important Note",
+                name="💡 About Groq API Keys",
                 value=(
-                    "If all keys are from the **same Google account**, they share the same quota/rate limits.\n"
-                    "For true load distribution, use keys from **different Google accounts**."
+                    "Each Groq API key has its own **independent rate limits** (30 req/min free tier).\n"
+                    "Keys can be from the same account and will still distribute load effectively.\n"
+                    "Multiple keys help avoid rate limits and improve reliability."
                 ),
                 inline=False
             )
