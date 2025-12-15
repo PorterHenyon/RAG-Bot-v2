@@ -986,7 +986,7 @@ async def check_rate_limit(key_manager=None, api_calls_dict=None):
     recent_count = len(api_calls)
     
     # Proactive rotation: if we're at 7+ calls, rotate to a better key
-    if recent_count >= 7:
+    if recent_count >= 20:
         print(f"⚠️ Key {key_short} has {recent_count}/30 calls - proactively rotating to better key")
         key_manager.rotate_key()
         new_key = key_manager.get_current_key()
@@ -1003,7 +1003,7 @@ async def check_rate_limit(key_manager=None, api_calls_dict=None):
         
         new_recent_count = len(new_api_calls)
         
-        if new_recent_count >= 10:
+        if new_recent_count >= 30:
             # All keys are at limit, must wait
             if new_api_calls:
                 oldest_call = new_api_calls[0]
