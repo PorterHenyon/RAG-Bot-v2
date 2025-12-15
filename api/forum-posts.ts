@@ -261,10 +261,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (postId) {
         const posts = await getForumPosts();
         const initialLength = posts.length;
-        const filtered = posts.filter(p => p.id !== postId);
+        // Check both id and postId fields (same as POST action='delete')
+        const filtered = posts.filter(p => p.id !== postId && p.postId !== postId.replace('POST-', ''));
         await saveForumPosts(filtered);
         const deleted = initialLength > filtered.length;
         if (deleted) {
+          console.log(`Deleted post ${postId} from dashboard via DELETE method`);
           return res.status(200).json({ success: true, message: 'Post deleted' });
         }
         // Even if not found in API, return success (might be local mock data)

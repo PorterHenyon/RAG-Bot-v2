@@ -8,7 +8,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from discord.ext import tasks
-import google.generativeai as genai
+from groq import Groq
 from dotenv import load_dotenv
 import aiohttp
 import numpy as np
@@ -73,44 +73,46 @@ DISCORD_GUILD_ID_STR = os.getenv('DISCORD_GUILD_ID', '1265864190883532872')  # S
 DATA_API_URL = os.getenv('DATA_API_URL', 'https://your-vercel-app.vercel.app/api/data')
 
 # Load API keys from environment variable
-# All keys (GEMINI_API_KEY, GEMINI_API_KEY_2 through GEMINI_API_KEY_6) are used for all operations
-GEMINI_API_KEYS = []
+# All keys (GROQ_API_KEY, GROQ_API_KEY_2 through GROQ_API_KEY_20) are used for all operations
+# Groq provides cheap, fast LLM inference with reliable API keys
+GROQ_API_KEYS = []
 
-# Load GEMINI_API_KEY (primary key)
-env_key = os.getenv('GEMINI_API_KEY')
+# Load GROQ_API_KEY (primary key)
+env_key = os.getenv('GROQ_API_KEY')
 if env_key:
-    GEMINI_API_KEYS.append(env_key)
-    print(f"✓ Loaded API key from GEMINI_API_KEY")
+    GROQ_API_KEYS.append(env_key)
+    print(f"✓ Loaded API key from GROQ_API_KEY")
 
-# Load additional keys (GEMINI_API_KEY_2 through GEMINI_API_KEY_20 - supports up to 20 keys)
+# Load additional keys (GROQ_API_KEY_2 through GROQ_API_KEY_20 - supports up to 20 keys)
 # The system will automatically use all available keys for rotation
-for i in range(2, 21):  # Support up to 20 keys total (GEMINI_API_KEY + GEMINI_API_KEY_2 through GEMINI_API_KEY_20)
-    additional_key = os.getenv(f'GEMINI_API_KEY_{i}')
-    if additional_key and additional_key not in GEMINI_API_KEYS:
-        GEMINI_API_KEYS.append(additional_key)
-        print(f"✓ Loaded API key from GEMINI_API_KEY_{i}")
+for i in range(2, 21):  # Support up to 20 keys total (GROQ_API_KEY + GROQ_API_KEY_2 through GROQ_API_KEY_20)
+    additional_key = os.getenv(f'GROQ_API_KEY_{i}')
+    if additional_key and additional_key not in GROQ_API_KEYS:
+        GROQ_API_KEYS.append(additional_key)
+        print(f"✓ Loaded API key from GROQ_API_KEY_{i}")
 
 # --- Initial Validation ---
 if not DISCORD_BOT_TOKEN:
     print("FATAL ERROR: 'DISCORD_BOT_TOKEN' not found in environment.")
     exit()
 
-if not GEMINI_API_KEYS:
-    print("FATAL ERROR: No Gemini API keys found in environment.")
-    print("   Set GEMINI_API_KEY or GEMINI_API_KEY_2 through GEMINI_API_KEY_20")
+if not GROQ_API_KEYS:
+    print("FATAL ERROR: No Groq API keys found in environment.")
+    print("   Set GROQ_API_KEY or GROQ_API_KEY_2 through GROQ_API_KEY_20")
+    print("   Get keys at: https://console.groq.com/keys")
     exit()
 
 # Validate keys are not empty
-valid_keys = [key for key in GEMINI_API_KEYS if key and len(key.strip()) > 10]
-if len(valid_keys) != len(GEMINI_API_KEYS):
+valid_keys = [key for key in GROQ_API_KEYS if key and len(key.strip()) > 10]
+if len(valid_keys) != len(GROQ_API_KEYS):
     print(f"⚠️ WARNING: Some API keys are invalid (empty or too short)")
-    print(f"   Loaded {len(valid_keys)} valid key(s) out of {len(GEMINI_API_KEYS)} total")
-    GEMINI_API_KEYS = valid_keys
-    if not GEMINI_API_KEYS:
+    print(f"   Loaded {len(valid_keys)} valid key(s) out of {len(GROQ_API_KEYS)} total")
+    GROQ_API_KEYS = valid_keys
+    if not GROQ_API_KEYS:
         print("FATAL ERROR: No valid API keys found after validation")
         exit()
 
-print(f"✓ Loaded {len(GEMINI_API_KEYS)} valid API key(s) for all operations (forum posts, /ask, etc.)")
+print(f"✓ Loaded {len(GROQ_API_KEYS)} valid Groq API key(s) for all operations (forum posts, /ask, etc.)")
 
 # COST OPTIMIZATION: Show cost-optimized status
 if FORCE_KEYWORD_SEARCH:
@@ -147,9 +149,9 @@ except ValueError:
     print("FATAL ERROR: 'DISCORD_GUILD_ID' is not a valid number.")
     exit()
 
-# --- GEMINI API KEY ROTATION SYSTEM ---
-class GeminiKeyManager:
-    """Manages multiple Gemini API keys with intelligent rotation, load balancing, and rate limit handling"""
+# --- GROQ API KEY ROTATION SYSTEM ---
+class GroqKeyManager:
+    """Manages multiple Groq API keys with intelligent rotation, load balancing, and rate limit handling"""
     
     def __init__(self, api_keys):
         self.api_keys = api_keys
@@ -164,22 +166,21 @@ class GeminiKeyManager:
         self.key_rate_limit_time = {name: None for name in key_short_names}  # When rate limit occurred
         self.key_last_used = {name: None for name in key_short_names}  # Last usage timestamp
         
-        # Optimize rotation based on number of keys
-        # More keys = more frequent rotation to distribute load evenly
-        # This ensures each key gets roughly equal usage over time
+        # Groq has higher rate limits, so we can rotate less frequently
+        # Groq free tier: 30 requests/minute, paid: much higher
         if len(api_keys) >= 10:
-            self.calls_per_key = 2  # Very frequent rotation with many keys
+            self.calls_per_key = 3  # Rotate frequently with many keys
         elif len(api_keys) >= 6:
-            self.calls_per_key = 3  # Frequent rotation with 6+ keys
+            self.calls_per_key = 5  # Moderate rotation with 6+ keys
         elif len(api_keys) >= 3:
-            self.calls_per_key = 4  # Moderate rotation with 3-5 keys
+            self.calls_per_key = 8  # Less frequent rotation with 3-5 keys
         else:
-            self.calls_per_key = 5  # Less frequent with 1-2 keys
+            self.calls_per_key = 10  # Less frequent with 1-2 keys
         
         self.current_key_calls = 0  # Track calls on current key
         self.rate_limit_cooldown = 60  # Seconds to wait before retrying rate-limited key
         
-        print(f"✓ Initialized GeminiKeyManager with {len(api_keys)} key(s) for rotation")
+        print(f"✓ Initialized GroqKeyManager with {len(api_keys)} key(s) for rotation")
         if len(api_keys) > 1:
             print(f"   🔄 Keys will rotate every {self.calls_per_key} calls to distribute load evenly")
             print(f"   📊 Load balancing enabled with health tracking")
@@ -191,10 +192,10 @@ class GeminiKeyManager:
     def get_recent_call_count(self, key_index):
         """Get number of API calls in the last minute for a key"""
         key_short = self.api_keys[key_index][:10] + '...'
-        if key_short not in gemini_api_calls_by_key:
+        if key_short not in groq_api_calls_by_key:
             return 0
         
-        api_calls = gemini_api_calls_by_key[key_short]
+        api_calls = groq_api_calls_by_key[key_short]
         now = datetime.now()
         # Count calls in last 60 seconds
         recent_count = sum(1 for call_time in api_calls 
@@ -217,17 +218,17 @@ class GeminiKeyManager:
                     self.key_rate_limited[key_short] = False
                     self.key_rate_limit_time[key_short] = None
         
-        # CRITICAL: Check recent calls in last minute (rate limit is 10/min)
+        # CRITICAL: Check recent calls in last minute (Groq free tier: 30 req/min, paid: much higher)
         recent_calls = self.get_recent_call_count(key_index)
         
-        # Heavily penalize keys close to or at the limit
-        if recent_calls >= 10:
+        # Heavily penalize keys close to or at the limit (optimized for Groq's 30 req/min)
+        if recent_calls >= 30:
             return -2000  # Way over limit - never use
-        elif recent_calls >= 8:
+        elif recent_calls >= 25:
             return -500   # Very close to limit - avoid
-        elif recent_calls >= 6:
+        elif recent_calls >= 20:
             return -100  # Getting close - prefer others
-        elif recent_calls >= 4:
+        elif recent_calls >= 15:
             return 10    # Moderate usage - low priority
         
         # Calculate health score based on:
@@ -324,22 +325,22 @@ class GeminiKeyManager:
         original_index = self.current_key_index
         original_key_short = self.api_keys[original_index][:10] + '...'
         
-        # Check if current key is approaching limit (proactive rotation)
+        # Check if current key is approaching limit (proactive rotation for Groq's 30 req/min)
         current_recent_calls = self.get_recent_call_count(original_index)
-        if current_recent_calls >= 7 and not force_round_robin:
-            print(f"⚠️ Key {original_key_short} has {current_recent_calls}/10 calls in last minute - proactively rotating")
+        if current_recent_calls >= 20 and not force_round_robin:
+            print(f"⚠️ Key {original_key_short} has {current_recent_calls}/30 calls in last minute - proactively rotating")
             force_round_robin = False  # Use smart rotation to find best key
         
         if force_round_robin:
-            # Round-robin but skip rate-limited keys
+            # Round-robin but skip rate-limited keys (optimized for Groq's 30 req/min)
             attempts = 0
             while attempts < len(self.api_keys):
                 self.current_key_index = (self.current_key_index + 1) % len(self.api_keys)
                 key_short = self.api_keys[self.current_key_index][:10] + '...'
                 recent_calls = self.get_recent_call_count(self.current_key_index)
                 
-                # Skip if rate limited or too many recent calls
-                if not self.key_rate_limited[key_short] and recent_calls < 8:
+                # Skip if rate limited or too many recent calls (25/30 = safe threshold)
+                if not self.key_rate_limited[key_short] and recent_calls < 25:
                     break
                 attempts += 1
         else:
@@ -351,12 +352,12 @@ class GeminiKeyManager:
         key_short = self.api_keys[self.current_key_index][:10] + '...'
         recent_calls = self.get_recent_call_count(self.current_key_index)
         
-        if self.key_rate_limited[key_short] or recent_calls >= 8:
-            # Emergency: find ANY key that's available
+        if self.key_rate_limited[key_short] or recent_calls >= 25:
+            # Emergency: find ANY key that's available (25/30 = safe threshold)
             for i in range(len(self.api_keys)):
                 test_key_short = self.api_keys[i][:10] + '...'
                 test_recent = self.get_recent_call_count(i)
-                if not self.key_rate_limited[test_key_short] and test_recent < 8:
+                if not self.key_rate_limited[test_key_short] and test_recent < 25:
                     self.current_key_index = i
                     key_short = test_key_short
                     recent_calls = test_recent
@@ -426,8 +427,8 @@ class GeminiKeyManager:
         # 1. If key has 6+ calls in last minute, rotate immediately
         # 2. Otherwise, rotate after N calls to distribute load
         if len(self.api_keys) > 1:
-            if recent_calls >= 6:
-                print(f"🔄 Key {key_short} has {recent_calls} recent calls - rotating proactively")
+            if recent_calls >= 20:  # Rotate when approaching Groq's 30 req/min limit
+                print(f"🔄 Key {key_short} has {recent_calls}/30 recent calls - rotating proactively")
                 self.rotate_key()
             elif self.current_key_calls >= self.calls_per_key:
                 # Normal rotation after N calls
@@ -453,20 +454,17 @@ class GeminiKeyManager:
             }
         return stats
     
-    def create_model(self, model_name, **kwargs):
-        """Create a GenerativeModel with the current key (with proactive rotation)"""
+    def get_client(self):
+        """Get a Groq client with the current key (with proactive rotation)"""
         key = self.get_current_key()
         self.track_usage(key)  # This will rotate if needed
         
-        # Configure genai with current key (may have rotated)
+        # Get current key (may have rotated)
         current_key = self.get_current_key()
-        genai.configure(api_key=current_key)
-        
-        # Create and return model
-        return genai.GenerativeModel(model_name, **kwargs)
+        return Groq(api_key=current_key)
     
-    def create_model_with_retry(self, model_name, **kwargs):
-        """Create a GenerativeModel with automatic key rotation"""
+    def get_client_with_retry(self):
+        """Get a Groq client with automatic key rotation"""
         # Try each key once, rotating through all keys
         tried_keys = set()
         max_attempts = len(self.api_keys) * 2  # Try each key up to 2 times
@@ -484,33 +482,12 @@ class GeminiKeyManager:
             tried_keys.add(current_key)
             
             try:
-                # Configure and create model
-                genai.configure(api_key=current_key)
-                model = genai.GenerativeModel(model_name, **kwargs)
-                print(f"✅ Created model {model_name} with key {key_short}")
-                return model
+                # Create and return Groq client
+                client = Groq(api_key=current_key)
+                print(f"✅ Created Groq client with key {key_short}")
+                return client
             except Exception as e:
                 error_str = str(e).lower()
-                # If it's a model not found error, try alternative models
-                if 'not found' in error_str or 'invalid' in error_str or 'not available' in error_str:
-                    # Try alternative models
-                    alternatives = [
-                        'gemini-2.5-flash',  # Current model
-                        'gemini-2.5-pro',
-                        'gemini-2.5-flash-lite',
-                        'gemini-pro',
-                        'gemini-flash-latest',
-                        'gemini-pro-latest'
-                    ]
-                    for alt_model in alternatives:
-                        if alt_model != model_name:
-                            try:
-                                genai.configure(api_key=current_key)
-                                model = genai.GenerativeModel(alt_model, **kwargs)
-                                print(f"✅ Created alternative model {alt_model} with key {key_short}")
-                                return model
-                            except:
-                                continue
                 # Rotate to next key and try again
                 if attempt < max_attempts - 1:
                     self.rotate_key(force_round_robin=True)
@@ -519,47 +496,50 @@ class GeminiKeyManager:
                     continue
                 else:
                     # Last attempt failed
-                    raise Exception(f"Failed to create model: {str(e)[:200]}")
+                    raise Exception(f"Failed to create Groq client: {str(e)[:200]}")
         
         raise Exception("All API keys exhausted")
 
 # Initialize key manager (all keys used for all operations)
-gemini_key_manager = GeminiKeyManager(GEMINI_API_KEYS)
+groq_key_manager = GroqKeyManager(GROQ_API_KEYS)
 
 # Test API keys on startup to verify they work (non-blocking - bot will start even if test fails)
-print(f"\n🔍 Testing API keys on startup (quick validation)...")
+print(f"\n🔍 Testing Groq API keys on startup (quick validation)...")
 test_passed = False
 working_keys = []
-for i, test_key in enumerate(GEMINI_API_KEYS, 1):
+for i, test_key in enumerate(GROQ_API_KEYS, 1):
     try:
         key_short = test_key[:15] + '...'
-        genai.configure(api_key=test_key)
-        # Try multiple model names to find one that works (Gemini 1.5 was shut down Sep 2025, use 2.5)
-        test_models = ['gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-2.5-flash-lite', 'gemini-pro']
-        test_model = None
+        client = Groq(api_key=test_key)
+        # Try multiple Groq models to find one that works
+        test_models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768', 'gemma2-9b-it']
+        test_passed_for_key = False
         for model_name in test_models:
             try:
-                test_model = genai.GenerativeModel(model_name)
-                break  # Found a working model
-            except:
-                continue
+                # Simple test - just try to generate content
+                response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "Hi"}],
+                    max_tokens=10
+                )
+                if response and response.choices and len(response.choices) > 0:
+                    content = response.choices[0].message.content
+                    if content:
+                        print(f"   ✅ Key {i} ({key_short}) works with {model_name}!")
+                        working_keys.append(i)
+                        test_passed = True
+                        test_passed_for_key = True
+                        break  # Found a working model
+            except Exception as model_error:
+                continue  # Try next model
         
-        if test_model is None:
-            raise Exception("No working model found")
-        
-        # Simple test - just try to generate content (no timeout option, let it use default)
-        test_response = test_model.generate_content("Hi")
-        if test_response and hasattr(test_response, 'text') and test_response.text:
-            print(f"   ✅ Key {i} ({key_short}) works!")
-            working_keys.append(i)
-            test_passed = True
-        else:
-            print(f"   ⚠️ Key {i} ({key_short}) responded but no text")
+        if not test_passed_for_key:
+            print(f"   ⚠️ Key {i} ({key_short}) - no working models found")
     except Exception as test_error:
         error_str = str(test_error).lower()
         error_msg = str(test_error)[:150]
-        if 'api key' in error_str or 'auth' in error_str or '403' in error_str or 'leaked' in error_str or 'permission denied' in error_str:
-            print(f"   ❌ Key {i} INVALID/LEAKED: {error_msg}")
+        if 'api key' in error_str or 'auth' in error_str or '403' in error_str or '401' in error_str or 'permission denied' in error_str:
+            print(f"   ❌ Key {i} INVALID: {error_msg}")
         elif 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
             print(f"   ⚠️ Key {i} rate limited (temporary): {error_msg}")
         elif 'timeout' in error_str:
@@ -568,21 +548,16 @@ for i, test_key in enumerate(GEMINI_API_KEYS, 1):
             print(f"   ⚠️ Key {i} test failed: {error_msg}")
 
 if test_passed:
-    print(f"✓ Startup test: {len(working_keys)}/{len(GEMINI_API_KEYS)} key(s) working ({', '.join(map(str, working_keys))})\n")
+    print(f"✓ Startup test: {len(working_keys)}/{len(GROQ_API_KEYS)} key(s) working ({', '.join(map(str, working_keys))})\n")
 else:
     print(f"\n⚠️ WARNING: Startup test failed for all keys!")
     print(f"   The bot will still try to use them (test may have been too strict)")
     print(f"   Check Railway logs when making actual API calls to see real errors")
-    print(f"   Verify keys at: https://aistudio.google.com/app/apikey\n")
+    print(f"   Get keys at: https://console.groq.com/keys\n")
 
-# Configure with first key (will be reconfigured per-request)
-if gemini_key_manager.api_keys:
-    try:
-        genai.configure(api_key=gemini_key_manager.get_current_key())
-        print(f"✓ Initialized genai with first key")
-    except Exception as e:
-        print(f"⚠️ Failed to configure genai with first key: {e}")
-        print(f"   Will configure per-request instead")
+# Groq clients are created per-request, no global configuration needed
+if groq_key_manager.api_keys:
+    print(f"✓ Groq key manager initialized with {len(groq_key_manager.api_keys)} key(s)")
 
 # --- Bot Setup ---
 intents = discord.Intents.default()
@@ -835,28 +810,10 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
         stats = index.describe_index_stats()
         existing_count = stats.total_vector_count
         
-        # If Pinecone is empty, upload all entries (but don't block - run in background)
+        # If Pinecone is empty, upload all entries
         if existing_count == 0:
-            print("🌲 Pinecone is empty - uploading all entries in background...")
-            # Run in background to avoid blocking - use safe background task
-            try:
-                async def background_embed():
-                    try:
-                        compute_rag_embeddings()
-                    except Exception as bg_error:
-                        print(f"⚠️ Error in background embedding computation: {bg_error}")
-                
-                # Create background task safely
-                if hasattr(bot, 'loop') and bot.loop and not bot.loop.is_closed():
-                    bot.loop.create_task(background_embed())
-                else:
-                    # Fallback: run synchronously but log warning
-                    print("⚠️ Bot loop not available, running embeddings synchronously...")
-                    compute_rag_embeddings()
-            except Exception as task_error:
-                print(f"⚠️ Could not create background task: {task_error}")
-                # Fallback: run synchronously
-                compute_rag_embeddings()
+            print("🌲 Pinecone is empty - uploading all entries...")
+            compute_rag_embeddings()
             return
         
         # Compare entry IDs to find truly new entries
@@ -870,25 +827,16 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
             if len(new_entry_ids) > existing_count:
                 print(f"⚠️ RAG has {len(new_entry_ids)} entries but Pinecone has {existing_count} - checking Pinecone...")
                 # Fetch all new entry IDs from Pinecone to see which are missing
-                # MEMORY OPTIMIZATION: Limit fetch to avoid memory spike
                 try:
-                    batch_size = 50  # Reduced from 100 to save memory
+                    batch_size = 100
                     entry_id_list = list(new_entry_ids)
                     existing_ids_in_pinecone = set()
-                    max_batches = 10  # Limit to first 500 IDs to avoid timeout/memory issues
-                    for i in range(0, min(len(entry_id_list), max_batches * batch_size), batch_size):
+                    for i in range(0, len(entry_id_list), batch_size):
                         batch = entry_id_list[i:i + batch_size]
                         try:
-                            # Add timeout to avoid hanging
-                            fetched_batch = await asyncio.wait_for(
-                                asyncio.to_thread(index.fetch, ids=batch),
-                                timeout=5.0
-                            )
+                            fetched_batch = index.fetch(ids=batch)
                             if fetched_batch.vectors:
                                 existing_ids_in_pinecone.update(fetched_batch.vectors.keys())
-                        except asyncio.TimeoutError:
-                            print(f"⚠️ Timeout fetching batch {i//batch_size + 1}, skipping...")
-                            break
                         except Exception as fetch_err:
                             print(f"⚠️ Error fetching batch: {fetch_err}")
                             # If fetch fails, assume they don't exist and upload them
@@ -902,11 +850,7 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
                         return
                 except Exception as e:
                     print(f"⚠️ Could not verify entries in Pinecone: {e}")
-                    # Fallback: if we can't verify, just upload entries that are new by ID comparison
-                    if truly_new_ids:
-                        print(f"🌲 Will upload {len(truly_new_ids)} entries based on ID comparison")
-                    else:
-                        return
+                    return
             else:
                 return
         
@@ -927,11 +871,8 @@ async def sync_new_entries_to_pinecone(new_rag_entries, old_rag_entries):
                 combined_text = f"{title}\n{keywords}\n{content[:500]}"
                 
                 try:
-                    # Compute embedding for new entry only (run in thread to avoid blocking)
-                    # MEMORY OPTIMIZATION: Use asyncio.to_thread to avoid blocking event loop
-                    embedding = await asyncio.to_thread(
-                        lambda: model.encode(combined_text, convert_to_numpy=True)
-                    )
+                    # Compute embedding for new entry only
+                    embedding = model.encode(combined_text, convert_to_numpy=True)
                     embedding_list = embedding.tolist()
                     
                     metadata = {
@@ -975,7 +916,7 @@ support_notification_messages = {}  # {thread_id: message_id}
 # --- BOT SETTINGS (Stored in Vercel KV API - NO local files) ---
 BOT_SETTINGS = {
     'support_forum_channel_id': SUPPORT_FORUM_CHANNEL_ID,
-    'ai_temperature': 1.0,  # Gemini temperature (0.0-2.0)
+    'ai_temperature': 1.0,  # LLM temperature (0.0-2.0)
     'ai_max_tokens': 2048,  # Max tokens for AI responses
     'ignored_post_ids': [],  # Post IDs to ignore (e.g., rules post)
     'post_inactivity_hours': 12,  # Hours before escalating old posts to High Priority
@@ -989,11 +930,11 @@ BOT_SETTINGS = {
     'last_updated': datetime.now().isoformat()
 }
 
-# --- GEMINI API RATE LIMITING (tracked per key now) ---
+# --- GROQ API RATE LIMITING (tracked per key now) ---
 from collections import deque
 
 # Track API calls per key (for monitoring)
-gemini_api_calls_by_key = {key[:10] + '...': deque(maxlen=100) for key in GEMINI_API_KEYS}
+groq_api_calls_by_key = {key[:10] + '...': deque(maxlen=100) for key in GROQ_API_KEYS}
 
 # MEMORY OPTIMIZATION: Cache for AI responses (reduces duplicate API calls)
 ai_response_cache = {}  # {query_hash: (response, timestamp)}
@@ -1004,17 +945,17 @@ AI_CACHE_MAX_SIZE = 50  # Maximum cache entries (reduced to save memory)
 last_data_hash = None
 
 async def check_rate_limit(key_manager=None, api_calls_dict=None):
-    """Check if we can make a Gemini API call without hitting rate limit
+    """Check if we can make a Groq API call without hitting rate limit
     Proactively rotates to best key before hitting limits
     
     Args:
-        key_manager: The GeminiKeyManager to use (defaults to gemini_key_manager for backward compatibility)
-        api_calls_dict: Dictionary tracking API calls per key (defaults to gemini_api_calls_by_key)
+        key_manager: The GroqKeyManager to use (defaults to groq_key_manager)
+        api_calls_dict: Dictionary tracking API calls per key (defaults to groq_api_calls_by_key)
     """
     if key_manager is None:
-        key_manager = gemini_key_manager
+        key_manager = groq_key_manager
     if api_calls_dict is None:
-        api_calls_dict = gemini_api_calls_by_key
+        api_calls_dict = groq_api_calls_by_key
     
     current_key = key_manager.get_current_key()
     key_short = current_key[:10] + '...'
@@ -1081,16 +1022,16 @@ async def check_rate_limit(key_manager=None, api_calls_dict=None):
     return True
 
 def track_api_call(key_manager=None, api_calls_dict=None):
-    """Track that we made a Gemini API call
+    """Track that we made a Groq API call
     
     Args:
-        key_manager: The GeminiKeyManager to use (defaults to gemini_key_manager for backward compatibility)
-        api_calls_dict: Dictionary tracking API calls per key (defaults to gemini_api_calls_by_key)
+        key_manager: The GroqKeyManager to use (defaults to groq_key_manager)
+        api_calls_dict: Dictionary tracking API calls per key (defaults to groq_api_calls_by_key)
     """
     if key_manager is None:
-        key_manager = gemini_key_manager
+        key_manager = groq_key_manager
     if api_calls_dict is None:
-        api_calls_dict = gemini_api_calls_by_key
+        api_calls_dict = groq_api_calls_by_key
     
     current_key = key_manager.get_current_key()
     key_short = current_key[:10] + '...'
@@ -2562,7 +2503,7 @@ def build_user_context(query, context_entries):
     )
 
 async def download_images_for_gemini(attachments):
-    """Download images from Discord attachments and prepare for Gemini vision model"""
+    """Download images from Discord attachments (legacy function - Groq doesn't support images yet)"""
     image_parts = []
     try:
         for attachment in attachments:
@@ -2610,7 +2551,7 @@ async def download_images_for_gemini(attachments):
         return None
 
 async def generate_ai_response(query, context_entries, image_parts=None):
-    """Generate an AI response using Gemini API with knowledge base context - SIMPLIFIED
+    """Generate an AI response using Groq API with knowledge base context - SIMPLIFIED
     
     Args:
         query: The user's question
@@ -2621,8 +2562,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     import hashlib
     
     # Use the main key manager (all keys available for all operations)
-    key_manager = gemini_key_manager
-    api_calls_dict = gemini_api_calls_by_key
+    key_manager = groq_key_manager
+    api_calls_dict = groq_api_calls_by_key
     
     if not key_manager:
         raise Exception("No key manager available")
@@ -2660,14 +2601,13 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
     max_tokens = BOT_SETTINGS.get('ai_max_tokens', 2048)
     
-    # Try models in order - Gemini 1.5 was shut down Sep 2025, use 2.5 models
+    # Try Groq models in order - fast, cheap inference
     models_to_try = [
-        'gemini-2.5-flash',  # Current model (replaced 1.5-flash)
-        'gemini-2.5-pro',   # Advanced model
-        'gemini-2.5-flash-lite',  # Cost-effective variant
-        'gemini-pro',  # Legacy fallback
-        'gemini-flash-latest',  # Legacy fallback
-        'gemini-pro-latest'  # Legacy fallback
+        'llama-3.3-70b-versatile',  # Latest and most capable
+        'llama-3.1-70b-versatile',  # Previous generation, very reliable
+        'mixtral-8x7b-32768',  # Good for longer context
+        'gemma2-9b-it',  # Lightweight fallback
+        'llama-3.1-8b-instant'  # Fastest fallback
     ]
     
     # Log knowledge base usage
@@ -2700,34 +2640,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     
     for model_name in models_to_try:
         try:
-            print(f"🔧 Trying model '{model_name}'...")
+            print(f"🔧 Trying Groq model '{model_name}'...")
             
-            # Use key manager to create model (handles rotation automatically)
-            # Try with system_instruction first, fallback to without if needed
-            model = None
-            model_error = None
-            
-            # Try to create model - try with system_instruction first, then without
-            model = None
+            # Get Groq client with key rotation
             try:
-                model = key_manager.create_model_with_retry(model_name, system_instruction=system_instruction)
+                client = key_manager.get_client_with_retry()
             except Exception as e:
-                # If system_instruction fails, try without it
-                try:
-                    model = key_manager.create_model_with_retry(model_name)
-                except Exception as e2:
-                    # Both failed, continue to next model
-                    print(f"   ⚠️ Model '{model_name}' failed, trying next model...")
-                    continue
-            
-            if model is None:
+                print(f"   ⚠️ Failed to get Groq client: {str(e)[:200]}")
                 continue
-            
-            # Configure generation settings
-            generation_config = genai.types.GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens
-            )
             
             # Build user context WITH KNOWLEDGE BASE
             user_context = build_user_context(query, context_entries)
@@ -2735,24 +2655,35 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             # Generate response - log which key is being used
             current_key = key_manager.get_current_key()
             key_short = current_key[:15] + '...'
-            print(f"💬 Calling Gemini API with key {key_short} and model {model_name}...")
+            print(f"💬 Calling Groq API with key {key_short} and model {model_name}...")
             
             # Track the API call BEFORE making it to prevent race conditions
-            # This ensures concurrent requests see the updated count immediately
             track_api_call(key_manager, api_calls_dict)
+            
+            # Build messages for Groq API
+            messages = []
+            if system_instruction:
+                messages.append({"role": "system", "content": system_instruction})
+            messages.append({"role": "user", "content": user_context})
             
             loop = asyncio.get_event_loop()
             
             # Define function outside lambda to avoid closure issues
             def generate_sync():
                 try:
-                    return model.generate_content(user_context, generation_config=generation_config)
+                    response = client.chat.completions.create(
+                        model=model_name,
+                        messages=messages,
+                        temperature=temperature,
+                        max_tokens=max_tokens
+                    )
+                    return response
                 except Exception as sync_error:
                     # Re-raise with more context
                     raise Exception(f"API call failed in sync context: {type(sync_error).__name__}: {str(sync_error)}") from sync_error
             
             try:
-                print(f"   📡 Making API call to Gemini...")
+                print(f"   📡 Making API call to Groq...")
                 response = await asyncio.wait_for(
                     loop.run_in_executor(None, generate_sync),
                     timeout=30.0
@@ -2768,14 +2699,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ API call failed: {str(api_error)[:200]}")
                 
                 # Handle quota vs rate limits differently
-                if 'resource exhausted' in error_str and 'quota' in error_str:
-                    # Billing quota exceeded
+                if 'quota' in error_str or 'limit' in error_str:
+                    # Quota or rate limit exceeded
                     key_short_err = current_key[:10] + '...'
-                    print(f"   ❌ QUOTA EXCEEDED (billing): All keys from same account share quota")
+                    print(f"   ❌ QUOTA/RATE LIMIT: Rotating to next key")
                     key_manager.key_rate_limited[key_short_err] = True
                     key_manager.key_rate_limit_time[key_short_err] = datetime.now()
                     key_manager.rotate_key(force_round_robin=True)
-                elif 'rate limit' in error_str or ('429' in error_str and 'quota' not in error_str):
+                elif 'rate limit' in error_str or '429' in error_str:
                     # Per-minute rate limit (temporary)
                     key_short_err = current_key[:10] + '...'
                     key_manager.key_rate_limited[key_short_err] = True
@@ -2785,10 +2716,15 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 await asyncio.sleep(0.3)
                 continue
             
-            # Check if response has text attribute BEFORE marking success
-            if not hasattr(response, 'text'):
-                print(f"   ⚠️ Response object missing 'text' attribute: {type(response)}")
-                print(f"   Response object: {response}")
+            # Extract response text from Groq response
+            if not response or not response.choices or len(response.choices) == 0:
+                print(f"   ⚠️ Empty response from Groq API")
+                key_manager.mark_key_error(current_key, is_rate_limit=False)
+                continue
+            
+            choice = response.choices[0]
+            if not hasattr(choice, 'message') or not hasattr(choice.message, 'content'):
+                print(f"   ⚠️ Response object missing content: {type(response)}")
                 key_manager.mark_key_error(current_key, is_rate_limit=False)
                 continue
             
@@ -2796,7 +2732,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             key_manager.mark_key_success(current_key)
             print(f"✅ API call succeeded with key {key_short}")
             
-            response_text = response.text
+            response_text = choice.message.content
             
             # Check if response is empty
             if not response_text or len(response_text.strip()) == 0:
@@ -2916,27 +2852,30 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         key_short = current_key[:15] + '...'
         print(f"🔄 Retry attempt {attempt + 1}: Trying key {key_short} with fallback models...")
         
-        # Try the most reliable models first
-        retry_models = ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-flash']
+        # Try the most reliable Groq models first
+        retry_models = ['llama-3.1-70b-versatile', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768']
         
         for model_name in retry_models:
             try:
-                genai.configure(api_key=current_key)
-                model = genai.GenerativeModel(model_name)
-                
-                generation_config = genai.types.GenerationConfig(
-                    temperature=temperature,
-                    max_output_tokens=max_tokens
-                )
+                client = Groq(api_key=current_key)
                 
                 user_context = build_user_context(query, context_entries)
+                messages = []
+                if system_instruction:
+                    messages.append({"role": "system", "content": system_instruction})
+                messages.append({"role": "user", "content": user_context})
                 
                 print(f"   🔄 Retrying with {model_name}...")
                 loop = asyncio.get_event_loop()
                 
                 def generate_sync():
                     try:
-                        return model.generate_content(user_context, generation_config=generation_config)
+                        return client.chat.completions.create(
+                            model=model_name,
+                            messages=messages,
+                            temperature=temperature,
+                            max_tokens=max_tokens
+                        )
                     except Exception as sync_error:
                         raise Exception(f"API call failed: {type(sync_error).__name__}: {str(sync_error)}") from sync_error
                 
@@ -2946,12 +2885,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                         timeout=30.0
                     )
                     
-                    if hasattr(response, 'text') and response.text and len(response.text.strip()) > 0:
-                        key_manager.mark_key_success(current_key)
-                        print(f"✅ RETRY SUCCESS! Got response from {model_name} on retry attempt {attempt + 1}")
-                        if context_entries:
-                            print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
-                        return response.text
+                    if response and response.choices and len(response.choices) > 0:
+                        content = response.choices[0].message.content
+                        if content and len(content.strip()) > 0:
+                            key_manager.mark_key_success(current_key)
+                            print(f"✅ RETRY SUCCESS! Got response from {model_name} on retry attempt {attempt + 1}")
+                            if context_entries:
+                                print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
+                            return content
                 except Exception as retry_error:
                     error_str = str(retry_error).lower()
                     if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
@@ -2993,13 +2934,12 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         
         if all_quota_limited and total_keys > 1:
             print(f"\n   ⚠️ ALL KEYS HITTING QUOTA LIMITS!")
-            print(f"   💡 All API keys from the same Google account share the same billing quota.")
-            print(f"   💡 Check your quota/billing: https://console.cloud.google.com/billing")
-            print(f"   💡 Or use keys from different Google accounts (different billing).")
+            print(f"   💡 Check your Groq API usage: https://console.groq.com/usage")
+            print(f"   💡 Groq has generous free tier limits (30 req/min) and affordable paid tiers")
         else:
-            print(f"\n   ⚠️ If you see 'leaked' or '403' errors above, your API key needs to be replaced.")
-            print(f"   📝 Get a new key: https://aistudio.google.com/app/apikey")
-            print(f"   Then update GEMINI_API_KEY in Railway environment variables and restart the bot.")
+            print(f"\n   ⚠️ If you see '401' or '403' errors above, your API key needs to be replaced.")
+            print(f"   📝 Get a new key: https://console.groq.com/keys")
+            print(f"   Then update GROQ_API_KEY in Railway environment variables and restart the bot.")
     except Exception as e:
         print(f"   ERROR getting key info: {e}")
         import traceback
@@ -5360,21 +5300,11 @@ async def reload(interaction: discord.Interaction):
         await interaction.followup.send("❌ You need Administrator permission to use this command.", ephemeral=True)
         return
     
-    # Send initial response to avoid timeout
-    await interaction.followup.send("🔄 Reloading data from dashboard...", ephemeral=False)
-    
-    try:
-        success = await fetch_data_from_api()
-        if success:
-            await interaction.followup.send(f"✅ Data reloaded successfully! Loaded {len(RAG_DATABASE)} RAG entries into memory.", ephemeral=False)
-        else:
-            await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
-    except Exception as e:
-        print(f"❌ Error during reload: {e}")
-        import traceback
-        traceback.print_exc()
-        await interaction.followup.send(f"❌ Error reloading data: {str(e)[:200]}", ephemeral=False)
-    
+    success = await fetch_data_from_api()
+    if success:
+        await interaction.followup.send(f"✅ Data reloaded successfully from dashboard! Loaded {len(RAG_DATABASE)} RAG entries into memory.", ephemeral=False)
+    else:
+        await interaction.followup.send("⚠️ Failed to reload data. Using cached data.", ephemeral=False)
     print(f"Reload command issued by {interaction.user}.")
 
 @bot.tree.command(name="fix_duplicate_commands", description="Clear ALL slash commands and re-sync (fixes duplicates) (Admin only).")
@@ -6770,8 +6700,8 @@ async def toggle_satisfaction_analysis(interaction: discord.Interaction, enabled
             await interaction.followup.send(
                 f"{status_emoji} Satisfaction analysis is now **{status_text}**!\n\n"
                 f"{'✅ The bot will automatically analyze user messages to detect satisfaction and escalate when needed.' if enabled else '❌ The bot will NOT automatically analyze satisfaction. Users can still click buttons to give feedback.'}\n\n"
-                f"💡 **Gemini API Impact**: This saves ~1 API call per user reply (10 RPM limit)\n"
-                f"📊 **Current rate**: {sum(len(calls) for calls in gemini_api_calls_by_key.values())} calls across {len(GEMINI_API_KEYS)} key(s)",
+                f"💡 **Groq API Impact**: This saves ~1 API call per user reply (30 RPM limit)\n"
+                f"📊 **Current rate**: {sum(len(calls) for calls in groq_api_calls_by_key.values())} calls across {len(GROQ_API_KEYS)} key(s)",
                 ephemeral=False
             )
             print(f"✓ Satisfaction analysis {status_text} by {interaction.user}")
@@ -6839,16 +6769,16 @@ async def status(interaction: discord.Interaction):
         )
         
         # Calculate total API calls across all keys
-        total_calls = sum(len(calls) for calls in gemini_api_calls_by_key.values())
-        usage_stats = gemini_key_manager.get_usage_stats()
+        total_calls = sum(len(calls) for calls in groq_api_calls_by_key.values())
+        usage_stats = groq_key_manager.get_usage_stats()
         
         # Enhanced key statistics with health tracking
-        key_stats_text = f"**{len(gemini_key_manager.api_keys)}** keys loaded\n"
+        key_stats_text = f"**{len(groq_key_manager.api_keys)}** keys loaded\n"
         key_stats_text += f"**{total_calls}** calls (last min)\n\n"
         
         # Show detailed stats for each key
         for key_short, stats in list(usage_stats.items())[:4]:  # Show first 4 keys
-            calls_for_key = len(gemini_api_calls_by_key.get(key_short, deque()))
+            calls_for_key = len(groq_api_calls_by_key.get(key_short, deque()))
             success_rate = stats.get('success_rate', 0)
             health = stats.get('health_score', 0)
             is_rate_limited = stats.get('rate_limited', False)
@@ -6885,7 +6815,7 @@ async def status(interaction: discord.Interaction):
             key_stats_text += f"\n... {len(usage_stats) - 4} more key(s)"
         
         status_embed.add_field(
-            name="🔥 Gemini API Keys",
+            name="🔥 Groq API Keys",
             value=key_stats_text,
             inline=True
         )
@@ -6966,16 +6896,16 @@ async def api_info(interaction: discord.Interaction):
         )
         
         # API keys info
-        keys_info = f"**Total Keys:** {len(GEMINI_API_KEYS)}\n"
-        usage_stats = gemini_key_manager.get_usage_stats()
-        for i, key in enumerate(GEMINI_API_KEYS, 1):
+        keys_info = f"**Total Keys:** {len(GROQ_API_KEYS)}\n"
+        usage_stats = groq_key_manager.get_usage_stats()
+        for i, key in enumerate(GROQ_API_KEYS, 1):
             key_short = key[:10] + '...'
             usage = usage_stats.get(key_short, 0)
-            current_indicator = " (current)" if i - 1 == gemini_key_manager.current_key_index else ""
+            current_indicator = " (current)" if i - 1 == groq_key_manager.current_key_index else ""
             keys_info += f"**Key {i}:** {key_short} - {usage} calls{current_indicator}\n"
         
         api_embed.add_field(
-            name="🔑 Gemini API Keys",
+            name="🔑 Groq API Keys",
             value=keys_info,
             inline=False
         )
@@ -7056,38 +6986,42 @@ async def test_api_keys(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="🔍 Testing API Keys",
-        description=f"Testing {len(GEMINI_API_KEYS)} key(s)...",
+        description=f"Testing {len(GROQ_API_KEYS)} key(s)...",
         color=discord.Color.blue()
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
     
-    for i, test_key in enumerate(GEMINI_API_KEYS, 1):
+    for i, test_key in enumerate(GROQ_API_KEYS, 1):
         key_short = test_key[:15] + '...' if len(test_key) > 15 else test_key
-        key_name = f"GEMINI_API_KEY" if i == 1 else f"GEMINI_API_KEY_{i}"
+        key_name = f"GROQ_API_KEY" if i == 1 else f"GROQ_API_KEY_{i}"
         
         # Try multiple models to find one that works
         models_to_try = [
-            'gemini-2.5-flash',  # Current model (replaced 1.5-flash)
-            'gemini-2.5-pro',   # Advanced model
-            'gemini-2.5-flash-lite',  # Cost-effective variant
-            'gemini-pro',  # Legacy fallback
-            'gemini-flash-latest',  # Legacy fallback
-            'gemini-pro-latest'  # Legacy fallback
+            'llama-3.3-70b-versatile',  # Latest and most capable
+            'llama-3.1-70b-versatile',  # Previous generation, very reliable
+            'mixtral-8x7b-32768',  # Good for longer context
+            'gemma2-9b-it',  # Lightweight fallback
+            'llama-3.1-8b-instant'  # Fastest fallback
         ]
         model_worked = False
         working_model = None
         
         for model_name in models_to_try:
             try:
-                genai.configure(api_key=test_key)
-                test_model = genai.GenerativeModel(model_name)
-                test_response = test_model.generate_content("Say hello")
+                client = Groq(api_key=test_key)
+                test_response = client.chat.completions.create(
+                    model=model_name,
+                    messages=[{"role": "user", "content": "Say hello"}],
+                    max_tokens=10
+                )
                 
-                if test_response and hasattr(test_response, 'text') and test_response.text:
-                    working_keys.append((i, key_name, key_short, model_name))
-                    model_worked = True
-                    working_model = model_name
-                    break
+                if test_response and test_response.choices and len(test_response.choices) > 0:
+                    content = test_response.choices[0].message.content
+                    if content:
+                        working_keys.append((i, key_name, key_short, model_name))
+                        model_worked = True
+                        working_model = model_name
+                        break
             except Exception as e:
                 error_str = str(e).lower()
                 error_msg = str(e)[:200]
@@ -7127,7 +7061,7 @@ async def test_api_keys(interaction: discord.Interaction):
             failed_text += f"\n... and {len(failed_keys) - 10} more"
         result_embed.add_field(name=f"Failed Keys ({len(failed_keys)})", value=failed_text[:1024], inline=False)
     
-    result_embed.set_footer(text=f"Total: {len(working_keys)} working, {len(failed_keys)} failed out of {len(GEMINI_API_KEYS)} keys")
+    result_embed.set_footer(text=f"Total: {len(working_keys)} working, {len(failed_keys)} failed out of {len(GROQ_API_KEYS)} keys")
     
     await interaction.followup.send(embed=result_embed, ephemeral=True)
 
@@ -7143,9 +7077,9 @@ async def check_api_keys(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     
     try:
-        usage_stats = gemini_key_manager.get_usage_stats()
-        total_keys = len(gemini_key_manager.api_keys)
-        current_key = gemini_key_manager.get_current_key()
+        usage_stats = groq_key_manager.get_usage_stats()
+        total_keys = len(groq_key_manager.api_keys)
+        current_key = groq_key_manager.get_current_key()
         
         key_embed = discord.Embed(
             title="🔑 API Key Statistics",
@@ -7163,7 +7097,7 @@ async def check_api_keys(interaction: discord.Interaction):
             is_rate_limited = stats.get('rate_limited', False)
             
             # Get recent calls from rate limit tracker
-            recent_calls = len(gemini_api_calls_by_key.get(key_short, deque()))
+            recent_calls = len(groq_api_calls_by_key.get(key_short, deque()))
             
             # Determine status based on health score and rate limit
             if is_rate_limited:
