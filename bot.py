@@ -985,7 +985,7 @@ async def check_rate_limit(key_manager=None, api_calls_dict=None):
     
     recent_count = len(api_calls)
     
-    # Proactive rotation: if we're at 7+ calls, rotate to a better key
+    # Proactive rotation: if we're at 20+ calls (approaching Groq's 30 req/min limit), rotate to a better key
     if recent_count >= 20:
         print(f"⚠️ Key {key_short} has {recent_count}/30 calls - proactively rotating to better key")
         key_manager.rotate_key()
