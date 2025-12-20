@@ -17,7 +17,7 @@ const Header: React.FC<HeaderProps> = ({ currentView, onMenuClick }) => {
     };
 
     return (
-        <header className="bg-gray-800 shadow-md p-4 flex justify-between items-center">
+        <header className="bg-gradient-to-r from-gray-800 to-gray-900 shadow-lg border-b border-gray-700 p-4 flex justify-between items-center backdrop-blur-sm">
             <div className="flex items-center gap-4">
                 {/* Hamburger menu for mobile */}
                 <button

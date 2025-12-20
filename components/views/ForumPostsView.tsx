@@ -14,9 +14,11 @@ const ForumPostCard: React.FC<{ post: ForumPost; onClick: () => void }> = ({ pos
   };
 
   return (
-    <div onClick={onClick} className="bg-gray-800 rounded-lg shadow-lg p-4 border border-gray-700 hover:border-primary-500 cursor-pointer transition-all duration-200">
-      <div className="flex justify-between items-start">
-        <h3 className="font-bold text-white mb-2 pr-4">{post.postTitle}</h3>
+    <div onClick={onClick} className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-lg p-5 border border-gray-700 hover:border-primary-500 cursor-pointer transition-all duration-300 hover:shadow-xl hover:scale-[1.02] group overflow-hidden relative">
+      <div className="absolute inset-0 bg-gradient-to-r from-primary-500/0 to-primary-500/0 group-hover:from-primary-500/5 group-hover:to-primary-500/10 transition-all duration-300"></div>
+      <div className="relative z-10">
+        <div className="flex justify-between items-start">
+          <h3 className="font-bold text-white mb-3 pr-4 text-lg group-hover:text-primary-300 transition-colors line-clamp-2">{post.postTitle}</h3>
         <div className="flex items-center gap-2">
           {post.discordUrl && (
             <button
@@ -31,19 +33,20 @@ const ForumPostCard: React.FC<{ post: ForumPost; onClick: () => void }> = ({ pos
           )}
           <PostStatusBadge status={post.status} />
         </div>
+        </div>
+        <div className="flex items-center gap-2 mb-3">
+          <img className="h-7 w-7 rounded-full ring-2 ring-gray-600 group-hover:ring-primary-500 transition-all" src={post.user.avatarUrl} alt={post.user.username} />
+          <span className="text-sm text-gray-400 group-hover:text-gray-300 transition-colors">{post.user.username}</span>
+        </div>
+        <div className="flex flex-wrap gap-2 mb-3">
+          {post.tags.map(tag => (
+            <span key={tag} className="bg-gray-700/80 text-xs text-gray-300 font-semibold px-3 py-1 rounded-full border border-gray-600 group-hover:border-primary-500/50 transition-all">{tag}</span>
+          ))}
+        </div>
+        <p className="text-xs text-gray-500 mt-4 text-right group-hover:text-gray-400 transition-colors">
+          {new Date(post.createdAt).toLocaleString()}
+        </p>
       </div>
-      <div className="flex items-center gap-2 mb-3">
-        <img className="h-6 w-6 rounded-full" src={post.user.avatarUrl} alt={post.user.username} />
-        <span className="text-sm text-gray-400">{post.user.username}</span>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {post.tags.map(tag => (
-          <span key={tag} className="bg-gray-700 text-xs text-gray-300 font-semibold px-2 py-1 rounded-full">{tag}</span>
-        ))}
-      </div>
-      <p className="text-xs text-gray-500 mt-3 text-right">
-        {new Date(post.createdAt).toLocaleString()}
-      </p>
     </div>
   );
 };
@@ -144,18 +147,18 @@ const ForumPostsView: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-gray-800 rounded-lg shadow-lg p-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+      <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-lg p-5 flex flex-col sm:flex-row justify-between items-center gap-4 border border-gray-700">
         <input
           type="text"
           placeholder="Search posts by title, user, tag..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
-          className="w-full sm:w-1/2 bg-gray-700 text-white placeholder-gray-400 border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="w-full sm:w-1/2 bg-gray-700/50 text-white placeholder-gray-400 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
         />
         <select
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          className="w-full sm:w-auto bg-gray-700 text-white border border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary-500"
+          className="w-full sm:w-auto bg-gray-700/50 text-white border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all cursor-pointer"
         >
           {filterOptions.map(option => (
             <option key={option} value={option}>{option}</option>
@@ -164,11 +167,16 @@ const ForumPostsView: React.FC = () => {
       </div>
 
       {filteredPosts.length === 0 ? (
-        <div className="bg-gray-800 rounded-lg shadow-lg p-8 text-center">
-          <p className="text-gray-400 text-lg">Nothing here yet</p>
-          <p className="text-gray-500 text-sm mt-2">
-            Posts from Discord show up here once they're created.
-          </p>
+        <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-lg p-12 text-center border border-gray-700">
+          <div className="max-w-md mx-auto">
+            <svg className="w-16 h-16 mx-auto text-gray-600 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+            </svg>
+            <p className="text-gray-300 text-xl font-semibold mb-2">Nothing here yet</p>
+            <p className="text-gray-500 text-sm">
+              Posts from Discord show up here once they're created.
+            </p>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">

@@ -4,17 +4,20 @@ import { PostStatus, ForumPost, Message } from '../../types';
 import { ArrowRightIcon, DatabaseIcon, ChevronDownIcon } from '../icons';
 
 const StatCard: React.FC<{ title: string; value: number; color: string }> = ({ title, value, color }) => (
-  <div className="bg-gray-800 p-6 rounded-lg shadow-lg">
-    <h3 className="text-gray-400 text-sm font-medium">{title}</h3>
-    <p className={`text-3xl font-bold ${color}`}>{value}</p>
+  <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-6 rounded-xl shadow-lg border border-gray-700 hover:border-primary-500 transition-all duration-300 hover:shadow-xl hover:scale-105 group">
+    <h3 className="text-gray-400 text-sm font-medium mb-2 group-hover:text-gray-300 transition-colors">{title}</h3>
+    <p className={`text-4xl font-bold ${color} transition-transform group-hover:scale-110`}>{value}</p>
   </div>
 );
 
 const FlowStep: React.FC<{ title: string; description: string; children?: React.ReactNode }> = ({ title, description, children }) => (
-    <div className="bg-gray-800 p-4 rounded-lg border border-gray-700 relative">
-        <h4 className="font-bold text-primary-400">{title}</h4>
-        <p className="text-sm text-gray-300 mt-1">{description}</p>
-        {children}
+    <div className="bg-gradient-to-br from-gray-800 to-gray-900 p-5 rounded-xl border border-gray-700 hover:border-primary-500 transition-all duration-300 shadow-lg hover:shadow-xl relative overflow-hidden group">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary-500/0 to-primary-500/0 group-hover:from-primary-500/5 group-hover:to-primary-500/10 transition-all duration-300"></div>
+        <div className="relative z-10">
+            <h4 className="font-bold text-primary-400 text-lg mb-2">{title}</h4>
+            <p className="text-sm text-gray-300 leading-relaxed">{description}</p>
+            {children}
+        </div>
     </div>
 );
 
@@ -75,8 +78,8 @@ const DashboardView: React.FC = () => {
       </div>
 
       <div>
-        <h2 className="text-2xl font-bold mb-4 text-white">Support Workflow</h2>
-        <div className="bg-gray-800/50 p-6 rounded-lg shadow-inner">
+        <h2 className="text-3xl font-bold mb-6 text-white">Support Workflow</h2>
+        <div className="bg-gradient-to-br from-gray-800/60 to-gray-900/60 backdrop-blur-sm p-8 rounded-2xl shadow-2xl border border-gray-700/50">
             <div className="flex flex-col items-center text-center">
                  <FlowStep title="(Start) User Creates Forum Post" description="A user creates a new post in the designated support forum channel on Discord." />
                  <FlowArrow />

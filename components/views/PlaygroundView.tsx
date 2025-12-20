@@ -103,33 +103,33 @@ const PlaygroundView: React.FC = () => {
     return (
         <div className="flex h-[calc(100vh-100px)] gap-6">
             {/* Chat Panel */}
-            <div className="flex flex-col flex-1 bg-gray-800 rounded-lg shadow-lg">
-                <div ref={chatContainerRef} className="flex-1 p-4 overflow-y-auto">
+            <div className="flex flex-col flex-1 bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-xl border border-gray-700 overflow-hidden">
+                <div ref={chatContainerRef} className="flex-1 p-6 overflow-y-auto bg-gradient-to-b from-gray-900/50 to-transparent">
                     {messages.map((msg, index) => <MessageBubble key={index} message={msg} />)}
                      {isLoading && (
                         <div className="flex items-start gap-3 my-4">
-                            <BotIcon className="w-8 h-8 rounded-full bg-gray-600 p-1 text-white flex-shrink-0" />
-                            <div className="p-3 rounded-lg bg-gray-700">
+                            <BotIcon className="w-8 h-8 rounded-full bg-gradient-to-br from-primary-600 to-primary-500 p-1 text-white flex-shrink-0 shadow-lg" />
+                            <div className="p-4 rounded-xl bg-gray-700/50 border border-gray-600">
                                 <div className="flex items-center justify-center space-x-1">
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
-                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-pulse"></div>
+                                    <div className="w-2 h-2 bg-primary-400 rounded-full animate-pulse [animation-delay:-0.3s]"></div>
+                                    <div className="w-2 h-2 bg-primary-400 rounded-full animate-pulse [animation-delay:-0.15s]"></div>
+                                    <div className="w-2 h-2 bg-primary-400 rounded-full animate-pulse"></div>
                                 </div>
                             </div>
                         </div>
                     )}
                 </div>
-                <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700">
-                    <div className="flex items-center bg-gray-700 rounded-lg">
+                <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-700 bg-gray-800/50 backdrop-blur-sm">
+                    <div className="flex items-center bg-gray-700/50 rounded-xl border border-gray-600 focus-within:border-primary-500 transition-all">
                         <input
                             type="text"
                             value={inputValue}
                             onChange={(e) => setInputValue(e.target.value)}
                             placeholder="Ask the bot a question..."
-                            className="w-full bg-transparent text-white placeholder-gray-400 px-4 py-2 focus:outline-none"
+                            className="w-full bg-transparent text-white placeholder-gray-400 px-4 py-3 focus:outline-none rounded-xl"
                             disabled={isLoading}
                         />
-                        <button type="submit" className="bg-primary-600 hover:bg-primary-500 text-white font-bold py-2 px-4 rounded-r-lg disabled:bg-gray-600 disabled:cursor-not-allowed" disabled={isLoading || !inputValue.trim()}>
+                        <button type="submit" className="bg-gradient-to-r from-primary-600 to-primary-500 hover:from-primary-500 hover:to-primary-400 text-white font-bold py-3 px-6 rounded-r-xl disabled:bg-gray-600 disabled:cursor-not-allowed transition-all shadow-lg disabled:shadow-none disabled:opacity-50" disabled={isLoading || !inputValue.trim()}>
                             Send
                         </button>
                     </div>
@@ -137,7 +137,7 @@ const PlaygroundView: React.FC = () => {
             </div>
 
             {/* Context Panel */}
-            <aside className="w-96 bg-gray-800 rounded-lg shadow-lg p-4 flex flex-col gap-4 overflow-y-auto">
+            <aside className="w-96 bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-xl border border-gray-700 p-5 flex flex-col gap-4 overflow-y-auto">
                 <h2 className="text-xl font-bold text-white">Bot's Thought Process</h2>
                 {botContext ? (
                     botContext.autoResponse ? (

@@ -2438,13 +2438,16 @@ def find_relevant_rag_entries_keyword(query, db=RAG_DATABASE):
 SYSTEM_PROMPT = (
     "You are Revolution Macro support bot for Bee Swarm Simulator (BSS). You are an expert on BSS game mechanics and Revolution Macro automation.\n\n"
     
-    "CRITICAL RULES:\n"
+    "CRITICAL RULES FOR ACCURACY:\n"
     "1. Read the POST TITLE first - it contains the key issue\n"
-    "2. ALWAYS attempt a direct answer based on title + message\n"
-    "3. Use knowledge base if available\n"
-    "4. Keep answers SHORT and actionable (2-4 sentences MAX)\n"
-    "5. Reference specific BSS/Revolution Macro settings when relevant\n"
-    "6. If you truly can't help, acknowledge human support is available\n\n"
+    "2. ALWAYS prioritize knowledge base content over general knowledge\n"
+    "3. If knowledge base has relevant info, use it EXACTLY - don't paraphrase or add speculation\n"
+    "4. Only use general knowledge if knowledge base doesn't cover the topic\n"
+    "5. Be PRECISE - use exact setting paths, terminology, and steps from knowledge base\n"
+    "6. Keep answers SHORT and actionable (2-4 sentences MAX)\n"
+    "7. Reference specific BSS/Revolution Macro settings when relevant\n"
+    "8. If you truly can't help, acknowledge human support is available\n"
+    "9. NEVER guess - if uncertain, say you need human support\n\n"
     
     "BEE SWARM SIMULATOR (BSS) KNOWLEDGE:\n"
     "- Fields: Sunflower, Dandelion, Blue Flower, Clover, Spider, Mountain Top, Rose, Stump, Cactus, Pine Tree, Pineapple Patch, Bamboo Field, etc.\n"
@@ -2505,14 +2508,34 @@ SYSTEM_PROMPT = (
 
 
 def build_user_context(query, context_entries):
-    """Build the user message with query and knowledge base context."""
-    context_text = "\n\n".join(
-        [f"Title: {entry['title']}\nContent: {entry['content']}"
-         for entry in context_entries]
-    )
+    """Build the user message with query and knowledge base context - optimized for accuracy."""
+    if not context_entries:
+        return f"User Question:\n{query}"
+    
+    # Build context with clear prioritization
+    context_parts = []
+    for i, entry in enumerate(context_entries, 1):
+        title = entry.get('title', 'Untitled')
+        content = entry.get('content', '')
+        keywords = entry.get('keywords', [])
+        
+        context_part = f"[Knowledge Base Entry {i}]\n"
+        context_part += f"Title: {title}\n"
+        if keywords:
+            context_part += f"Keywords: {', '.join(keywords)}\n"
+        context_part += f"Content:\n{content}\n"
+        context_parts.append(context_part)
+    
+    context_text = "\n" + "="*50 + "\n".join(context_parts) + "="*50
+    
     return (
-        f"Knowledge Base Context:\n{context_text}\n\n"
-        f"User Question:\n{query}"
+        f"IMPORTANT: Use the knowledge base entries below to answer the user's question. "
+        f"Prioritize accuracy - use exact information from the knowledge base. "
+        f"Only use general knowledge if the knowledge base doesn't cover the topic.\n\n"
+        f"{context_text}\n\n"
+        f"User Question:\n{query}\n\n"
+        f"Instructions: Provide a direct, accurate answer based on the knowledge base entries above. "
+        f"If the knowledge base has relevant information, use it exactly. Be precise and specific."
     )
 
 async def download_images_for_gemini(attachments):
@@ -5551,20 +5574,15 @@ async def purge_forum_posts(interaction: discord.Interaction):
                         continue
                     
                     try:
-                        # Use DELETE method
-                        delete_data = {'postId': post_id}
-                        async with session.delete(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as delete_resp:
+                        # Use POST method with action='delete' (DELETE method doesn't reliably support JSON bodies)
+                        delete_data = {'action': 'delete', 'postId': post_id}
+                        async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as delete_resp:
                             if delete_resp.status == 200:
                                 deleted_count += 1
                             else:
-                                # Try POST method with action='delete' as fallback
-                                delete_data_post = {'action': 'delete', 'postId': post_id}
-                                async with session.post(forum_api_url, json=delete_data_post, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_resp:
-                                    if post_resp.status == 200:
-                                        deleted_count += 1
-                                    else:
-                                        failed_count += 1
-                                        print(f"⚠ Failed to delete post {post_id}: {post_resp.status}")
+                                failed_count += 1
+                                response_text = await delete_resp.text()
+                                print(f"⚠ Failed to delete post {post_id}: {delete_resp.status} - {response_text[:200]}")
                     except Exception as delete_error:
                         failed_count += 1
                         print(f"⚠ Error deleting post {post_id}: {delete_error}")

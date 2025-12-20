@@ -20,8 +20,10 @@ const NavItem: React.FC<{
     <li
       key={view}
       onClick={onClick}
-      className={`flex items-center p-3 my-1 rounded-lg cursor-pointer transition-colors duration-200 ${
-        isActive ? 'bg-primary-500 text-white' : 'text-gray-400 hover:bg-gray-700 hover:text-white'
+      className={`flex items-center p-3 my-1 rounded-xl cursor-pointer transition-all duration-300 ${
+        isActive 
+          ? 'bg-gradient-to-r from-primary-600 to-primary-500 text-white shadow-lg shadow-primary-500/50 scale-105' 
+          : 'text-gray-400 hover:bg-gray-700/50 hover:text-white hover:scale-105'
       }`}
     >
       {icon}
@@ -58,8 +60,8 @@ const Sidebar: React.FC<SidebarProps> = ({ currentView, setCurrentView, isOpen, 
       {/* Sidebar */}
       <aside className={`
         fixed lg:static inset-y-0 left-0 z-50
-        w-64 flex-shrink-0 bg-gray-800 p-4 flex flex-col justify-between
-        transform transition-transform duration-300 ease-in-out
+        w-64 flex-shrink-0 bg-gradient-to-b from-gray-800 to-gray-900 p-4 flex flex-col justify-between
+        transform transition-transform duration-300 ease-in-out border-r border-gray-700
         ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
       `}>
       <div>
