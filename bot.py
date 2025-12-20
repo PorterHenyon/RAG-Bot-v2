@@ -6799,33 +6799,33 @@ async def status(interaction: discord.Interaction):
             inline=True
         )
         
-        # Calculate total API calls across all keys
-        total_calls = sum(len(calls) for calls in groq_api_calls_by_key.values())
+        # Calculate total API calls across all keys (last minute)
+        total_recent_calls = sum(len(calls) for calls in groq_api_calls_by_key.values())
         usage_stats = groq_key_manager.get_usage_stats()
         
         # Enhanced key statistics with health tracking
         key_stats_text = f"**{len(groq_key_manager.api_keys)}** keys loaded\n"
-        key_stats_text += f"**{total_calls}** calls (last min)\n\n"
+        key_stats_text += f"**{total_recent_calls}** calls (last min)\n\n"
         
         # Show detailed stats for each key
         for key_short, stats in list(usage_stats.items())[:4]:  # Show first 4 keys
-            calls_for_key = len(groq_api_calls_by_key.get(key_short, deque()))
+            calls_for_key_recent = len(groq_api_calls_by_key.get(key_short, deque()))
             success_rate = stats.get('success_rate', 0)
             health = stats.get('health_score', 0)
             is_rate_limited = stats.get('rate_limited', False)
-            total_calls = stats.get('total_calls', 0)
+            key_total_calls = stats.get('total_calls', 0)  # Total calls for this key (all time)
             errors = stats.get('errors', 0)
             success_calls = stats.get('successful_calls', 0)
             
             # Determine status indicator based on health score, errors, and rate limit status
             # Check for high error rate first (even if health score is high due to low total calls)
-            error_rate = (errors / total_calls * 100) if total_calls > 0 else 0
+            error_rate = (errors / key_total_calls * 100) if key_total_calls > 0 else 0
             
             if is_rate_limited:
                 status_icon = "🔴"  # Red for rate limited
-            elif total_calls > 0 and error_rate > 50:
+            elif key_total_calls > 0 and error_rate > 50:
                 status_icon = "🔴"  # Red for high error rate (>50% errors)
-            elif total_calls > 0 and errors > success_calls:
+            elif key_total_calls > 0 and errors > success_calls:
                 status_icon = "🔴"  # Red if more errors than successes
             elif health > 50 and error_rate < 20:
                 status_icon = "🟢"  # Green for good health and low error rate
@@ -6839,8 +6839,8 @@ async def status(interaction: discord.Interaction):
             # Show error count if there are errors
             error_info = f", {errors} errors" if errors > 0 else ""
             key_stats_text += f"{status_icon} {key_short}:\n"
-            key_stats_text += f"  {calls_for_key}/30 calls, {success_rate:.0f}% success{error_info}\n"
-            key_stats_text += f"  Health: {health:.0f}\n"
+            key_stats_text += f"  {calls_for_key_recent}/30 calls (last min), {success_rate:.0f}% success{error_info}\n"
+            key_stats_text += f"  Health: {health:.0f} | Total: {key_total_calls} calls\n"
         
         if len(usage_stats) > 4:
             key_stats_text += f"\n... {len(usage_stats) - 4} more key(s)"
@@ -6931,9 +6931,11 @@ async def api_info(interaction: discord.Interaction):
         usage_stats = groq_key_manager.get_usage_stats()
         for i, key in enumerate(GROQ_API_KEYS, 1):
             key_short = key[:10] + '...'
-            usage = usage_stats.get(key_short, 0)
+            key_stats = usage_stats.get(key_short, {})
+            total_calls = key_stats.get('total_calls', 0) if isinstance(key_stats, dict) else 0
+            recent_calls = len(groq_api_calls_by_key.get(key_short, deque()))
             current_indicator = " (current)" if i - 1 == groq_key_manager.current_key_index else ""
-            keys_info += f"**Key {i}:** {key_short} - {usage} calls{current_indicator}\n"
+            keys_info += f"**Key {i}:** {key_short} - {total_calls} total, {recent_calls} recent{current_indicator}\n"
         
         api_embed.add_field(
             name="🔑 Groq API Keys",
