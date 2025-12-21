@@ -1846,17 +1846,37 @@ async def fetch_data_from_api():
                             optimized_entry['content'] = optimized_entry['content'][:500] + "..."
                         optimized_rag.append(optimized_entry)
                     
-                    # Update data
-                    RAG_DATABASE = optimized_rag
+                    # CRITICAL: Completely replace RAG_DATABASE to ensure deleted entries are removed
+                    # Clear old entries first to prevent stale data
+                    RAG_DATABASE.clear()
+                    RAG_DATABASE.extend(optimized_rag)
                     AUTO_RESPONSES = new_auto
                     LEADERBOARD_DATA = new_leaderboard
                     last_data_hash = current_hash
                     print(f"💾 Memory optimized: RAG entries truncated to 500 chars (full content in Pinecone)")
+                    print(f"🔄 RAG_DATABASE updated: {len(RAG_DATABASE)} entries (deleted entries removed)")
                     
                     # COST OPTIMIZATION: Only recompute embeddings if RAG data changed
                     # All embeddings stored in Pinecone (saves Railway CPU/memory costs)
                     if ENABLE_EMBEDDINGS:
                         if rag_changed and USE_PINECONE:
+                            # CRITICAL: When RAG changes, we need to sync deletions too
+                            # Get current IDs from new_rag
+                            new_rag_ids = {e.get('id') for e in new_rag if e.get('id')}
+                            old_rag_ids = {e.get('id') for e in old_rag_entries if e.get('id')}
+                            deleted_ids = old_rag_ids - new_rag_ids
+                            
+                            if deleted_ids:
+                                print(f"🗑️ Detected {len(deleted_ids)} deleted RAG entries - removing from Pinecone...")
+                                try:
+                                    index = init_pinecone()
+                                    if index:
+                                        # Delete vectors from Pinecone
+                                        index.delete(ids=list(deleted_ids))
+                                        print(f"✅ Removed {len(deleted_ids)} entries from Pinecone")
+                                except Exception as delete_error:
+                                    print(f"⚠️ Could not delete entries from Pinecone: {delete_error}")
+                            
                             # MEMORY OPTIMIZATION: Incremental sync - only upload new entries to Pinecone
                             print("🔄 RAG database changed - syncing new entries to Pinecone...")
                             await sync_new_entries_to_pinecone(new_rag, old_rag_entries)
@@ -2938,9 +2958,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             
             try:
                 print(f"   📡 Making API call to Groq...")
+                # Reduced timeout from 30s to 15s for faster failure and retry
                 response = await asyncio.wait_for(
                     loop.run_in_executor(None, generate_sync),
-                    timeout=30.0
+                    timeout=15.0
                 )
                 print(f"   ✓ Received response from API")
             except asyncio.TimeoutError:
@@ -3096,12 +3117,12 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                 print(f"   ⚠️ Transient error, trying next model...")
                 continue
     
-    # All models failed - try one more round with all keys before giving up
-    print(f"\n⚠️ First round of models failed, trying all keys one more time...")
-    await asyncio.sleep(1)  # Brief delay to avoid rate limit hammering
+    # All models failed - try one more round with best key (reduced attempts for speed)
+    print(f"\n⚠️ First round of models failed, trying one more time with best key...")
+    await asyncio.sleep(0.5)  # Brief delay to avoid rate limit hammering
     
-    # Try one more round with all available keys
-    for attempt in range(len(key_manager.api_keys)):
+    # Try one more round with just 2 attempts (faster than trying all keys)
+    for attempt in range(min(2, len(key_manager.api_keys))):
         current_key = key_manager.get_current_key()
         if not current_key:
             break
@@ -3137,9 +3158,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                         raise Exception(f"API call failed: {type(sync_error).__name__}: {str(sync_error)}") from sync_error
                 
                 try:
+                    # Reduced timeout for retry attempts (faster failure)
                     response = await asyncio.wait_for(
                         loop.run_in_executor(None, generate_sync),
-                        timeout=30.0
+                        timeout=12.0
                     )
                     
                     if response and response.choices and len(response.choices) > 0:
