@@ -2661,6 +2661,10 @@ def clean_ai_response(response_text):
     if not response_text:
         return response_text
     
+    # Ensure response_text is a string
+    if not isinstance(response_text, str):
+        response_text = str(response_text)
+    
     import re
     # Remove issue_type\boxed{...} patterns (issue classification markers)
     # This is used internally but should never appear in user-facing responses
