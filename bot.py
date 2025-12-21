@@ -2656,6 +2656,7 @@ def clean_ai_response(response_text):
     
     Removes issue classification markers (issue_type\boxed{[type]}) that are used
     for internal tracking but should not appear in user-facing messages.
+    Preserves markdown formatting and line breaks for proper Discord display.
     """
     if not response_text:
         return response_text
@@ -2668,11 +2669,18 @@ def clean_ai_response(response_text):
     response_text = re.sub(r'\\boxed\{[^}]*\}', '', response_text)
     # Remove any remaining LaTeX commands that might appear
     response_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', response_text)
-    # Clean up extra whitespace and newlines at the end
-    response_text = re.sub(r'\s+', ' ', response_text)
-    response_text = response_text.strip()
-    # Remove trailing periods/spaces that might be left after removal
-    response_text = re.sub(r'[.\s]+$', '', response_text)
+    # Clean up excessive spaces on each line (but preserve newlines and markdown formatting)
+    lines = response_text.split('\n')
+    cleaned_lines = []
+    for line in lines:
+        # Replace multiple consecutive spaces with single space, but preserve the line structure
+        cleaned_line = re.sub(r'[ \t]+', ' ', line)
+        # Remove trailing spaces from each line
+        cleaned_line = cleaned_line.rstrip()
+        cleaned_lines.append(cleaned_line)
+    
+    # Rejoin lines and remove trailing newlines
+    response_text = '\n'.join(cleaned_lines).rstrip()
     
     return response_text
 
