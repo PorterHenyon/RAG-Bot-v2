@@ -2666,16 +2666,30 @@ def clean_ai_response(response_text):
         if not isinstance(response_text, str):
             response_text = str(response_text)
         
+        # Safety: Limit input size to prevent processing issues with extremely large responses
+        MAX_INPUT_SIZE = 100000  # 100k characters max
+        if len(response_text) > MAX_INPUT_SIZE:
+            print(f"⚠️ Response text is very large ({len(response_text)} chars), truncating for processing")
+            response_text = response_text[:MAX_INPUT_SIZE] + "... [truncated]"
+        
         import re
         # Remove issue_type\boxed{...} patterns (issue classification markers)
         # This is used internally but should never appear in user-facing responses
         response_text = re.sub(r'issue_type\\boxed\{[^}]*\}', '', response_text, flags=re.IGNORECASE)
         # Remove standalone \boxed{...} patterns
         response_text = re.sub(r'\\boxed\{[^}]*\}', '', response_text)
-        # Remove any remaining LaTeX commands that might appear
+        # Remove any remaining LaTeX commands that might appear (be careful with this regex)
         response_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', response_text)
+        
         # Clean up excessive spaces on each line (but preserve newlines and markdown formatting)
+        # Limit number of lines to prevent issues with extremely long responses
         lines = response_text.split('\n')
+        MAX_LINES = 10000  # Safety limit
+        if len(lines) > MAX_LINES:
+            print(f"⚠️ Response has many lines ({len(lines)}), truncating")
+            lines = lines[:MAX_LINES]
+            lines.append("... [truncated]")
+        
         cleaned_lines = []
         for line in lines:
             # Replace multiple consecutive spaces with single space, but preserve the line structure
@@ -2691,7 +2705,13 @@ def clean_ai_response(response_text):
     except Exception as e:
         # If cleaning fails, return original text to avoid breaking the bot
         print(f"⚠️ Error in clean_ai_response: {e}")
-        return str(response_text) if response_text else ""
+        import traceback
+        traceback.print_exc()
+        # Return original text as string, or empty string if that fails
+        try:
+            return str(response_text) if response_text else ""
+        except:
+            return ""
 
 def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71, relevant_docs=None):
     """Format AI response into a well-structured Discord embed with titles, sections, and fields
