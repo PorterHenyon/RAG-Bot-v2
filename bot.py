@@ -1505,15 +1505,10 @@ class SolvedButton(discord.ui.View):
                 inline=False
             )
             
-            # Add knowledge base references if we used them
+            # Set footer with entry count and source
             if relevant_docs:
-                doc_titles = [doc.get('title', 'Unknown') for doc in relevant_docs[:2]]
-                ai_embed.add_field(
-                    name="📚 Knowledge Base References",
-                    value="\n".join([f"• {title}" for title in doc_titles]),
-                    inline=False
-                )
-                ai_embed.set_footer(text=f"Revolution Macro AI • Based on {len(relevant_docs)} knowledge base entries")
+                source = 'Pinecone' if USE_PINECONE else 'Keyword'
+                ai_embed.set_footer(text=f"Based on {len(relevant_docs)} entries • {source}")
             else:
                 ai_embed.set_footer(text="Revolution Macro AI")
             
@@ -2510,7 +2505,9 @@ SYSTEM_PROMPT = (
     "- Be concise but complete\n\n"
     
     "IF YOU CAN'T HELP:\n"
-    "Say: 'I don't have specific info on this BSS issue. Our support team can help - they usually respond within 24 hours.'\n\n"
+    "Say: 'I don't have specific info on this BSS issue. Our support team can help - they usually respond within 24 hours.'\n"
+    "CRITICAL: If asked about a specific person, topic, or thing that's not in the knowledge base, simply say you don't know about it. "
+    "DO NOT mention other people or topics you do know about. Just say: 'I don't have information about [that person/topic] in my knowledge base.'\n\n"
     
     "Remember: POST TITLE = Main clue. Answer directly with BSS-specific solutions. Be SHORT but accurate. Human support is backup."
 )
@@ -2627,6 +2624,25 @@ async def download_images_for_gemini(attachments):
     except Exception as e:
         print(f"⚠ Error in download_images_for_gemini: {e}")
         return None
+
+def clean_ai_response(response_text):
+    """Clean AI response text to remove LaTeX formatting and unwanted artifacts"""
+    if not response_text:
+        return response_text
+    
+    # Remove LaTeX boxed formatting (e.g., \boxed{user}, issue_type\boxed{user})
+    import re
+    # Remove \boxed{...} patterns
+    response_text = re.sub(r'\\boxed\{[^}]*\}', '', response_text)
+    # Remove issue_type\boxed{...} patterns
+    response_text = re.sub(r'issue_type\\boxed\{[^}]*\}', '', response_text, flags=re.IGNORECASE)
+    # Remove any remaining LaTeX commands that might appear
+    response_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', response_text)
+    # Clean up extra whitespace
+    response_text = re.sub(r'\s+', ' ', response_text)
+    response_text = response_text.strip()
+    
+    return response_text
 
 async def generate_ai_response(query, context_entries, image_parts=None):
     """Generate an AI response using Groq API with knowledge base context - SIMPLIFIED
@@ -2812,6 +2828,9 @@ async def generate_ai_response(query, context_entries, image_parts=None):
             
             response_text = choice.message.content
             
+            # Clean the response to remove LaTeX formatting and unwanted artifacts
+            response_text = clean_ai_response(response_text)
+            
             # Check if response is empty
             if not response_text or len(response_text.strip()) == 0:
                 print(f"   ⚠️ Empty response from '{model_name}', trying next model...")
@@ -2966,11 +2985,14 @@ async def generate_ai_response(query, context_entries, image_parts=None):
                     if response and response.choices and len(response.choices) > 0:
                         content = response.choices[0].message.content
                         if content and len(content.strip()) > 0:
-                            key_manager.mark_key_success(current_key)
-                            print(f"✅ RETRY SUCCESS! Got response from {model_name} on retry attempt {attempt + 1}")
-                            if context_entries:
-                                print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
-                            return content
+                            # Clean the response to remove LaTeX formatting
+                            content = clean_ai_response(content)
+                            if content and len(content.strip()) > 0:
+                                key_manager.mark_key_success(current_key)
+                                print(f"✅ RETRY SUCCESS! Got response from {model_name} on retry attempt {attempt + 1}")
+                                if context_entries:
+                                    print(f"   📚 Response based on {len(context_entries)} knowledge base entries")
+                                return content
                 except Exception as retry_error:
                     error_str = str(retry_error).lower()
                     if 'quota' in error_str or 'rate limit' in error_str or '429' in error_str:
@@ -4338,7 +4360,8 @@ async def on_thread_create(thread):
                     value="Let me know by clicking a button below!",
                     inline=False
                 )
-                ai_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
+                source = 'Pinecone' if USE_PINECONE else 'Keyword'
+                ai_embed.set_footer(text=f"Based on {num_to_use} entries • {source}")
                 
                 # Create conversation for button handler
                 conversation = [
@@ -4383,7 +4406,9 @@ async def on_thread_create(thread):
                         description=bot_response_text[:4000] if len(bot_response_text) > 4000 else bot_response_text,
                         color=0x2ECC71
                     )
-                    simple_embed.set_footer(text="Revolution Macro AI • From Knowledge Base")
+                    # Set footer with entry count and source
+                    source = 'Pinecone' if USE_PINECONE else 'Keyword'
+                    simple_embed.set_footer(text=f"Based on {num_to_use} entries • {source}")
                     await thread.send(embed=simple_embed)
                     print(f"✅ Sent response embed (without view) for '{thread.name}'")
                     thread_response_type[thread_id] = 'ai'
@@ -7537,15 +7562,10 @@ async def ask(interaction: discord.Interaction, question: str):
             color=0x2ECC71
         )
         
-        # Add knowledge base references if we have them
+        # Set footer with entry count and source
         if relevant_docs:
-            doc_titles = [doc.get('title', 'Unknown') for doc in relevant_docs[:2]]
-            embed.add_field(
-                name="📚 Knowledge Base References",
-                value="\n".join([f"• {title}" for title in doc_titles]),
-                inline=False
-            )
-            embed.set_footer(text=f"Based on {len(relevant_docs)} knowledge base entries • {'Pinecone' if USE_PINECONE else 'Keyword'} search")
+            source = 'Pinecone' if USE_PINECONE else 'Keyword'
+            embed.set_footer(text=f"Based on {len(relevant_docs)} entries • {source}")
         else:
             embed.set_footer(text="AI-generated response (no RAG matches found)")
         
