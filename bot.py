@@ -1494,23 +1494,18 @@ class SolvedButton(discord.ui.View):
             if len(ai_response) > max_description_length:
                 truncated_response = ai_response[:max_description_length-3] + "..."
             
-            ai_embed = discord.Embed(
+            # Format response into structured embed
+            ai_embed = format_ai_response_embed(
+                truncated_response,
                 title="💡 Let Me Try Again",
-                description=truncated_response,
-                color=0x5865F2
+                color=0x5865F2,
+                relevant_docs=relevant_docs
             )
             ai_embed.add_field(
                 name="💬 Better?",
                 value="Let me know if this helps!",
                 inline=False
             )
-            
-            # Set footer with entry count and source
-            if relevant_docs:
-                source = 'Pinecone' if USE_PINECONE else 'Keyword'
-                ai_embed.set_footer(text=f"Based on {len(relevant_docs)} entries • {source}")
-            else:
-                ai_embed.set_footer(text="Revolution Macro AI")
             
             # Add solved button - create conversation for follow-up response
             followup_conversation = self.conversation + [
@@ -2660,6 +2655,154 @@ def clean_ai_response(response_text):
     response_text = re.sub(r'[.\s]+$', '', response_text)
     
     return response_text
+
+def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71, relevant_docs=None):
+    """Format AI response into a well-structured Discord embed with titles, sections, and fields
+    
+    Args:
+        response_text: The raw AI response text
+        title: The embed title (default: "✅ Solution")
+        color: The embed color (default: green)
+        relevant_docs: List of relevant documents for footer
+    
+    Returns:
+        discord.Embed: A formatted embed with structured content
+    """
+    import re
+    
+    # Clean the response first
+    response_text = clean_ai_response(response_text)
+    
+    # Create base embed
+    embed = discord.Embed(color=color)
+    
+    # Try to extract a better title from the response
+    if not title or title == "✅ Solution":
+        # Look for common patterns that indicate a title
+        first_line = response_text.split('\n')[0].strip()
+        if len(first_line) < 100 and (first_line.endswith('?') or ':' in first_line or first_line.startswith('For')):
+            # Use first line as title if it's short and looks like a title
+            title = first_line.rstrip('?').rstrip(':')
+            if len(title) > 256:  # Discord title limit
+                title = title[:253] + "..."
+            response_text = response_text[len(first_line):].strip()
+        else:
+            title = "✅ Solution"
+    
+    embed.title = title
+    
+    # Parse response into sections
+    # Look for numbered lists, bullet points, or markdown headers
+    lines = response_text.split('\n')
+    description_parts = []
+    current_field_name = None
+    current_field_value = []
+    fields_added = 0
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        if not line:
+            i += 1
+            continue
+        
+        # Check for markdown headers (## or ###)
+        if line.startswith('##'):
+            # Save current field if exists
+            if current_field_name and current_field_value:
+                field_text = '\n'.join(current_field_value).strip()
+                if len(field_text) > 0 and len(field_text) <= 1024:
+                    embed.add_field(name=current_field_name, value=field_text, inline=False)
+                    fields_added += 1
+                current_field_value = []
+            
+            # New section header
+            current_field_name = line.lstrip('#').strip()
+            if len(current_field_name) > 256:
+                current_field_name = current_field_name[:253] + "..."
+            i += 1
+            continue
+        
+        # Check for numbered lists (1., 2., etc.) or bullet points (-, •, *)
+        if re.match(r'^[\d]+[.)]\s+', line) or re.match(r'^[-•*]\s+', line):
+            # This is a list item - add to current field or description
+            if current_field_name:
+                current_field_value.append(line)
+            else:
+                description_parts.append(line)
+            i += 1
+            continue
+        
+        # Check if line looks like a step or instruction
+        if ':' in line and len(line) < 150:
+            # Might be a field name
+            parts = line.split(':', 1)
+            if len(parts) == 2 and len(parts[0]) < 50:
+                # Save current field
+                if current_field_name and current_field_value:
+                    field_text = '\n'.join(current_field_value).strip()
+                    if len(field_text) > 0 and len(field_text) <= 1024:
+                        embed.add_field(name=current_field_name, value=field_text, inline=False)
+                        fields_added += 1
+                
+                # Start new field
+                current_field_name = parts[0].strip()
+                current_field_value = [parts[1].strip()]
+                i += 1
+                continue
+        
+        # Regular content line
+        if current_field_name:
+            current_field_value.append(line)
+        else:
+            description_parts.append(line)
+        
+        i += 1
+    
+    # Add final field if exists
+    if current_field_name and current_field_value:
+        field_text = '\n'.join(current_field_value).strip()
+        if len(field_text) > 0 and len(field_text) <= 1024:
+            embed.add_field(name=current_field_name, value=field_text, inline=False)
+            fields_added += 1
+    
+    # Set description from collected parts
+    description = '\n'.join(description_parts).strip()
+    
+    # If we didn't parse into fields, try to split by double newlines
+    if fields_added == 0 and '\n\n' in description:
+        parts = description.split('\n\n', 1)
+        if len(parts[0]) < 2000:
+            description = parts[0]
+            if len(parts) > 1:
+                # Try to add remaining as a field
+                remaining = parts[1].strip()
+                if len(remaining) > 0 and len(remaining) <= 1024:
+                    embed.add_field(name="📋 Details", value=remaining, inline=False)
+    
+    # Limit description length (Discord limit is 4096)
+    if len(description) > 4096:
+        description = description[:4090] + "..."
+    
+    # If description is empty but we have fields, use a default
+    if not description and fields_added > 0:
+        description = "Here's the solution to your issue:"
+    elif not description:
+        description = response_text[:4090] if len(response_text) > 4090 else response_text
+    
+    embed.description = description
+    
+    # Add footer - USE_PINECONE is a global variable
+    if relevant_docs:
+        # Access global USE_PINECONE variable
+        global USE_PINECONE
+        source = 'Pinecone' if USE_PINECONE else 'Keyword'
+        embed.set_footer(text=f"Based on {len(relevant_docs)} entries • {source}")
+    else:
+        embed.set_footer(text="Revolution Macro AI")
+    
+    return embed
 
 async def generate_ai_response(query, context_entries, image_parts=None):
     """Generate an AI response using Groq API with knowledge base context - SIMPLIFIED
@@ -4358,27 +4501,20 @@ async def on_thread_create(thread):
                 bot_response_text = f"I found information in my knowledge base about **{doc_title}**:\n\n{content_preview}\n\n*Note: I'm having trouble connecting to my AI service right now, but here's the relevant information from my knowledge base.*"
                 print(f"⚠️ Using RAG content fallback for '{thread.name}'")
             
-            # Send AI response - SHORTER AND SIMPLER
+            # Send AI response - FORMATTED WITH STRUCTURE
             try:
-                # Discord embed limits: description max 4096, field value max 1024
-                # Truncate description if needed
-                embed_description = bot_response_text
-                if len(embed_description) > 4096:
-                    embed_description = embed_description[:4090] + "..."
-                    print(f"⚠️ Truncated embed description from {len(bot_response_text)} to 4090 chars")
-                
-                ai_embed = discord.Embed(
+                # Format response into structured embed
+                ai_embed = format_ai_response_embed(
+                    bot_response_text,
                     title="✅ Solution",
-                    description=embed_description,
-                    color=0x2ECC71
+                    color=0x2ECC71,
+                    relevant_docs=confident_docs[:num_to_use]
                 )
                 ai_embed.add_field(
                     name="💬 Did this help?",
                     value="Let me know by clicking a button below!",
                     inline=False
                 )
-                source = 'Pinecone' if USE_PINECONE else 'Keyword'
-                ai_embed.set_footer(text=f"Based on {num_to_use} entries • {source}")
                 
                 # Create conversation for button handler
                 conversation = [
@@ -4417,15 +4553,13 @@ async def on_thread_create(thread):
                 
                 # Try to send as embed without view first (in case view is the issue)
                 try:
-                    # Create simpler embed without view
-                    simple_embed = discord.Embed(
+                    # Create formatted embed without view
+                    simple_embed = format_ai_response_embed(
+                        bot_response_text,
                         title="✅ Solution",
-                        description=bot_response_text[:4000] if len(bot_response_text) > 4000 else bot_response_text,
-                        color=0x2ECC71
+                        color=0x2ECC71,
+                        relevant_docs=confident_docs[:num_to_use] if 'confident_docs' in locals() else None
                     )
-                    # Set footer with entry count and source
-                    source = 'Pinecone' if USE_PINECONE else 'Keyword'
-                    simple_embed.set_footer(text=f"Based on {num_to_use} entries • {source}")
                     await thread.send(embed=simple_embed)
                     print(f"✅ Sent response embed (without view) for '{thread.name}'")
                     thread_response_type[thread_id] = 'ai'
@@ -4507,18 +4641,18 @@ async def on_thread_create(thread):
                 # Pass image_parts so vision model is used if images are present
                 bot_response_text = await generate_ai_response(user_question, [general_context_entry], image_parts)
                 
-                # Send general AI response (SHORTER, SIMPLER)
-                general_ai_embed = discord.Embed(
+                # Format general AI response into structured embed
+                general_ai_embed = format_ai_response_embed(
+                    bot_response_text,
                     title="💡 Here's What I Found",
-                    description=bot_response_text,
-                    color=0x5865F2
+                    color=0x5865F2,
+                    relevant_docs=None
                 )
                 general_ai_embed.add_field(
                     name="💬 Did this help?",
                     value="Let me know by clicking a button below!",
                     inline=False
                 )
-                general_ai_embed.set_footer(text="Revolution Macro AI")
                 
                 # Create conversation for button handler
                 conversation = [
@@ -7567,23 +7701,16 @@ async def ask(interaction: discord.Interaction, question: str):
             else:
                 ai_response = "I couldn't find any relevant information in my knowledge base for your question, and I'm having trouble connecting to my AI service right now. A human support agent will help you shortly."
         
-        # Truncate description if too long (Discord limit is 4096 characters)
-        max_description_length = 4096
-        truncated_response = ai_response[:max_description_length] if len(ai_response) > max_description_length else ai_response
-        if len(ai_response) > max_description_length:
-            truncated_response = truncated_response[:max_description_length-3] + "..."
-        
-        embed = discord.Embed(
+        # Format AI response into structured embed
+        embed = format_ai_response_embed(
+            ai_response,
             title="✅ AI Response",
-            description=truncated_response,
-            color=0x2ECC71
+            color=0x2ECC71,
+            relevant_docs=relevant_docs
         )
         
-        # Set footer with entry count and source
-        if relevant_docs:
-            source = 'Pinecone' if USE_PINECONE else 'Keyword'
-            embed.set_footer(text=f"Based on {len(relevant_docs)} entries • {source}")
-        else:
+        # Update footer if no relevant docs
+        if not relevant_docs:
             embed.set_footer(text="AI-generated response (no RAG matches found)")
         
         await interaction.followup.send(embed=embed, ephemeral=False)
