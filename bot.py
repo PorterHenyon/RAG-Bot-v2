@@ -2658,35 +2658,40 @@ def clean_ai_response(response_text):
     for internal tracking but should not appear in user-facing messages.
     Preserves markdown formatting and line breaks for proper Discord display.
     """
-    if not response_text:
+    try:
+        if not response_text:
+            return response_text
+        
+        # Ensure response_text is a string
+        if not isinstance(response_text, str):
+            response_text = str(response_text)
+        
+        import re
+        # Remove issue_type\boxed{...} patterns (issue classification markers)
+        # This is used internally but should never appear in user-facing responses
+        response_text = re.sub(r'issue_type\\boxed\{[^}]*\}', '', response_text, flags=re.IGNORECASE)
+        # Remove standalone \boxed{...} patterns
+        response_text = re.sub(r'\\boxed\{[^}]*\}', '', response_text)
+        # Remove any remaining LaTeX commands that might appear
+        response_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', response_text)
+        # Clean up excessive spaces on each line (but preserve newlines and markdown formatting)
+        lines = response_text.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            # Replace multiple consecutive spaces with single space, but preserve the line structure
+            cleaned_line = re.sub(r'[ \t]+', ' ', line)
+            # Remove trailing spaces from each line
+            cleaned_line = cleaned_line.rstrip()
+            cleaned_lines.append(cleaned_line)
+        
+        # Rejoin lines and remove trailing newlines
+        response_text = '\n'.join(cleaned_lines).rstrip()
+        
         return response_text
-    
-    # Ensure response_text is a string
-    if not isinstance(response_text, str):
-        response_text = str(response_text)
-    
-    import re
-    # Remove issue_type\boxed{...} patterns (issue classification markers)
-    # This is used internally but should never appear in user-facing responses
-    response_text = re.sub(r'issue_type\\boxed\{[^}]*\}', '', response_text, flags=re.IGNORECASE)
-    # Remove standalone \boxed{...} patterns
-    response_text = re.sub(r'\\boxed\{[^}]*\}', '', response_text)
-    # Remove any remaining LaTeX commands that might appear
-    response_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', response_text)
-    # Clean up excessive spaces on each line (but preserve newlines and markdown formatting)
-    lines = response_text.split('\n')
-    cleaned_lines = []
-    for line in lines:
-        # Replace multiple consecutive spaces with single space, but preserve the line structure
-        cleaned_line = re.sub(r'[ \t]+', ' ', line)
-        # Remove trailing spaces from each line
-        cleaned_line = cleaned_line.rstrip()
-        cleaned_lines.append(cleaned_line)
-    
-    # Rejoin lines and remove trailing newlines
-    response_text = '\n'.join(cleaned_lines).rstrip()
-    
-    return response_text
+    except Exception as e:
+        # If cleaning fails, return original text to avoid breaking the bot
+        print(f"⚠️ Error in clean_ai_response: {e}")
+        return str(response_text) if response_text else ""
 
 def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71, relevant_docs=None):
     """Format AI response into a well-structured Discord embed with titles, sections, and fields
