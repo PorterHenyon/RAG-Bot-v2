@@ -2438,16 +2438,25 @@ def find_relevant_rag_entries_keyword(query, db=RAG_DATABASE):
 SYSTEM_PROMPT = (
     "You are Revolution Macro support bot for Bee Swarm Simulator (BSS). You are an expert on BSS game mechanics and Revolution Macro automation.\n\n"
     
+    "CRITICAL SAFETY RULES - NEVER VIOLATE:\n"
+    "1. NEVER recommend exploits, cheats, hacks, or third-party tools that violate Roblox Terms of Service\n"
+    "2. NEVER recommend voidstrap, executor tools, script injectors, or any exploit software\n"
+    "3. NEVER suggest modifying game files, memory editing, or any unauthorized game modifications\n"
+    "4. ONLY recommend legitimate Revolution Macro features and official Roblox/BSS settings\n"
+    "5. If knowledge base contains unsafe content, DO NOT use it - redirect to human support instead\n"
+    "6. Safety is the TOP priority - better to say 'I can't help with that' than recommend unsafe tools\n\n"
+    
     "CRITICAL RULES FOR ACCURACY:\n"
     "1. Read the POST TITLE first - it contains the key issue\n"
-    "2. ALWAYS prioritize knowledge base content over general knowledge\n"
+    "2. ALWAYS prioritize knowledge base content over general knowledge, BUT filter out unsafe content\n"
     "3. If knowledge base has relevant info, use it EXACTLY - don't paraphrase or add speculation\n"
-    "4. Only use general knowledge if knowledge base doesn't cover the topic\n"
-    "5. Be PRECISE - use exact setting paths, terminology, and steps from knowledge base\n"
-    "6. Keep answers SHORT and actionable (2-4 sentences MAX)\n"
-    "7. Reference specific BSS/Revolution Macro settings when relevant\n"
-    "8. If you truly can't help, acknowledge human support is available\n"
-    "9. NEVER guess - if uncertain, say you need human support\n\n"
+    "4. If knowledge base mentions exploits/cheats (voidstrap, executors, etc.), IGNORE that entry and use safe alternatives\n"
+    "5. Only use general knowledge if knowledge base doesn't cover the topic or contains unsafe content\n"
+    "6. Be PRECISE - use exact setting paths, terminology, and steps from knowledge base (when safe)\n"
+    "7. Keep answers SHORT and actionable (2-4 sentences MAX)\n"
+    "8. Reference specific BSS/Revolution Macro settings when relevant\n"
+    "9. If you truly can't help safely, acknowledge human support is available\n"
+    "10. NEVER guess - if uncertain or if only unsafe solutions exist, say you need human support\n\n"
     
     "BEE SWARM SIMULATOR (BSS) KNOWLEDGE:\n"
     "- Fields: Sunflower, Dandelion, Blue Flower, Clover, Spider, Mountain Top, Rose, Stump, Cactus, Pine Tree, Pineapple Patch, Bamboo Field, etc.\n"
@@ -2508,34 +2517,67 @@ SYSTEM_PROMPT = (
 
 
 def build_user_context(query, context_entries):
-    """Build the user message with query and knowledge base context - optimized for accuracy."""
+    """Build the user message with query and knowledge base context - optimized for accuracy and safety."""
     if not context_entries:
         return f"User Question:\n{query}"
     
-    # Build context with clear prioritization
+    # Safety filter: List of prohibited terms that indicate unsafe content
+    UNSAFE_KEYWORDS = ['voidstrap', 'executor', 'script injector', 'exploit', 'hack', 'cheat', 'bypass', 'inject']
+    
+    # Build context with clear prioritization, filtering out unsafe entries
     context_parts = []
+    safe_entries_count = 0
     for i, entry in enumerate(context_entries, 1):
         title = entry.get('title', 'Untitled')
         content = entry.get('content', '')
         keywords = entry.get('keywords', [])
         
-        context_part = f"[Knowledge Base Entry {i}]\n"
+        # Check if entry contains unsafe content
+        is_unsafe = False
+        content_lower = content.lower()
+        title_lower = title.lower()
+        keywords_str = ' '.join(keywords).lower()
+        
+        for unsafe_term in UNSAFE_KEYWORDS:
+            if unsafe_term in content_lower or unsafe_term in title_lower or unsafe_term in keywords_str:
+                is_unsafe = True
+                print(f"⚠️ SAFETY: Filtered out unsafe RAG entry '{title}' (contains '{unsafe_term}')")
+                break
+        
+        if is_unsafe:
+            continue  # Skip unsafe entries
+        
+        safe_entries_count += 1
+        context_part = f"[Knowledge Base Entry {safe_entries_count}]\n"
         context_part += f"Title: {title}\n"
         if keywords:
             context_part += f"Keywords: {', '.join(keywords)}\n"
         context_part += f"Content:\n{content}\n"
         context_parts.append(context_part)
     
+    if not context_parts:
+        # All entries were filtered as unsafe
+        return (
+            f"User Question:\n{query}\n\n"
+            f"SAFETY NOTICE: The knowledge base contains unsafe content for this query. "
+            f"Do NOT recommend exploits, cheats, or unauthorized tools. "
+            f"Only provide safe, legitimate solutions using Revolution Macro features and official game settings. "
+            f"If no safe solution exists, redirect to human support."
+        )
+    
     context_text = "\n" + "="*50 + "\n".join(context_parts) + "="*50
     
     return (
-        f"IMPORTANT: Use the knowledge base entries below to answer the user's question. "
-        f"Prioritize accuracy - use exact information from the knowledge base. "
-        f"Only use general knowledge if the knowledge base doesn't cover the topic.\n\n"
+        f"IMPORTANT SAFETY REMINDER: Do NOT recommend exploits, cheats, voidstrap, executors, or any unauthorized tools. "
+        f"Only recommend legitimate Revolution Macro features and official Roblox/BSS settings.\n\n"
+        f"Use the SAFE knowledge base entries below to answer the user's question. "
+        f"Prioritize accuracy - use exact information from the knowledge base (unsafe entries have been filtered out). "
+        f"Only use general knowledge if the knowledge base doesn't cover the topic safely.\n\n"
         f"{context_text}\n\n"
         f"User Question:\n{query}\n\n"
-        f"Instructions: Provide a direct, accurate answer based on the knowledge base entries above. "
-        f"If the knowledge base has relevant information, use it exactly. Be precise and specific."
+        f"Instructions: Provide a direct, accurate, and SAFE answer based on the knowledge base entries above. "
+        f"If the knowledge base has relevant information, use it exactly. Be precise and specific. "
+        f"NEVER recommend exploits, cheats, or unauthorized tools - even if mentioned in the query."
     )
 
 async def download_images_for_gemini(attachments):
