@@ -4,6 +4,7 @@ import { ForumPost, PostStatus } from '../../types';
 import PostStatusBadge from '../PostStatusBadge';
 import ForumPostDetailModal from '../ForumPostDetailModal';
 import { forumPostService } from '../../services/forumPostService';
+import { dataService } from '../../services/dataService';
 
 const ForumPostCard: React.FC<{ post: ForumPost; onClick: () => void }> = ({ post, onClick }) => {
   const handleDiscordLinkClick = (e: React.MouseEvent) => {
@@ -57,6 +58,8 @@ const ForumPostsView: React.FC = () => {
   const [selectedPost, setSelectedPost] = useState<ForumPost | null>(null);
   const [filter, setFilter] = useState<string>('All');
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [isPurging, setIsPurging] = useState<boolean>(false);
+  const [showPurgeConfirm, setShowPurgeConfirm] = useState<boolean>(false);
 
   const filteredPosts = useMemo(() => {
     return forumPosts
@@ -114,6 +117,37 @@ const ForumPostsView: React.FC = () => {
     }
   };
 
+  const handlePurgeForumPosts = async () => {
+    try {
+      setIsPurging(true);
+      setShowPurgeConfirm(false);
+      
+      // Get ignored post IDs from bot settings
+      let ignoredPostIds: string[] = [];
+      try {
+        const data = await dataService.fetchData();
+        ignoredPostIds = data.botSettings?.ignored_post_ids || [];
+      } catch (error) {
+        console.error('Error fetching bot settings:', error);
+      }
+
+      // Purge posts (keep ignored ones)
+      const result = await forumPostService.purgeForumPosts(ignoredPostIds);
+      
+      // Refresh forum posts
+      const posts = await forumPostService.fetchForumPosts();
+      setForumPosts(posts);
+      
+      // Show success message
+      alert(`✅ Purge complete!\n\nDeleted: ${result.deleted}\nKept (main posts): ${result.kept}\nFailed: ${result.failed}`);
+    } catch (error) {
+      console.error('Error purging forum posts:', error);
+      alert(`❌ Error purging forum posts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsPurging(false);
+    }
+  };
+
   // Periodically refresh forum posts from API
   useEffect(() => {
     let isMounted = true;
@@ -155,16 +189,56 @@ const ForumPostsView: React.FC = () => {
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full sm:w-1/2 bg-gray-700/50 text-white placeholder-gray-400 border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all"
         />
-        <select
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          className="w-full sm:w-auto bg-gray-700/50 text-white border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all cursor-pointer"
-        >
-          {filterOptions.map(option => (
-            <option key={option} value={option}>{option}</option>
-          ))}
-        </select>
+        <div className="flex gap-3 w-full sm:w-auto">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            className="flex-1 sm:flex-none bg-gray-700/50 text-white border border-gray-600 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition-all cursor-pointer"
+          >
+            {filterOptions.map(option => (
+              <option key={option} value={option}>{option}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => setShowPurgeConfirm(true)}
+            disabled={isPurging || forumPosts.length === 0}
+            className="px-4 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all duration-200 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 focus:ring-offset-gray-900 whitespace-nowrap"
+            title="Delete all forum posts except main posts (ignored posts)"
+          >
+            {isPurging ? 'Purging...' : '🗑️ Purge Posts'}
+          </button>
+        </div>
       </div>
+
+      {showPurgeConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-2xl p-6 border border-gray-700 max-w-md w-full">
+            <h3 className="text-xl font-bold text-white mb-4">⚠️ Confirm Purge</h3>
+            <p className="text-gray-300 mb-2">
+              This will delete <strong className="text-red-400">{forumPosts.length}</strong> forum post{forumPosts.length !== 1 ? 's' : ''}.
+            </p>
+            <p className="text-gray-400 text-sm mb-6">
+              Main posts (ignored posts) will be kept. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handlePurgeForumPosts}
+                disabled={isPurging}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all"
+              >
+                {isPurging ? 'Purging...' : 'Yes, Purge All'}
+              </button>
+              <button
+                onClick={() => setShowPurgeConfirm(false)}
+                disabled={isPurging}
+                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {filteredPosts.length === 0 ? (
         <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-lg p-12 text-center border border-gray-700">

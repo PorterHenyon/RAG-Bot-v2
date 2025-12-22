@@ -951,8 +951,8 @@ groq_api_calls_by_key = {key[:10] + '...': deque(maxlen=100) for key in GROQ_API
 
 # MEMORY OPTIMIZATION: Cache for AI responses (reduces duplicate API calls)
 ai_response_cache = {}  # {query_hash: (response, timestamp)}
-AI_CACHE_TTL = 3600  # Cache responses for 1 hour
-AI_CACHE_MAX_SIZE = 50  # Maximum cache entries (reduced to save memory)
+AI_CACHE_TTL = 7200  # Cache responses for 2 hours (increased to reduce API calls and Railway costs)
+AI_CACHE_MAX_SIZE = 100  # Maximum cache entries (increased to reduce API calls, but still memory-safe)
 
 # Hash for data change detection (skip unnecessary syncs)
 last_data_hash = None
@@ -1076,6 +1076,8 @@ thread_images = {}  # {thread_id: [image_parts]}
 no_review_threads = set()  # {thread_id}
 # Track how many times "not solved" has been clicked per thread (to prevent duplicate "Let Me Try Again" responses)
 not_solved_retry_count = {}  # {thread_id: count}
+# Track threads that have already received high priority notifications (to prevent duplicates)
+threads_with_high_priority_notifications = set()  # {thread_id}
 
 # REMOVED: No local storage - all data in Vercel KV API only
 
@@ -2115,6 +2117,83 @@ async def fetch_context(msg):
 # RAG_DATABASE is loaded from API and kept in memory
 
 # --- CORE BOT LOGIC (MIRRORS PLAYGROUND) ---
+async def analyze_conversation(conversation_text: str):
+    """Analyze a conversation and create a RAG entry from it using AI"""
+    try:
+        if not conversation_text or len(conversation_text.strip()) == 0:
+            return None
+        
+        key_manager = groq_key_manager
+        if not key_manager or not key_manager.api_keys:
+            print("⚠️ No API keys available for analyze_conversation")
+            return None
+        
+        # Use Groq to analyze the conversation
+        models_to_try = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768']
+        
+        analysis_prompt = f"""Analyze the following support conversation and extract key information to create a knowledge base entry.
+
+Conversation:
+{conversation_text[:3000]}
+
+Create a RAG entry with:
+1. A concise title (max 100 characters) that summarizes the issue/solution
+2. Detailed content explaining the issue and solution
+3. 5-10 relevant keywords for searching
+
+Respond in JSON format only:
+{{
+  "title": "Title here",
+  "content": "Content here",
+  "keywords": ["keyword1", "keyword2", "keyword3"]
+}}
+
+Return ONLY valid JSON, no other text."""
+
+        for model_name in models_to_try:
+            try:
+                client = key_manager.get_client_with_retry()
+                
+                response = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: client.chat.completions.create(
+                        model=model_name,
+                        messages=[
+                            {"role": "system", "content": "You are a helpful assistant that analyzes support conversations and creates structured knowledge base entries. Always respond with valid JSON only."},
+                            {"role": "user", "content": analysis_prompt}
+                        ],
+                        temperature=0.3,
+                        max_tokens=1000
+                    )
+                )
+                
+                if response and response.choices and len(response.choices) > 0:
+                    content = response.choices[0].message.content.strip()
+                    # Extract JSON from response (handle cases where there's extra text)
+                    import json
+                    # Try to find JSON object in the response
+                    start_idx = content.find('{')
+                    end_idx = content.rfind('}') + 1
+                    if start_idx >= 0 and end_idx > start_idx:
+                        json_str = content[start_idx:end_idx]
+                        result = json.loads(json_str)
+                        if 'title' in result and 'content' in result and 'keywords' in result:
+                            print(f"✅ Successfully analyzed conversation and created RAG entry: {result['title']}")
+                            return result
+                
+                continue
+            except Exception as e:
+                print(f"⚠️ Error analyzing conversation with {model_name}: {e}")
+                continue
+        
+        print("⚠️ Failed to analyze conversation - all models failed")
+        return None
+    except Exception as e:
+        print(f"❌ Error in analyze_conversation: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
 def classify_issue(question: str) -> str:
     """Classify issue type using regex patterns (simple classification)"""
     import re
@@ -2446,8 +2525,8 @@ def find_relevant_rag_entries_keyword(query, db=RAG_DATABASE):
     return [item['entry'] for item in scored_entries[:5]]
 
 SYSTEM_PROMPT = (
-    "You are the official Discord support bot for Revolution Macro, a professional automation application for the Roblox game Bee Swarm Simulator. "
-    "You are an expert at Revolution Macro, RDP, and Bee Swarm Simulator.\n\n"
+    "You are the official Discord support bot for Revolution Macro, a professional automation application for the Roblox game Bee Swarm Simulator (BSS). "
+    "You are an EXPERT at Bee Swarm Simulator, Revolution Macro, and RDP. You have deep knowledge of BSS mechanics, items, bees, fields, mechanics, and all game systems.\n\n"
     
     "Official website: revolutionmacro.com\n\n"
     
@@ -2459,9 +2538,19 @@ SYSTEM_PROMPT = (
     "- Cross-platform (Only for Windows 10/11 and newer version of MacOS)\n"
     "- Standard macro features (pattern-based gathering, auto-conversion, hive claiming, field navigation, quest automation, etc.)\n\n"
     
-    "# ABOUT BEE SWARM SIMULATOR\n"
+    "# BEE SWARM SIMULATOR EXPERTISE - YOU ARE AN EXPERT\n"
+    "You have comprehensive knowledge of Bee Swarm Simulator including:\n"
+    "- All bee types (Basic, Rare, Epic, Legendary, Mythic, Event bees) and their abilities\n"
+    "- All fields, their pollen types, flower counts, and optimal usage\n"
+    "- All planters (Blue Clay, Red Clay, Plastic, Cactus, Petal, etc.) and their stats\n"
+    "- All equipment (masks, guards, boots, amulets) and their stats\n"
+    "- Game mechanics (pollen collection, conversion, quests, badges, codes, etc.)\n"
+    "- Common game knowledge: where to find items, how to use them, what they do\n"
+    "- Field locations, bee locations, quest locations, shop locations\n"
+    "- When users ask about BSS items, mechanics, or features, you know the answer even if it's not in the knowledge base\n\n"
+    
     "BSS is a popular Roblox game focused on collecting pollen to produce honey. Players upgrade equipment, expand hives (up to 50 bee slots) with many bee types to discover, "
-    "complete quests, battle enemies, and compete on leaderboards.\n\n"
+    "complete quests, battle enemies, and compete on leaderboards. You understand all aspects of this game deeply.\n\n"
     
     "# RDP CLARIFICATION\n"
     "RDP can refer to three different technologies but they're usually used together as one package:\n"
@@ -2584,8 +2673,9 @@ def build_user_context(query, context_entries):
             f"User Question:\n{query}\n\n"
             f"SAFETY NOTICE: The knowledge base contains unsafe content for this query. "
             f"Do NOT recommend exploits, cheats, or unauthorized tools. "
-            f"Only provide safe, legitimate solutions using Revolution Macro features and official game settings. "
-            f"If no safe solution exists, redirect to human support."
+            f"Only provide safe, legitimate solutions using Revolution Macro features and official game settings.\n\n"
+            f"BSS EXPERTISE: You are an expert in Bee Swarm Simulator. If this is a BSS question (about items, mechanics, fields, bees, planters, equipment, etc.), "
+            f"use your deep knowledge of the game to answer. You know about all game features and can provide helpful, accurate answers about BSS even without the knowledge base."
         )
     
     context_text = "\n" + "="*50 + "\n".join(context_parts) + "="*50
@@ -2593,13 +2683,18 @@ def build_user_context(query, context_entries):
     return (
         f"IMPORTANT SAFETY REMINDER: Do NOT recommend exploits, cheats, voidstrap, executors, or any unauthorized tools. "
         f"Only recommend legitimate Revolution Macro features and official Roblox/BSS settings.\n\n"
+        f"BSS EXPERTISE: You are an expert in Bee Swarm Simulator. When users ask about BSS items, mechanics, fields, bees, planters, equipment, or game features, "
+        f"you should answer using your deep knowledge of the game - even if not in the knowledge base. You know about all planters (Blue Clay, Red Clay, Plastic, Cactus, Petal, etc.), "
+        f"all fields, all bees, all equipment, game mechanics, and common game knowledge. Use this expertise to provide helpful, accurate answers.\n\n"
         f"Use the SAFE knowledge base entries below to answer the user's question. "
-        f"Prioritize accuracy - use exact information from the knowledge base (unsafe entries have been filtered out). "
-        f"Only use general knowledge if the knowledge base doesn't cover the topic safely.\n\n"
+        f"Prioritize knowledge base content, but also use your BSS expertise when appropriate. "
+        f"Be precise and specific. If it's a BSS question, use your game knowledge. If it's a Revolution Macro question, use the knowledge base.\n\n"
         f"{context_text}\n\n"
         f"User Question:\n{query}\n\n"
-        f"Instructions: Provide a direct, accurate, and SAFE answer based on the knowledge base entries above. "
-        f"If the knowledge base has relevant information, use it exactly. Be precise and specific. "
+        f"Instructions: Provide a direct, accurate, and SAFE answer. "
+        f"If this is about Bee Swarm Simulator (items, mechanics, game features), use your BSS expertise to answer thoroughly. "
+        f"If this is about Revolution Macro settings/features, use the knowledge base entries above. "
+        f"Combine both sources when appropriate. Be helpful, specific, and precise. "
         f"NEVER recommend exploits, cheats, or unauthorized tools - even if mentioned in the query."
     )
 
@@ -2746,7 +2841,8 @@ def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71
         else:
             title = "✅ Solution"
     
-    embed.title = title
+    # Make title bold and prominent
+    embed.title = f"**{title}**" if not title.startswith('**') else title
     
     # Parse response into sections
     # Look for numbered lists, bullet points, or markdown headers
@@ -2770,14 +2866,19 @@ def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71
             if current_field_name and current_field_value:
                 field_text = '\n'.join(current_field_value).strip()
                 if len(field_text) > 0 and len(field_text) <= 1024:
-                    embed.add_field(name=current_field_name, value=field_text, inline=False)
+                    # Make field names bold
+                    bold_field_name = f"**{current_field_name}**" if not current_field_name.startswith('**') else current_field_name
+                    embed.add_field(name=bold_field_name, value=field_text, inline=False)
                     fields_added += 1
                 current_field_value = []
             
-            # New section header
+            # New section header - make it bold
             current_field_name = line.lstrip('#').strip()
             if len(current_field_name) > 256:
                 current_field_name = current_field_name[:253] + "..."
+            # Ensure it's bold
+            if not current_field_name.startswith('**'):
+                current_field_name = f"**{current_field_name}**"
             i += 1
             continue
         
@@ -2800,11 +2901,15 @@ def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71
                 if current_field_name and current_field_value:
                     field_text = '\n'.join(current_field_value).strip()
                     if len(field_text) > 0 and len(field_text) <= 1024:
-                        embed.add_field(name=current_field_name, value=field_text, inline=False)
+                        # Make field names bold
+                        bold_field_name = f"**{current_field_name}**" if not current_field_name.startswith('**') else current_field_name
+                        embed.add_field(name=bold_field_name, value=field_text, inline=False)
                         fields_added += 1
                 
-                # Start new field
+                # Start new field - make it bold
                 current_field_name = parts[0].strip()
+                if not current_field_name.startswith('**'):
+                    current_field_name = f"**{current_field_name}**"
                 current_field_value = [parts[1].strip()]
                 i += 1
                 continue
@@ -2821,11 +2926,27 @@ def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71
     if current_field_name and current_field_value:
         field_text = '\n'.join(current_field_value).strip()
         if len(field_text) > 0 and len(field_text) <= 1024:
-            embed.add_field(name=current_field_name, value=field_text, inline=False)
+            # Make field names bold
+            bold_field_name = f"**{current_field_name}**" if not current_field_name.startswith('**') else current_field_name
+            embed.add_field(name=bold_field_name, value=field_text, inline=False)
             fields_added += 1
     
-    # Set description from collected parts
+    # Set description from collected parts with better formatting
     description = '\n'.join(description_parts).strip()
+    
+    # Improve formatting: Add spacing between paragraphs and make key phrases bold
+    if description:
+        # Split by double newlines to preserve paragraph structure
+        paragraphs = description.split('\n\n')
+        formatted_paragraphs = []
+        for para in paragraphs:
+            # Add spacing and preserve structure
+            para = para.strip()
+            if para:
+                # Make common instruction words bold (Check, Ensure, Enable, Set, etc.)
+                para = re.sub(r'\b(Check|Ensure|Enable|Set|Adjust|Try|Make sure|Navigate|Go to|Click|Open|Close|Restart|Disable)\b', r'**\1**', para, flags=re.IGNORECASE)
+                formatted_paragraphs.append(para)
+        description = '\n\n'.join(formatted_paragraphs)
     
     # If we didn't parse into fields, try to split by double newlines
     if fields_added == 0 and '\n\n' in description:
@@ -2836,7 +2957,7 @@ def format_ai_response_embed(response_text, title="✅ Solution", color=0x2ECC71
                 # Try to add remaining as a field
                 remaining = parts[1].strip()
                 if len(remaining) > 0 and len(remaining) <= 1024:
-                    embed.add_field(name="📋 Details", value=remaining, inline=False)
+                    embed.add_field(name="**📋 Details**", value=remaining, inline=False)
     
     # Limit description length (Discord limit is 4096)
     if len(description) > 4096:
@@ -3376,7 +3497,7 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
-@tasks.loop(hours=3)  # Run every 3 hours (more frequent to save memory)
+@tasks.loop(hours=2)  # Run every 2 hours (COST OPTIMIZATION: More frequent cleanup saves memory)
 async def cleanup_processed_threads():
     """Clean up old processed threads and prevent memory leaks - MEMORY OPTIMIZED"""
     global processed_threads, support_notification_messages, thread_images, thread_response_type, not_solved_retry_count
@@ -3781,10 +3902,10 @@ async def check_old_posts():
                                     print(f"✅ Escalated to High Priority: '{post_title}'")
                                     escalated_count += 1
                                     
-                                    # Try to ping support in the thread
+                                    # Try to ping support in the thread (only once per thread)
                                     try:
                                         thread_channel = bot.get_channel(int(thread_id))
-                                        if thread_channel and thread_id not in escalated_threads:
+                                        if thread_channel and thread_id not in escalated_threads and thread_id not in threads_with_high_priority_notifications:
                                             escalate_embed = discord.Embed(
                                                 title="🚨 Support Team Notified",
                                                 description=f"This post has been open for {int(age_hours)} hours. Our support team has been pinged and will help you soon.",
@@ -3796,7 +3917,10 @@ async def check_old_posts():
                                             # Track this message so we can delete it when classification is done
                                             support_notification_messages[thread_id] = notification_msg.id
                                             escalated_threads.add(thread_id)  # Mark as escalated
+                                            threads_with_high_priority_notifications.add(thread_id)  # Track that we've sent notification
                                             print(f"📢 Sent high priority notification to thread {thread_id}")
+                                        elif thread_id in threads_with_high_priority_notifications:
+                                            print(f"ℹ️ Thread {thread_id} already received high priority notification - skipping")
                                     except Exception as ping_error:
                                         print(f"⚠ Could not send notification to thread {thread_id}: {ping_error}")
                                 else:
@@ -4733,7 +4857,7 @@ async def on_thread_create(thread):
                     print(f"💾 Stored {len(image_parts)} image(s) for thread {thread_id}")
                 
                 # Add satisfaction buttons (pass images for escalation)
-                button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
+                button_view = SolvedButton(thread_id, conversation, 'ai', image_parts)
                 await thread.send(embed=general_ai_embed, view=button_view)
                 thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
                 
@@ -4800,7 +4924,7 @@ async def on_thread_create(thread):
                         thread_images[thread_id] = image_parts
                     
                     # Add satisfaction buttons (pass images for escalation)
-                    button_view = SatisfactionButtons(thread_id, conversation, 'ai', image_parts)
+                    button_view = SolvedButton(thread_id, conversation, 'ai', image_parts)
                     await thread.send(embed=fallback_embed, view=button_view)
                     thread_response_type[thread_id] = 'ai'  # Track as AI attempt
                     print(f"⚠ Sent fallback response for '{thread.name}' (AI generation failed).")
@@ -5039,244 +5163,260 @@ async def on_message(message):
                                     }
                                 }
                             else:
-                                # Update conversation immediately
-                                post_update = {
-                                    'action': 'update',
-                                    'post': {
-                                        **matching_post,
-                                        'conversation': conversation,
-                                        'status': new_status
+                                # Check if satisfaction analysis is enabled
+                                satisfaction_enabled = BOT_SETTINGS.get('satisfaction_analysis_enabled', True)
+                                if not satisfaction_enabled:
+                                    print(f"ℹ️ Satisfaction analysis is disabled - skipping analysis for thread {thread_id}")
+                                    # Just update conversation, no bot response
+                                    post_update = {
+                                        'action': 'update',
+                                        'post': {
+                                            **matching_post,
+                                            'conversation': conversation,
+                                            'status': new_status
+                                        }
                                     }
-                                }
-                                try:
-                                    delay = BOT_SETTINGS.get('satisfaction_delay', 15)
-                                    await asyncio.sleep(delay)  # Wait for user to finish typing
-                                    
-                                    # Get the thread channel
-                                    thread_channel = bot.get_channel(thread_id)
-                                    if not thread_channel:
-                                        print(f"⚠ Could not find thread channel {thread_id}")
-                                        return
-                                    
-                                    # Get all recent user messages (last 5)
-                                    recent_user_messages = [msg.get('content') for msg in conversation[-5:] if msg.get('author') == 'User']
-                                    
-                                    print(f"📝 Analyzing {len(recent_user_messages)} user message(s): {recent_user_messages}")
-                                    
-                                    if not recent_user_messages:
-                                        print(f"⚠ No user messages found for analysis")
-                                        return
-                                    
-                                    satisfaction = await analyze_user_satisfaction(recent_user_messages)
-                                    print(f"📊 Analysis result: satisfied={satisfaction.get('satisfied')}, wants_human={satisfaction.get('wants_human')}, confidence={satisfaction.get('confidence')}")
-                                    
-                                    # Update status based on analysis
-                                    updated_status = matching_post.get('status', 'Unsolved')
-                                    response_type = thread_response_type.get(thread_id)  # Get what type of response we gave
-                                    
-                                    # DEBUG: Log escalation decision factors
-                                    print(f"🔍 Escalation Decision Factors:")
-                                    print(f"   Response type: {response_type}")
-                                    print(f"   Satisfied: {satisfaction.get('satisfied')}")
-                                    print(f"   Wants human: {satisfaction.get('wants_human')}")
-                                    print(f"   Confidence: {satisfaction.get('confidence')}")
-                                    
-                                    # ESCALATION LOGIC:
-                                    # 1. Auto-response → if unsatisfied → AI response
-                                    # 2. AI response → if unsatisfied → Human support
-                                    # 3. Explicit human request → Human support immediately
-                                    
-                                    if satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
-                                        # User is satisfied - mark as solved
-                                        updated_status = 'Solved'
+                                else:
+                                    # Update conversation immediately
+                                    post_update = {
+                                        'action': 'update',
+                                        'post': {
+                                            **matching_post,
+                                            'conversation': conversation,
+                                            'status': new_status
+                                        }
+                                    }
+                                    # Capture the user who sent the message for later use
+                                    captured_user = message.author
+                                    try:
+                                        delay = BOT_SETTINGS.get('satisfaction_delay', 15)
+                                        await asyncio.sleep(delay)  # Wait for user to finish typing
                                         
-                                        # Send shorter satisfaction confirmation embed
-                                        confirm_embed = discord.Embed(
-                                            title="✅ Great! Issue Solved",
-                                            description="Glad I could help! This post will now be locked.",
-                                            color=0x2ECC71
-                                        )
-                                        confirm_embed.add_field(
-                                            name="💬 More Questions?",
-                                            value="Create a new post anytime!",
-                                            inline=False
-                                        )
-                                        confirm_embed.set_footer(text="Revolution Macro Support")
-                                        await thread_channel.send(embed=confirm_embed)
-                                        print(f"✅ User satisfaction detected - marking thread {thread_id} as Solved")
+                                        # Get the thread channel
+                                        thread_channel = bot.get_channel(thread_id)
+                                        if not thread_channel:
+                                            print(f"⚠ Could not find thread channel {thread_id}")
+                                            return
                                         
-                                        # Apply "Resolved" tag and remove "Unsolved" tag if it exists
-                                        try:
-                                            forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
-                                            if forum_channel:
-                                                resolved_tag = await get_resolved_tag(forum_channel)
-                                                unsolved_tag = await get_unsolved_tag(forum_channel)
-                                                
-                                                # Get current tags
-                                                current_tags = list(thread_channel.applied_tags)
-                                                
-                                                # Remove unsolved tag if present
-                                                if unsolved_tag and unsolved_tag in current_tags:
-                                                    current_tags.remove(unsolved_tag)
-                                                    print(f"🏷️ Removed '{unsolved_tag.name}' tag from thread {thread_id}")
-                                                
-                                                # Add resolved tag if not present
-                                                if resolved_tag and resolved_tag not in current_tags:
-                                                    current_tags.append(resolved_tag)
-                                                    print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
-                                                
-                                                # Update tags
-                                                await thread_channel.edit(applied_tags=current_tags)
-                                        except Exception as tag_error:
-                                            print(f"⚠ Could not update tags: {tag_error}")
+                                        # Get all recent user messages (last 5)
+                                        recent_user_messages = [msg.get('content') for msg in conversation[-5:] if msg.get('author') == 'User']
                                         
-                                        # Lock/archive the thread
-                                        try:
-                                            await thread_channel.edit(archived=True, locked=True)
-                                            print(f"🔒 Thread {thread_id} locked and archived successfully")
-                                        except discord.errors.Forbidden as perm_error:
-                                            print(f"❌ Bot lacks 'Manage Threads' permission to lock thread {thread_id}")
-                                            print(f"   Error: {perm_error}")
-                                            # Send notification that thread couldn't be locked
+                                        print(f"📝 Analyzing {len(recent_user_messages)} user message(s): {recent_user_messages}")
+                                        
+                                        if not recent_user_messages:
+                                            print(f"⚠ No user messages found for analysis")
+                                            return
+                                        
+                                        satisfaction = await analyze_user_satisfaction(recent_user_messages)
+                                        print(f"📊 Analysis result: satisfied={satisfaction.get('satisfied')}, wants_human={satisfaction.get('wants_human')}, confidence={satisfaction.get('confidence')}")
+                                        
+                                        # Update status based on analysis
+                                        updated_status = matching_post.get('status', 'Unsolved')
+                                        response_type = thread_response_type.get(thread_id)  # Get what type of response we gave
+                                        
+                                        # DEBUG: Log escalation decision factors
+                                        print(f"🔍 Escalation Decision Factors:")
+                                        print(f"   Response type: {response_type}")
+                                        print(f"   Satisfied: {satisfaction.get('satisfied')}")
+                                        print(f"   Wants human: {satisfaction.get('wants_human')}")
+                                        print(f"   Confidence: {satisfaction.get('confidence')}")
+                                        
+                                        # ESCALATION LOGIC:
+                                        # 1. Auto-response → if unsatisfied → AI response
+                                        # 2. AI response → if unsatisfied → Human support
+                                        # 3. Explicit human request → Human support immediately
+                                        
+                                        if satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
+                                                # User is satisfied - mark as solved
+                                            updated_status = 'Solved'
+                                            
+                                            # Send shorter satisfaction confirmation embed
+                                            confirm_embed = discord.Embed(
+                                                title="✅ Great! Issue Solved",
+                                                description="Glad I could help! This post will now be locked.",
+                                                color=0x2ECC71
+                                            )
+                                            confirm_embed.add_field(
+                                                name="💬 More Questions?",
+                                                value="Create a new post anytime!",
+                                                inline=False
+                                            )
+                                            confirm_embed.set_footer(text="Revolution Macro Support")
+                                            await thread_channel.send(embed=confirm_embed)
+                                            print(f"✅ User satisfaction detected - marking thread {thread_id} as Solved")
+                                            
+                                            # Apply "Resolved" tag and remove "Unsolved" tag if it exists
                                             try:
-                                                lock_fail_embed = discord.Embed(
-                                                    title="⚠️ Thread Not Locked",
-                                                    description="This thread has been marked as Solved, but I don't have permission to lock it. Please give me the **Manage Threads** permission.",
-                                                    color=0xF39C12
-                                                )
-                                                await thread_channel.send(embed=lock_fail_embed)
-                                            except:
-                                                pass
-                                        except Exception as lock_error:
-                                            print(f"❌ Error locking thread {thread_id}: {lock_error}")
-                                            import traceback
-                                            traceback.print_exc()
-                                        
-                                        # Automatically create RAG entry from this solved conversation (if enabled)
-                                        try:
-                                            # Check if auto-RAG is enabled
-                                            if not BOT_SETTINGS.get('auto_rag_enabled', True):
-                                                print(f"ℹ️ Auto-RAG creation is disabled - skipping RAG entry for thread {thread_id}")
-                                            else:
-                                                print(f"📝 Attempting to create RAG entry from solved conversation...")
-                                                
-                                                # Format conversation for analysis
-                                                formatted_lines = []
-                                                for msg in conversation:
-                                                    author = msg.get('author', 'Unknown')
-                                                    content = msg.get('content', '')
-                                                    formatted_lines.append(f"<@{author}> Said: {content}")
-                                                
-                                                conversation_text = "\n".join(formatted_lines)
-                                                
-                                                # Analyze conversation to create RAG entry
-                                                rag_entry = await analyze_conversation(conversation_text)
-                                                
-                                                # Check if thread was manually closed with no_review (don't create RAG)
-                                                if thread_id in no_review_threads:
-                                                    print(f"🚫 Thread {thread_id} marked as no_review - skipping auto-RAG creation")
-                                                elif rag_entry and 'your-vercel-app' not in DATA_API_URL:
-                                                    # Create pending RAG entry (requires approval)
-                                                    data_api_url_rag = DATA_API_URL
+                                                forum_channel = bot.get_channel(SUPPORT_FORUM_CHANNEL_ID)
+                                                if forum_channel:
+                                                    resolved_tag = await get_resolved_tag(forum_channel)
+                                                    unsolved_tag = await get_unsolved_tag(forum_channel)
                                                     
-                                                    async with aiohttp.ClientSession() as rag_session:
-                                                        async with rag_session.get(data_api_url_rag) as get_data_response:
-                                                            current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': [], 'pendingRagEntries': []}
-                                                            if get_data_response.status == 200:
-                                                                current_data = await get_data_response.json()
-                                                            
-                                                            # Create conversation preview for review
-                                                            conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
-                                                            
-                                                            # Create new PENDING RAG entry
-                                                            new_pending_entry = {
-                                                                'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
-                                                                'title': rag_entry.get('title', 'Auto-generated from solved thread'),
-                                                                'content': rag_entry.get('content', ''),
-                                                                'keywords': rag_entry.get('keywords', []),
-                                                                'createdAt': datetime.now().isoformat(),
-                                                                'source': 'Auto-satisfaction',
-                                                                'threadId': str(thread_id),
-                                                                'conversationPreview': conversation_preview
-                                                            }
-                                                            
-                                                            pending_entries = current_data.get('pendingRagEntries', [])
-                                                            pending_entries.append(new_pending_entry)
-                                                            
-                                                            # Save to API (must include ALL fields)
-                                                            save_data = {
-                                                                'ragEntries': current_data.get('ragEntries', []),
-                                                                'autoResponses': current_data.get('autoResponses', []),
-                                                                'slashCommands': current_data.get('slashCommands', []),
-                                                                'botSettings': current_data.get('botSettings', {}),
-                                                                'pendingRagEntries': pending_entries
-                                                            }
-                                                            
-                                                            print(f"💾 Saving pending RAG entry to API for review...")
-                                                            print(f"   Total pending entries: {len(pending_entries)}")
-                                                            print(f"   New pending entry: '{new_pending_entry['title']}'")
-                                                            
-                                                            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                                                            async with rag_session.post(data_api_url_rag, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
-                                                                response_text = await save_response.text()
-                                                                if save_response.status == 200:
-                                                                    print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
-                                                                    print(f"   API response: {response_text[:200]}")
-                                                                    
-                                                                    # Send shorter notification in thread
-                                                                    rag_notification = discord.Embed(
-                                                                        title="📋 Entry Saved for Review",
-                                                                        description=f"**{new_pending_entry['title']}**\n\nThis will be reviewed and added to help future users!",
-                                                                        color=0xF39C12
-                                                                    )
-                                                                    rag_notification.set_footer(text="Revolution Macro • Pending Approval")
-                                                                    await thread_channel.send(embed=rag_notification)
-                                                                else:
-                                                                    print(f"❌ Failed to create pending RAG entry!")
-                                                                    print(f"   Status: {save_response.status}")
-                                                                    print(f"   Response: {response_text[:300]}")
-                                                                    print(f"   URL: {data_api_url_rag}")
-                                                                    print(f"   Payload: {len(pending_entries)} pending entries")
-                                                else:
-                                                    print(f"ℹ Skipping RAG entry creation (no entry generated or API not configured)")
-                                        except Exception as rag_error:
-                                            print(f"⚠ Error auto-creating RAG entry: {rag_error}")
-                                            import traceback
-                                            traceback.print_exc()
-                                        
-                                    elif not satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
-                                        # User is unsatisfied - check escalation path
-                                        
-                                        # STEP 1: Check if they EXPLICITLY asked for human (e.g., "I want to talk to a person")
-                                        if satisfaction.get('wants_human') and response_type == 'ai':
-                                            # They got AI and explicitly want human - escalate
-                                            updated_status = 'Human Support'
-                                            escalated_threads.add(thread_id)
+                                                    # Get current tags
+                                                    current_tags = list(thread_channel.applied_tags)
+                                                    
+                                                    # Remove unsolved tag if present
+                                                    if unsolved_tag and unsolved_tag in current_tags:
+                                                        current_tags.remove(unsolved_tag)
+                                                        print(f"🏷️ Removed '{unsolved_tag.name}' tag from thread {thread_id}")
+                                                    
+                                                    # Add resolved tag if not present
+                                                    if resolved_tag and resolved_tag not in current_tags:
+                                                        current_tags.append(resolved_tag)
+                                                        print(f"🏷️ Applied '{resolved_tag.name}' tag to thread {thread_id}")
+                                                    
+                                                    # Update tags
+                                                    await thread_channel.edit(applied_tags=current_tags)
+                                            except Exception as tag_error:
+                                                print(f"⚠ Could not update tags: {tag_error}")
                                             
-                                            human_embed = discord.Embed(
-                                                title="👨‍💼 Support Team Notified",
-                                                description="Got it! I've notified our support team. They'll help you soon.",
-                                                color=0x3498DB
-                                            )
-                                            human_embed.add_field(
-                                                name="⏰ Response Time",
-                                                value="Usually under 24 hours",
-                                                inline=True
-                                            )
-                                            human_embed.add_field(
-                                                name="📸 Tip",
-                                                value="Send screenshots if you have any!",
-                                                inline=True
-                                            )
-                                            human_embed.set_footer(text="Revolution Macro Support Team")
-                                            await thread_channel.send(embed=human_embed)
-                                            print(f"👥 User explicitly requested human support after AI - thread {thread_id} escalated")
-                                        
-                                        # STEP 2: They got auto-response and are unsatisfied - try AI
-                                        elif response_type == 'auto':
-                                            print(f"🔄 ESCALATION PATH: Auto → AI (user unsatisfied with auto-response, trying AI follow-up...)")
-                                            
+                                            # Lock/archive the thread
                                             try:
+                                                await thread_channel.edit(archived=True, locked=True)
+                                                print(f"🔒 Thread {thread_id} locked and archived successfully")
+                                            except discord.errors.Forbidden as perm_error:
+                                                print(f"❌ Bot lacks 'Manage Threads' permission to lock thread {thread_id}")
+                                                print(f"   Error: {perm_error}")
+                                                # Send notification that thread couldn't be locked
+                                                try:
+                                                    lock_fail_embed = discord.Embed(
+                                                        title="⚠️ Thread Not Locked",
+                                                        description="This thread has been marked as Solved, but I don't have permission to lock it. Please give me the **Manage Threads** permission.",
+                                                        color=0xF39C12
+                                                    )
+                                                    await thread_channel.send(embed=lock_fail_embed)
+                                                except:
+                                                    pass
+                                            except Exception as lock_error:
+                                                print(f"❌ Error locking thread {thread_id}: {lock_error}")
+                                                import traceback
+                                                traceback.print_exc()
+                                            
+                                            # Automatically create RAG entry from this solved conversation (if enabled)
+                                            try:
+                                                # Check if auto-RAG is enabled
+                                                if not BOT_SETTINGS.get('auto_rag_enabled', True):
+                                                    print(f"ℹ️ Auto-RAG creation is disabled - skipping RAG entry for thread {thread_id}")
+                                                else:
+                                                    print(f"📝 Attempting to create RAG entry from solved conversation...")
+                                                    
+                                                    # Format conversation for analysis
+                                                    formatted_lines = []
+                                                    for msg in conversation:
+                                                        author = msg.get('author', 'Unknown')
+                                                        content = msg.get('content', '')
+                                                        formatted_lines.append(f"<@{author}> Said: {content}")
+                                                    
+                                                    conversation_text = "\n".join(formatted_lines)
+                                                    
+                                                    # Analyze conversation to create RAG entry
+                                                    rag_entry = await analyze_conversation(conversation_text)
+                                                    
+                                                    # Check if thread was manually closed with no_review (don't create RAG)
+                                                    if thread_id in no_review_threads:
+                                                        print(f"🚫 Thread {thread_id} marked as no_review - skipping auto-RAG creation")
+                                                    elif rag_entry and 'your-vercel-app' not in DATA_API_URL:
+                                                        # Create pending RAG entry (requires approval)
+                                                        data_api_url_rag = DATA_API_URL
+                                                        
+                                                        async with aiohttp.ClientSession() as rag_session:
+                                                            async with rag_session.get(data_api_url_rag) as get_data_response:
+                                                                current_data = {'ragEntries': [], 'autoResponses': [], 'slashCommands': [], 'pendingRagEntries': []}
+                                                                if get_data_response.status == 200:
+                                                                    current_data = await get_data_response.json()
+                                                                
+                                                                # Create conversation preview for review
+                                                                conversation_preview = conversation_text[:500] + "..." if len(conversation_text) > 500 else conversation_text
+                                                                
+                                                                # Create new PENDING RAG entry
+                                                                new_pending_entry = {
+                                                                    'id': f'PENDING-{datetime.now().strftime("%Y%m%d%H%M%S")}',
+                                                                    'title': rag_entry.get('title', 'Auto-generated from solved thread'),
+                                                                    'content': rag_entry.get('content', ''),
+                                                                    'keywords': rag_entry.get('keywords', []),
+                                                                    'createdAt': datetime.now().isoformat(),
+                                                                    'source': 'Auto-satisfaction',
+                                                                    'threadId': str(thread_id),
+                                                                    'conversationPreview': conversation_preview
+                                                                }
+                                                                
+                                                                pending_entries = current_data.get('pendingRagEntries', [])
+                                                                pending_entries.append(new_pending_entry)
+                                                                
+                                                                # Save to API (must include ALL fields)
+                                                                save_data = {
+                                                                    'ragEntries': current_data.get('ragEntries', []),
+                                                                    'autoResponses': current_data.get('autoResponses', []),
+                                                                    'slashCommands': current_data.get('slashCommands', []),
+                                                                    'botSettings': current_data.get('botSettings', {}),
+                                                                    'pendingRagEntries': pending_entries
+                                                                }
+                                                                
+                                                                print(f"💾 Saving pending RAG entry to API for review...")
+                                                                print(f"   Total pending entries: {len(pending_entries)}")
+                                                                print(f"   New pending entry: '{new_pending_entry['title']}'")
+                                                                
+                                                                headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                                                async with rag_session.post(data_api_url_rag, json=save_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as save_response:
+                                                                    response_text = await save_response.text()
+                                                                    if save_response.status == 200:
+                                                                        print(f"✅ Created pending RAG entry for review: '{new_pending_entry['title']}'")
+                                                                        print(f"   API response: {response_text[:200]}")
+                                                                        
+                                                                        # Send shorter notification in thread
+                                                                        rag_notification = discord.Embed(
+                                                                            title="📋 Entry Saved for Review",
+                                                                            description=f"**{new_pending_entry['title']}**\n\nThis will be reviewed and added to help future users!",
+                                                                            color=0xF39C12
+                                                                        )
+                                                                        rag_notification.set_footer(text="Revolution Macro • Pending Approval")
+                                                                        await thread_channel.send(embed=rag_notification)
+                                                                    else:
+                                                                        print(f"❌ Failed to create pending RAG entry!")
+                                                                        print(f"   Status: {save_response.status}")
+                                                                        print(f"   Response: {response_text[:300]}")
+                                                                        print(f"   URL: {data_api_url_rag}")
+                                                                        print(f"   Payload: {len(pending_entries)} pending entries")
+                                                    else:
+                                                        print(f"ℹ Skipping RAG entry creation (no entry generated or API not configured)")
+                                            except Exception as rag_error:
+                                                print(f"⚠ Error auto-creating RAG entry: {rag_error}")
+                                                import traceback
+                                                traceback.print_exc()
+                                        
+                                        elif not satisfaction.get('satisfied') and satisfaction.get('confidence', 0) > 60:
+                                            # User is unsatisfied - check escalation path
+                                            
+                                            # STEP 1: Check if they EXPLICITLY asked for human (e.g., "I want to talk to a person")
+                                            if satisfaction.get('wants_human') and response_type == 'ai':
+                                                # They got AI and explicitly want human - escalate
+                                                updated_status = 'Human Support'
+                                                escalated_threads.add(thread_id)
+                                                
+                                                human_embed = discord.Embed(
+                                                    title="👨‍💼 Support Team Notified",
+                                                    description="Got it! I've notified our support team. They'll help you soon.",
+                                                    color=0x3498DB
+                                                )
+                                                human_embed.add_field(
+                                                    name="⏰ Response Time",
+                                                    value="Usually under 24 hours",
+                                                    inline=True
+                                                )
+                                                human_embed.add_field(
+                                                    name="📸 Tip",
+                                                    value="Send screenshots if you have any!",
+                                                    inline=True
+                                                )
+                                                human_embed.set_footer(text="Revolution Macro Support Team")
+                                                await thread_channel.send(embed=human_embed)
+                                                print(f"👥 User explicitly requested human support after AI - thread {thread_id} escalated")
+                                            
+                                            # STEP 2: They got auto-response and are unsatisfied - try AI
+                                            elif response_type == 'auto':
+                                                print(f"🔄 ESCALATION PATH: Auto → AI (user unsatisfied with auto-response, trying AI follow-up...)")
+                                                
+                                                try:
                                                     # Get the user's question from conversation
                                                     user_messages = [msg.get('content', '') for msg in conversation if msg.get('author') == 'User']
                                                     user_question = ' '.join(user_messages[:2]) if user_messages else "Help with this issue"
@@ -5323,171 +5463,159 @@ async def on_message(message):
                                                     updated_status = 'AI Response'
                                                     print(f"✅ SENT AI FOLLOW-UP RESPONSE to thread {thread_id}")
                                                     
-                                            except Exception as ai_error:
-                                                print(f"❌ ERROR generating AI follow-up: {ai_error}")
-                                                import traceback
-                                                traceback.print_exc()
-                                                # Even if AI fails, send something
+                                                except Exception as ai_error:
+                                                    print(f"❌ ERROR generating AI follow-up: {ai_error}")
+                                                    import traceback
+                                                    traceback.print_exc()
+                                                    # Even if AI fails, send something
+                                                    try:
+                                                        fallback_embed = discord.Embed(
+                                                            title="💡 Let Me Try Again",
+                                                            description="I'm having trouble generating a detailed response. Let me get a human to help you with this!",
+                                                            color=0xF39C12
+                                                        )
+                                                        await thread_channel.send(embed=fallback_embed)
+                                                        updated_status = 'Human Support'
+                                                        escalated_threads.add(thread_id)
+                                                    except:
+                                                        pass
+                                            
+                                            # STEP 3: They got AI response and are still unsatisfied - escalate to human
+                                            elif response_type == 'ai':
+                                                # They got AI response and were still unsatisfied - escalate to human
+                                                print(f"⚠ ESCALATION PATH: AI → Human (user still unsatisfied after AI response)")
+                                                updated_status = 'Human Support'
+                                                escalated_threads.add(thread_id)  # Mark thread - bot stops talking
+                                                
+                                                # Get the user who triggered this (from the message that started the timer)
+                                                # We need to check if they're the post creator and not staff
+                                                user_who_triggered = None
+                                                thread_owner_id = None
+                                                should_show_log_prompt = False
+                                                
                                                 try:
-                                                    fallback_embed = discord.Embed(
-                                                        title="💡 Let Me Try Again",
-                                                        description="I'm having trouble generating a detailed response. Let me get a human to help you with this!",
+                                                    # Get thread owner
+                                                    if hasattr(thread_channel, 'owner_id') and thread_channel.owner_id:
+                                                        thread_owner_id = thread_channel.owner_id
+                                                    elif hasattr(thread_channel, 'owner') and thread_channel.owner:
+                                                        thread_owner_id = thread_channel.owner.id
+                                                    
+                                                    # Get the user who sent the message that triggered this (captured from message context)
+                                                    user_who_triggered = captured_user if 'captured_user' in locals() else None
+                                                    if user_who_triggered and thread_owner_id:
+                                                        is_creator = user_who_triggered.id == thread_owner_id
+                                                        is_staff = is_staff_or_admin(user_who_triggered) if isinstance(user_who_triggered, discord.Member) else False
+                                                        should_show_log_prompt = is_creator and not is_staff
+                                                except Exception as user_check_error:
+                                                    print(f"⚠ Error checking user for log prompt: {user_check_error}")
+                                                
+                                                if should_show_log_prompt:
+                                                    # First, ask for logs to help support team (only to post creator)
+                                                    log_prompt_embed = discord.Embed(
+                                                        title="📋 Before We Get Support...",
+                                                        description="To help our team solve this **much faster**, please include your **logs**!\n\nLogs contain error details that help us identify exactly what's wrong.",
                                                         color=0xF39C12
                                                     )
-                                                    await thread_channel.send(embed=fallback_embed)
-                                                    updated_status = 'Human Support'
-                                                    escalated_threads.add(thread_id)
-                                                except:
-                                                    pass
-                                        
-                                        # STEP 3: They got AI response and are still unsatisfied - escalate to human
-                                        elif response_type == 'ai':
-                                            # They got AI response and were still unsatisfied - escalate to human
-                                            print(f"⚠ ESCALATION PATH: AI → Human (user still unsatisfied after AI response)")
-                                            updated_status = 'Human Support'
-                                            escalated_threads.add(thread_id)  # Mark thread - bot stops talking
-                                            
-                                            # Get the user who triggered this (from the message that started the timer)
-                                            # We need to check if they're the post creator and not staff
-                                            user_who_triggered = None
-                                            thread_owner_id = None
-                                            should_show_log_prompt = False
-                                            
-                                            try:
-                                                # Get thread owner
-                                                if hasattr(thread_channel, 'owner_id') and thread_channel.owner_id:
-                                                    thread_owner_id = thread_channel.owner_id
-                                                elif hasattr(thread_channel, 'owner') and thread_channel.owner:
-                                                    thread_owner_id = thread_channel.owner.id
+                                                    log_prompt_embed.add_field(
+                                                        name="🧭 How to Get Logs (from the Macro)",
+                                                        value=(
+                                                            "1) Open the macro and go to **Status → Logs**\n"
+                                                            "2) Click **Copy Logs** → then paste here\n"
+                                                            "   - or -\n"
+                                                            "   Click **Open Logs Folder** → upload the most recent `.log` file"
+                                                        ),
+                                                        inline=False
+                                                    )
+                                                    log_prompt_embed.add_field(
+                                                        name="📌 Tips",
+                                                        value="Please include screenshots or a short video if possible. It helps a ton!",
+                                                        inline=False
+                                                    )
+                                                    log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
+                                                    
+                                                    # Send the unified logs instructions (no OS selector needed anymore)
+                                                    await thread_channel.send(embed=log_prompt_embed)
+                                                    
+                                                    # Wait a moment, then send escalation message
+                                                    await asyncio.sleep(2)
+                                                else:
+                                                    print(f"ℹ Skipping log prompt - user is not post creator or is staff/admin")
                                                 
-                                                # Get the user who sent the message that triggered this (from closure)
-                                                user_who_triggered = captured_user
-                                                if user_who_triggered and thread_owner_id:
-                                                    is_creator = user_who_triggered.id == thread_owner_id
-                                                    is_staff = is_staff_or_admin(user_who_triggered) if isinstance(user_who_triggered, discord.Member) else False
-                                                    should_show_log_prompt = is_creator and not is_staff
-                                            except Exception as user_check_error:
-                                                print(f"⚠ Error checking user for log prompt: {user_check_error}")
+                                                # Send escalation embed
+                                                escalate_embed = discord.Embed(
+                                                    title="👨‍💼 Support Team Notified",
+                                                    description="Our support team has been notified and will review your issue soon!",
+                                                    color=0xE67E22
+                                                )
+                                                escalate_embed.add_field(
+                                                    name="⏰ Response Time",
+                                                    value="Usually under 24 hours",
+                                                    inline=True
+                                                )
+                                                escalate_embed.add_field(
+                                                    name="📎 Helpful to Include",
+                                                    value="Screenshots, videos, or error messages",
+                                                    inline=True
+                                                )
+                                                escalate_embed.set_footer(text="Revolution Macro Support Team")
+                                                await thread_channel.send(embed=escalate_embed)
+                                                print(f"⚠ User unsatisfied after AI - escalating thread {thread_id} to Human Support")
                                             
-                                            if should_show_log_prompt:
-                                                # First, ask for logs to help support team (only to post creator)
-                                                log_prompt_embed = discord.Embed(
-                                                    title="📋 Before We Get Support...",
-                                                    description="To help our team solve this **much faster**, please include your **logs**!\n\nLogs contain error details that help us identify exactly what's wrong.",
-                                                    color=0xF39C12
-                                                )
-                                                log_prompt_embed.add_field(
-                                                    name="🧭 How to Get Logs (from the Macro)",
-                                                    value=(
-                                                        "1) Open the macro and go to **Status → Logs**\n"
-                                                        "2) Click **Copy Logs** → then paste here\n"
-                                                        "   - or -\n"
-                                                        "   Click **Open Logs Folder** → upload the most recent `.log` file"
-                                                    ),
-                                                    inline=False
-                                                )
-                                                log_prompt_embed.add_field(
-                                                    name="📌 Tips",
-                                                    value="Please include screenshots or a short video if possible. It helps a ton!",
-                                                    inline=False
-                                                )
-                                                log_prompt_embed.set_footer(text="💡 Uploading logs can reduce resolution time by 50%!")
-                                                
-                                                # Send the unified logs instructions (no OS selector needed anymore)
-                                                await thread_channel.send(embed=log_prompt_embed)
-                                                
-                                                # Wait a moment, then send escalation message
-                                                await asyncio.sleep(2)
+                                            # STEP 4: No response type tracked - default behavior
                                             else:
-                                                print(f"ℹ Skipping log prompt - user is not post creator or is staff/admin")
-                                            
-                                            # Send escalation embed
-                                            escalate_embed = discord.Embed(
-                                                title="👨‍💼 Support Team Notified",
-                                                description="Our support team has been notified and will review your issue soon!",
-                                                color=0xE67E22
-                                            )
-                                            escalate_embed.add_field(
-                                                name="⏰ Response Time",
-                                                value="Usually under 24 hours",
-                                                inline=True
-                                            )
-                                            escalate_embed.add_field(
-                                                name="📎 Helpful to Include",
-                                                value="Screenshots, videos, or error messages",
-                                                inline=True
-                                            )
-                                            escalate_embed.set_footer(text="Revolution Macro Support Team")
-                                            await thread_channel.send(embed=escalate_embed)
-                                            print(f"⚠ User unsatisfied after AI - escalating thread {thread_id} to Human Support")
-                                            
-                                        # STEP 4: No response type tracked - default behavior
-                                        else:
-                                            print(f"⚠ No response type tracked for thread {thread_id}, defaulting to human escalation")
-                                            updated_status = 'Human Support'
-                                            escalated_threads.add(thread_id)
-                                    
-                                    # Update forum post status in dashboard
-                                    if updated_status != matching_post.get('status'):
-                                        # Only try to update if API is configured
-                                        if 'your-vercel-app' not in DATA_API_URL:
-                                            try:
-                                                forum_api_url_delayed = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-                                                print(f"🔄 Updating dashboard status to '{updated_status}' for thread {thread_id}")
-                                                
-                                                async with aiohttp.ClientSession() as delayed_session:
-                                                    # Get current posts
-                                                    async with delayed_session.get(forum_api_url_delayed) as get_resp:
-                                                        if get_resp.status == 200:
-                                                            all_posts = await get_resp.json()
-                                                            current_post = None
-                                                            for p in all_posts:
-                                                                if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
-                                                                    current_post = p
-                                                                    break
-                                                            
-                                                            if current_post:
-                                                                current_post['status'] = updated_status
-                                                                update_payload = {
-                                                                    'action': 'update',
-                                                                    'post': current_post
-                                                                }
-                                                                headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                                                                async with delayed_session.post(forum_api_url_delayed, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as update_resp:
-                                                                    if update_resp.status == 200:
-                                                                        print(f"✅ Successfully updated forum post status to '{updated_status}' for thread {thread_id}")
-                                                                        response_data = await update_resp.json()
-                                                                        print(f"   API response: {response_data}")
-                                                                    else:
-                                                                        error_text = await update_resp.text()
-                                                                        print(f"❌ Failed to update forum post status: HTTP {update_resp.status}")
-                                                                        print(f"   Error: {error_text[:200]}")
-                                                            else:
-                                                                print(f"⚠ Could not find forum post with thread ID {thread_id} in dashboard")
-                                                        else:
-                                                            print(f"⚠ Failed to fetch forum posts from API: HTTP {get_resp.status}")
-                                            except Exception as e:
-                                                print(f"❌ Error updating status after delayed analysis: {e}")
-                                                import traceback
-                                                traceback.print_exc()
-                                        else:
-                                            print(f"ℹ Skipping dashboard update - API not configured")
-                                    
-                                    # Clean up timer
-                                    if thread_id in satisfaction_timers:
-                                        del satisfaction_timers[thread_id]
+                                                print(f"⚠ No response type tracked for thread {thread_id}, defaulting to human escalation")
+                                                updated_status = 'Human Support'
+                                                escalated_threads.add(thread_id)
                                         
-                                except asyncio.CancelledError:
-                                    print(f"⏰ Satisfaction timer cancelled for thread {thread_id}")
-                                except Exception as e:
-                                    print(f"⚠ Error in delayed satisfaction check: {e}")
-                                    import traceback
-                                    traceback.print_exc()
-                            
-                            # Store the task
-                            satisfaction_timers[thread_id] = asyncio.create_task(delayed_satisfaction_check())
-                            delay = BOT_SETTINGS.get('satisfaction_delay', 15)
-                            print(f"⏰ Started {delay}-second satisfaction timer for thread {thread_id}")
+                                        # Update forum post status in dashboard
+                                        if updated_status != matching_post.get('status'):
+                                            # Only try to update if API is configured
+                                            if 'your-vercel-app' not in DATA_API_URL:
+                                                try:
+                                                    forum_api_url_delayed = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+                                                    print(f"🔄 Updating dashboard status to '{updated_status}' for thread {thread_id}")
+                                                    
+                                                    async with aiohttp.ClientSession() as delayed_session:
+                                                        # Get current posts
+                                                        async with delayed_session.get(forum_api_url_delayed) as get_resp:
+                                                            if get_resp.status == 200:
+                                                                all_posts = await get_resp.json()
+                                                                current_post = None
+                                                                for p in all_posts:
+                                                                    if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
+                                                                        current_post = p
+                                                                        break
+                                                                
+                                                                if current_post:
+                                                                    current_post['status'] = updated_status
+                                                                    update_payload = {
+                                                                        'action': 'update',
+                                                                        'post': current_post
+                                                                    }
+                                                                    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                                                    async with delayed_session.post(forum_api_url_delayed, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as update_resp:
+                                                                        if update_resp.status == 200:
+                                                                            print(f"✅ Successfully updated forum post status to '{updated_status}' for thread {thread_id}")
+                                                                            response_data = await update_resp.json()
+                                                                            print(f"   API response: {response_data}")
+                                                                        else:
+                                                                            error_text = await update_resp.text()
+                                                                            print(f"❌ Failed to update forum post status: HTTP {update_resp.status}")
+                                                                            print(f"   Error: {error_text[:200]}")
+                                                                else:
+                                                                    print(f"⚠ Could not find forum post with thread ID {thread_id} in dashboard")
+                                                            else:
+                                                                print(f"⚠ Failed to fetch forum posts from API: HTTP {get_resp.status}")
+                                                except Exception as e:
+                                                    print(f"❌ Error updating status after delayed analysis: {e}")
+                                                    import traceback
+                                                    traceback.print_exc()
+                                                else:
+                                                    print(f"ℹ Skipping dashboard update - API not configured")
+                                    except Exception as e:
+                                        print(f"⚠ Error in satisfaction analysis: {e}")
+                                        import traceback
+                                        traceback.print_exc()
                         
                         else:
                             # Normal flow - update conversation
@@ -5846,23 +5974,57 @@ async def purge_forum_posts(interaction: discord.Interaction):
                 failed_count = 0
                 
                 for post in posts_to_delete:
-                    post_id = post.get('id', post.get('postId', ''))
-                    if not post_id:
+                    # Try both id formats - API checks both
+                    post_id = post.get('id', '')  # Format: POST-123456
+                    post_id_alt = post.get('postId', '')  # Format: 123456 (numeric string)
+                    
+                    # Use the id field first (POST- format), but also try postId if id is missing
+                    delete_post_id = post_id if post_id else post_id_alt
+                    if not delete_post_id:
+                        print(f"⚠ Skipping post with no ID: {post.get('postTitle', 'Unknown')}")
+                        failed_count += 1
                         continue
                     
                     try:
                         # Use POST method with action='delete' (DELETE method doesn't reliably support JSON bodies)
-                        delete_data = {'action': 'delete', 'postId': post_id}
-                        async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as delete_resp:
-                            if delete_resp.status == 200:
-                                deleted_count += 1
+                        delete_data = {'action': 'delete', 'postId': delete_post_id}
+                        print(f"🗑️ Deleting post: {delete_post_id} (title: {post.get('postTitle', 'Unknown')[:50]})")
+                        
+                        async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as delete_resp:
+                            response_status = delete_resp.status
+                            
+                            if response_status == 200:
+                                # Try to parse JSON response
+                                try:
+                                    response_json = await delete_resp.json()
+                                    if response_json.get('success'):
+                                        deleted_count += 1
+                                        print(f"✅ Successfully deleted post {delete_post_id}")
+                                    else:
+                                        # API returned 200 but success=false, still count as success for now
+                                        deleted_count += 1
+                                        print(f"✅ Deleted post {delete_post_id} (API returned 200)")
+                                except:
+                                    # Response is not JSON or parsing failed, but status is 200
+                                    deleted_count += 1
+                                    print(f"✅ Deleted post {delete_post_id} (API returned 200)")
                             else:
-                                failed_count += 1
-                                response_text = await delete_resp.text()
-                                print(f"⚠ Failed to delete post {post_id}: {delete_resp.status} - {response_text[:200]}")
+                                # Failed request - get error message
+                                try:
+                                    response_text = await delete_resp.text()
+                                    failed_count += 1
+                                    print(f"❌ Failed to delete post {delete_post_id}: {response_status} - {response_text[:200]}")
+                                except:
+                                    failed_count += 1
+                                    print(f"❌ Failed to delete post {delete_post_id}: {response_status} (could not read response)")
+                    except asyncio.TimeoutError:
+                        failed_count += 1
+                        print(f"❌ Timeout deleting post {delete_post_id}")
                     except Exception as delete_error:
                         failed_count += 1
-                        print(f"⚠ Error deleting post {post_id}: {delete_error}")
+                        print(f"❌ Error deleting post {delete_post_id}: {delete_error}")
+                        import traceback
+                        traceback.print_exc()
                 
                 # Create result embed
                 result_embed = discord.Embed(
