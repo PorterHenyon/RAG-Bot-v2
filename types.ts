@@ -85,8 +85,24 @@ export interface SlashCommand {
 }
 
 export interface BotSettings {
-  systemPrompt: string;
-  updatedAt: string;
+  systemPrompt?: string;
+  updatedAt?: string;
+  support_forum_channel_id?: number | string;
+  satisfaction_delay?: number;
+  satisfaction_analysis_enabled?: boolean;
+  ai_temperature?: number;
+  ai_max_tokens?: number;
+  ignored_post_ids?: string[];
+  post_inactivity_hours?: number;
+  high_priority_check_interval_hours?: number;
+  solved_post_retention_days?: number;
+  unsolved_tag_id?: number | string | null;
+  resolved_tag_id?: number | string | null;
+  auto_rag_enabled?: boolean;
+  support_notification_channel_id?: number | string;
+  support_role_id?: number | string | null;
+  last_updated?: string;
+  [key: string]: any; // Allow any additional settings
 }
 
 export interface LeaderboardEntry {
