@@ -71,7 +71,7 @@ const SettingsView: React.FC = () => {
                 />
                 <div className="mt-4 flex items-center justify-between">
                     <span className="text-xs text-gray-500">
-                        Last updated: {new Date(botSettings.updatedAt).toLocaleString()}
+                        Last updated: {botSettings.updatedAt ? new Date(botSettings.updatedAt).toLocaleString() : 'Never'}
                     </span>
                     <div className="flex items-center gap-4">
                         {saved && <span className="text-green-400 font-semibold animate-fade-in">✓ Saved & synced to API!</span>}
