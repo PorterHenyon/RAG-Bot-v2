@@ -1085,7 +1085,7 @@ threads_with_high_priority_notifications = set()  # {thread_id}
 async def analyze_user_satisfaction(user_messages):
     """Lightweight heuristic satisfaction analysis to keep flow running without external calls."""
     if not user_messages:
-        return {'satisfied': False, 'wants_human': False, 'confidence': 0}
+        return {'satisfied': False, 'wants_human': False, 'confidence': 0, 'is_followup': False}
     
     text = " ".join(m.lower() for m in user_messages if m)
     satisfied_keywords = ["thanks", "thank you", "fixed", "resolved", "works now", "great", "appreciate"]
@@ -1100,11 +1100,21 @@ async def analyze_user_satisfaction(user_messages):
     wants_human = any(k in text for k in wants_human_keywords) or score < 0
     
     satisfied = score > 0
+    
+    # Check if user is providing follow-up information (not just satisfaction)
+    # Look for informational content: questions, details, explanations, etc.
+    followup_indicators = ["?", "i", "my", "when", "where", "how", "what", "why", "because", "tried", "did", "doing", "error", "says", "shows", "see", "look"]
+    is_followup = any(indicator in text for indicator in followup_indicators) and len(text) > 20
+    # Not a followup if it's just satisfaction
+    if satisfied and score > 1:
+        is_followup = False
+    
     confidence = min(100, max(10, 60 + (score * 10))) if score != 0 else 40
     return {
         'satisfied': satisfied,
         'wants_human': wants_human,
-        'confidence': confidence
+        'confidence': confidence,
+        'is_followup': is_followup
     }
 
 # --- PAGINATED HIGH PRIORITY POSTS VIEW ---
@@ -5208,11 +5218,105 @@ async def on_message(message):
                                             return
                                         
                                         satisfaction = await analyze_user_satisfaction(recent_user_messages)
-                                        print(f"📊 Analysis result: satisfied={satisfaction.get('satisfied')}, wants_human={satisfaction.get('wants_human')}, confidence={satisfaction.get('confidence')}")
+                                        print(f"📊 Analysis result: satisfied={satisfaction.get('satisfied')}, wants_human={satisfaction.get('wants_human')}, confidence={satisfaction.get('confidence')}, is_followup={satisfaction.get('is_followup')}")
                                         
                                         # Update status based on analysis
                                         updated_status = matching_post.get('status', 'Unsolved')
                                         response_type = thread_response_type.get(thread_id)  # Get what type of response we gave
+                                        
+                                        # CHECK FOR FOLLOW-UP INFORMATION FIRST
+                                        # If user is providing follow-up info (not just satisfaction), generate a new AI response
+                                        if satisfaction.get('is_followup') and not satisfaction.get('satisfied') and not satisfaction.get('wants_human'):
+                                            print(f"💬 User provided follow-up information - generating new AI response based on conversation")
+                                            
+                                            # Build conversation context from full conversation history
+                                            conversation_text = ""
+                                            for msg in conversation:
+                                                author = msg.get('author', 'Unknown')
+                                                content = msg.get('content', '')
+                                                if author == 'User':
+                                                    conversation_text += f"User: {content}\n"
+                                                elif author == 'Bot':
+                                                    conversation_text += f"Assistant: {content}\n"
+                                            
+                                            # Get the latest user message as the query
+                                            latest_user_msg = recent_user_messages[-1] if recent_user_messages else ""
+                                            
+                                            # Search for relevant RAG entries using the conversation context
+                                            search_query = f"{conversation_text}\n\nUser's latest question: {latest_user_msg}"
+                                            relevant_docs = find_relevant_rag_entries(search_query, RAG_DATABASE, top_k=5, similarity_threshold=0.2)
+                                            
+                                            if relevant_docs:
+                                                print(f"📚 Found {len(relevant_docs)} relevant RAG entries for follow-up")
+                                            else:
+                                                print(f"⚠️ No relevant RAG entries found for follow-up")
+                                            
+                                            # Generate AI response using conversation context
+                                            try:
+                                                # Use conversation context as the query
+                                                bot_response_text = await generate_ai_response(
+                                                    f"Conversation so far:\n{conversation_text}\n\nUser's latest message: {latest_user_msg}",
+                                                    relevant_docs[:3] if relevant_docs else [],
+                                                    None
+                                                )
+                                                
+                                                if bot_response_text and len(bot_response_text.strip()) > 0:
+                                                    # Format response into structured embed
+                                                    ai_embed = format_ai_response_embed(
+                                                        bot_response_text,
+                                                        title="💡 Follow-up Response",
+                                                        color=0x5865F2,
+                                                        relevant_docs=relevant_docs[:2] if relevant_docs else None
+                                                    )
+                                                    ai_embed.add_field(
+                                                        name="💬 Did this help?",
+                                                        value="Let me know by clicking a button below!",
+                                                        inline=False
+                                                    )
+                                                    
+                                                    # Add solved button with updated conversation
+                                                    solved_view = SolvedButton(thread_id, conversation)
+                                                    await thread_channel.send(embed=ai_embed, view=solved_view)
+                                                    thread_response_type[thread_id] = 'ai'  # Track that we gave an AI response
+                                                    
+                                                    # Update conversation in database
+                                                    bot_message = {
+                                                        'author': 'Bot',
+                                                        'content': bot_response_text,
+                                                        'timestamp': datetime.now().isoformat()
+                                                    }
+                                                    conversation.append(bot_message)
+                                                    
+                                                    # Update post with new conversation
+                                                    post_update = {
+                                                        'action': 'update',
+                                                        'post': {
+                                                            **matching_post,
+                                                            'conversation': conversation,
+                                                            'status': 'AI Response'
+                                                        }
+                                                    }
+                                                    
+                                                    print(f"✅ Generated follow-up AI response for thread {thread_id}")
+                                                    
+                                                    # Send update to API
+                                                    async with aiohttp.ClientSession() as update_session:
+                                                        headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
+                                                        async with update_session.post(forum_api_url, json=post_update, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as update_resp:
+                                                            if update_resp.status == 200:
+                                                                print(f"✅ Updated conversation in database")
+                                                            else:
+                                                                print(f"⚠️ Failed to update conversation: {update_resp.status}")
+                                                    
+                                                    # Don't continue with satisfaction analysis - we already responded
+                                                    return
+                                                else:
+                                                    print(f"⚠️ AI response was empty, falling through to satisfaction analysis")
+                                            except Exception as followup_error:
+                                                print(f"❌ Error generating follow-up response: {followup_error}")
+                                                import traceback
+                                                traceback.print_exc()
+                                                # Fall through to satisfaction analysis
                                         
                                         # DEBUG: Log escalation decision factors
                                         print(f"🔍 Escalation Decision Factors:")
