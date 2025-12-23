@@ -5903,16 +5903,25 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
         print(f"Error in set_ignore_post_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="purge_forum_posts", description="Delete all forum posts except the main ones (ignored posts) (Admin only).")
+@bot.tree.command(name="purge_forum_posts", description="⚠️ PERMANENTLY DELETE all Discord forum threads except main posts (ignored posts). This cannot be undone! (Admin only)")
 async def purge_forum_posts(interaction: discord.Interaction):
-    """Purge all forum posts except those in the ignore list"""
+    """Permanently delete all Discord forum threads except those in the ignore list"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
         return
     if not is_owner_or_admin(interaction):
         await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
         return
+    
+    # Send warning and start processing
     await interaction.response.defer(ephemeral=False)
+    await interaction.followup.send(
+        "⚠️ **WARNING: This will PERMANENTLY DELETE Discord forum threads!**\n"
+        "This action cannot be undone. The threads will be removed from Discord.\n"
+        "Only main posts (in ignore list) will be kept.\n\n"
+        "Starting purge...",
+        ephemeral=False
+    )
     
     try:
         # Skip API call if URL is not configured
@@ -5995,87 +6004,116 @@ async def purge_forum_posts(interaction: discord.Interaction):
                     )
                     return
                 
-                # Use bulk purge action for better performance
-                print(f"🗑️ Purging {len(posts_to_delete)} posts (keeping {len(posts_to_keep)} main posts)")
+                # Delete Discord forum threads and then remove from database
+                print(f"🗑️ Purging {len(posts_to_delete)} Discord forum threads (keeping {len(posts_to_keep)} main posts)")
                 
-                # Collect all post IDs to keep (from ignored_post_ids)
-                keep_post_ids = []
-                for post in posts_to_keep:
-                    post_id = post.get('id', '') or post.get('postId', '')
-                    if post_id:
-                        keep_post_ids.append(post_id)
-                    # Also add the postId field if different
-                    post_id_alt = post.get('postId', '')
-                    if post_id_alt and post_id_alt != post_id:
-                        keep_post_ids.append(post_id_alt)
+                deleted_count = 0
+                failed_count = 0
+                deleted_thread_ids = []
                 
-                # Also add ignored_post_ids directly (they might be in different format)
-                for ignored_id in ignored_post_ids:
-                    if ignored_id not in keep_post_ids:
-                        keep_post_ids.append(str(ignored_id))
+                # Get Discord bot token
+                discord_token = os.getenv('DISCORD_BOT_TOKEN')
+                if not discord_token:
+                    await interaction.followup.send("❌ Discord bot token not configured. Cannot delete Discord threads.", ephemeral=False)
+                    return
                 
-                try:
-                    # Call bulk purge API
-                    purge_data = {
-                        'action': 'purge',
-                        'keepPostIds': keep_post_ids
-                    }
+                # Delete each Discord forum thread
+                for post in posts_to_delete:
+                    thread_id = post.get('postId', '') or post.get('id', '').replace('POST-', '')
+                    if not thread_id:
+                        print(f"⚠️ Skipping post with no thread ID: {post.get('postTitle', 'Unknown')}")
+                        failed_count += 1
+                        continue
                     
-                    async with session.post(forum_api_url, json=purge_data, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as purge_resp:
-                        if purge_resp.status == 200:
-                            result = await purge_resp.json()
-                            deleted_count = result.get('deleted', 0)
-                            failed_count = result.get('failed', 0)
-                            kept_count = result.get('kept', len(posts_to_keep))
-                            print(f"✅ Bulk purge complete: {deleted_count} deleted, {kept_count} kept, {failed_count} failed")
-                        else:
-                            # Fallback to individual deletes if bulk purge fails
-                            error_text = await purge_resp.text()
-                            print(f"⚠️ Bulk purge failed ({purge_resp.status}), falling back to individual deletes: {error_text[:200]}")
-                            deleted_count = 0
-                            failed_count = 0
-                            
-                            for post in posts_to_delete:
-                                post_id = post.get('id', '') or post.get('postId', '')
-                                if not post_id:
-                                    failed_count += 1
-                                    continue
-                                
-                                try:
-                                    delete_data = {'action': 'delete', 'postId': post_id}
-                                    async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as delete_resp:
-                                        if delete_resp.status == 200:
-                                            deleted_count += 1
-                                        else:
-                                            failed_count += 1
-                                except:
-                                    failed_count += 1
-                            
-                            kept_count = len(posts_to_keep)
-                except Exception as purge_error:
-                    print(f"❌ Error during bulk purge: {purge_error}")
-                    import traceback
-                    traceback.print_exc()
-                    deleted_count = 0
-                    failed_count = len(posts_to_delete)
-                    kept_count = len(posts_to_keep)
+                    try:
+                        # Delete the Discord thread using Discord API
+                        discord_api_url = f"https://discord.com/api/v10/channels/{thread_id}"
+                        discord_headers = {
+                            'Authorization': f'Bot {discord_token}',
+                            'Content-Type': 'application/json'
+                        }
+                        
+                        print(f"🗑️ Deleting Discord thread: {thread_id} (title: {post.get('postTitle', 'Unknown')[:50]})")
+                        
+                        async with session.delete(discord_api_url, headers=discord_headers, timeout=aiohttp.ClientTimeout(total=10)) as delete_resp:
+                            if delete_resp.status == 200 or delete_resp.status == 204:
+                                deleted_count += 1
+                                deleted_thread_ids.append(thread_id)
+                                print(f"✅ Successfully deleted Discord thread {thread_id}")
+                            else:
+                                error_text = await delete_resp.text()
+                                failed_count += 1
+                                print(f"❌ Failed to delete Discord thread {thread_id}: {delete_resp.status} - {error_text[:200]}")
+                    except asyncio.TimeoutError:
+                        failed_count += 1
+                        print(f"❌ Timeout deleting Discord thread {thread_id}")
+                    except Exception as delete_error:
+                        failed_count += 1
+                        print(f"❌ Error deleting Discord thread {thread_id}: {delete_error}")
+                        import traceback
+                        traceback.print_exc()
+                
+                # Now remove deleted threads from database
+                if deleted_thread_ids:
+                    try:
+                        # Collect all post IDs to keep (from ignored_post_ids)
+                        keep_post_ids = []
+                        for post in posts_to_keep:
+                            post_id = post.get('id', '') or post.get('postId', '')
+                            if post_id:
+                                keep_post_ids.append(post_id)
+                            # Also add the postId field if different
+                            post_id_alt = post.get('postId', '')
+                            if post_id_alt and post_id_alt != post_id:
+                                keep_post_ids.append(post_id_alt)
+                        
+                        # Also add ignored_post_ids directly (they might be in different format)
+                        for ignored_id in ignored_post_ids:
+                            if ignored_id not in keep_post_ids:
+                                keep_post_ids.append(str(ignored_id))
+                        
+                        # Call bulk purge API to remove from database
+                        purge_data = {
+                            'action': 'purge',
+                            'keepPostIds': keep_post_ids
+                        }
+                        
+                        async with session.post(forum_api_url, json=purge_data, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as purge_resp:
+                            if purge_resp.status == 200:
+                                result = await purge_resp.json()
+                                print(f"✅ Removed {result.get('deleted', 0)} posts from database")
+                            else:
+                                print(f"⚠️ Failed to remove posts from database: {purge_resp.status}")
+                    except Exception as db_error:
+                        print(f"⚠️ Error removing posts from database: {db_error}")
+                        # Continue anyway - Discord threads are already deleted
+                
+                kept_count = len(posts_to_keep)
                 
                 # Create result embed
                 result_embed = discord.Embed(
-                    title="🗑️ Forum Posts Purge Complete",
+                    title="🗑️ Discord Forum Threads Purge Complete",
                     color=0xFF6B6B if failed_count > 0 else 0x2ECC71
                 )
                 
                 result_embed.add_field(
                     name="📊 Summary",
                     value=(
-                        f"**Total posts:** {len(all_posts)}\n"
-                        f"**Kept (main posts):** {len(posts_to_keep)}\n"
-                        f"**Deleted:** {deleted_count}\n"
-                        f"**Failed:** {failed_count}"
+                        f"**Total threads:** {len(all_posts)}\n"
+                        f"**Kept (main posts):** {kept_count}\n"
+                        f"**Deleted from Discord:** {deleted_count}\n"
+                        f"**Failed to delete:** {failed_count}"
                     ),
                     inline=False
                 )
+                
+                if deleted_count > 0:
+                    result_embed.add_field(
+                        name="✅ Success",
+                        value=f"Successfully deleted {deleted_count} Discord forum thread(s).\n"
+                              f"The threads have been permanently removed from Discord.",
+                        inline=False
+                    )
                 
                 if len(posts_to_keep) > 0:
                     kept_list = []
