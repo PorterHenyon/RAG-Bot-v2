@@ -5931,13 +5931,39 @@ async def purge_forum_posts(interaction: discord.Interaction):
             # Get all posts
             async with session.get(forum_api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
                 if get_resp.status != 200:
-                    await interaction.followup.send(f"❌ Failed to fetch forum posts from API. Status: {get_resp.status}", ephemeral=False)
+                    error_text = await get_resp.text()
+                    await interaction.followup.send(
+                        f"❌ Failed to fetch forum posts from API.\n"
+                        f"**Status:** {get_resp.status}\n"
+                        f"**Error:** {error_text[:200]}",
+                        ephemeral=False
+                    )
                     return
                 
                 all_posts = await get_resp.json()
                 
-                if not all_posts or len(all_posts) == 0:
-                    await interaction.followup.send("ℹ️ No forum posts found to purge.", ephemeral=False)
+                # Handle case where API returns null or non-array
+                if all_posts is None:
+                    all_posts = []
+                
+                if not isinstance(all_posts, list):
+                    print(f"⚠️ API returned non-array: {type(all_posts).__name__}, value: {all_posts}")
+                    await interaction.followup.send(
+                        f"❌ API returned invalid data format. Expected array, got: {type(all_posts).__name__}",
+                        ephemeral=False
+                    )
+                    return
+                
+                print(f"📊 Fetched {len(all_posts)} forum posts from API")
+                print(f"📋 Ignored post IDs: {ignored_post_ids}")
+                
+                if len(all_posts) == 0:
+                    await interaction.followup.send(
+                        "ℹ️ No forum posts found in the database.\n"
+                        "Forum posts are created when the bot responds to new forum threads.\n"
+                        f"**API URL:** `{forum_api_url}`",
+                        ephemeral=False
+                    )
                     return
                 
                 # Filter posts to delete (exclude ignored ones)
