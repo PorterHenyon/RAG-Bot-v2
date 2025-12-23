@@ -248,6 +248,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Missing postId' });
       }
 
+      if (action === 'purge') {
+        // Bulk purge forum posts (delete all except kept ones)
+        const keepPostIds: string[] = req.body.keepPostIds || [];
+        try {
+          const posts = await getForumPosts();
+          const initialLength = posts.length;
+          
+          // Filter posts to keep
+          const postsToKeep = posts.filter(post => {
+            const postId = post.id || post.postId;
+            const postIdWithoutPrefix = postId.replace('POST-', '');
+            
+            // Check if this post should be kept
+            return keepPostIds.some(keepId => {
+              const keepIdWithoutPrefix = keepId.replace('POST-', '');
+              return (
+                postId === keepId ||
+                postIdWithoutPrefix === keepId ||
+                postId === `POST-${keepId}` ||
+                postIdWithoutPrefix === keepIdWithoutPrefix ||
+                post.postId === keepId ||
+                post.postId === keepIdWithoutPrefix
+              );
+            });
+          });
+          
+          // Save only the posts to keep
+          await saveForumPosts(postsToKeep);
+          
+          const deleted = initialLength - postsToKeep.length;
+          console.log(`Purged ${deleted} forum posts (kept ${postsToKeep.length})`);
+          
+          return res.status(200).json({
+            success: true,
+            deleted,
+            kept: postsToKeep.length,
+            failed: 0,
+            message: `Purged ${deleted} posts, kept ${postsToKeep.length}`
+          });
+        } catch (error: any) {
+          console.error('Error purging forum posts:', error);
+          return res.status(500).json({ error: `Failed to purge posts: ${error.message}` });
+        }
+      }
+
       return res.status(400).json({ error: 'Invalid action' });
     } catch (error) {
       return res.status(400).json({ error: 'Invalid request body' });
@@ -255,9 +300,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'DELETE') {
-    // Delete a forum post
+    // Delete a forum post (support both body and query parameter)
     try {
-      const { postId } = req.body;
+      // Try to get postId from body first, then query
+      const postId = req.body?.postId || req.query?.postId;
       if (postId) {
         const posts = await getForumPosts();
         const initialLength = posts.length;
@@ -274,7 +320,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       return res.status(400).json({ error: 'Post ID required' });
     } catch (error) {
-      return res.status(400).json({ error: 'Invalid request body' });
+      console.error('Error in DELETE handler:', error);
+      return res.status(400).json({ error: 'Invalid request' });
     }
   }
 

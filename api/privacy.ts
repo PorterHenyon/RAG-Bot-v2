@@ -137,7 +137,7 @@ const privacyHTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
-export default function handler(req: VercelRequest, res: VercelResponse) {
+export default function handler(_req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'text/html');
   res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
   return res.status(200).send(privacyHTML);

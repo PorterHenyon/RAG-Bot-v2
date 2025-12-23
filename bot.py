@@ -5969,62 +5969,70 @@ async def purge_forum_posts(interaction: discord.Interaction):
                     )
                     return
                 
-                # Delete each post
-                deleted_count = 0
-                failed_count = 0
+                # Use bulk purge action for better performance
+                print(f"🗑️ Purging {len(posts_to_delete)} posts (keeping {len(posts_to_keep)} main posts)")
                 
-                for post in posts_to_delete:
-                    # Try both id formats - API checks both
-                    post_id = post.get('id', '')  # Format: POST-123456
-                    post_id_alt = post.get('postId', '')  # Format: 123456 (numeric string)
+                # Collect all post IDs to keep (from ignored_post_ids)
+                keep_post_ids = []
+                for post in posts_to_keep:
+                    post_id = post.get('id', '') or post.get('postId', '')
+                    if post_id:
+                        keep_post_ids.append(post_id)
+                    # Also add the postId field if different
+                    post_id_alt = post.get('postId', '')
+                    if post_id_alt and post_id_alt != post_id:
+                        keep_post_ids.append(post_id_alt)
+                
+                # Also add ignored_post_ids directly (they might be in different format)
+                for ignored_id in ignored_post_ids:
+                    if ignored_id not in keep_post_ids:
+                        keep_post_ids.append(str(ignored_id))
+                
+                try:
+                    # Call bulk purge API
+                    purge_data = {
+                        'action': 'purge',
+                        'keepPostIds': keep_post_ids
+                    }
                     
-                    # Use the id field first (POST- format), but also try postId if id is missing
-                    delete_post_id = post_id if post_id else post_id_alt
-                    if not delete_post_id:
-                        print(f"⚠ Skipping post with no ID: {post.get('postTitle', 'Unknown')}")
-                        failed_count += 1
-                        continue
-                    
-                    try:
-                        # Use POST method with action='delete' (DELETE method doesn't reliably support JSON bodies)
-                        delete_data = {'action': 'delete', 'postId': delete_post_id}
-                        print(f"🗑️ Deleting post: {delete_post_id} (title: {post.get('postTitle', 'Unknown')[:50]})")
-                        
-                        async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as delete_resp:
-                            response_status = delete_resp.status
+                    async with session.post(forum_api_url, json=purge_data, headers=headers, timeout=aiohttp.ClientTimeout(total=30)) as purge_resp:
+                        if purge_resp.status == 200:
+                            result = await purge_resp.json()
+                            deleted_count = result.get('deleted', 0)
+                            failed_count = result.get('failed', 0)
+                            kept_count = result.get('kept', len(posts_to_keep))
+                            print(f"✅ Bulk purge complete: {deleted_count} deleted, {kept_count} kept, {failed_count} failed")
+                        else:
+                            # Fallback to individual deletes if bulk purge fails
+                            error_text = await purge_resp.text()
+                            print(f"⚠️ Bulk purge failed ({purge_resp.status}), falling back to individual deletes: {error_text[:200]}")
+                            deleted_count = 0
+                            failed_count = 0
                             
-                            if response_status == 200:
-                                # Try to parse JSON response
-                                try:
-                                    response_json = await delete_resp.json()
-                                    if response_json.get('success'):
-                                        deleted_count += 1
-                                        print(f"✅ Successfully deleted post {delete_post_id}")
-                                    else:
-                                        # API returned 200 but success=false, still count as success for now
-                                        deleted_count += 1
-                                        print(f"✅ Deleted post {delete_post_id} (API returned 200)")
-                                except:
-                                    # Response is not JSON or parsing failed, but status is 200
-                                    deleted_count += 1
-                                    print(f"✅ Deleted post {delete_post_id} (API returned 200)")
-                            else:
-                                # Failed request - get error message
-                                try:
-                                    response_text = await delete_resp.text()
+                            for post in posts_to_delete:
+                                post_id = post.get('id', '') or post.get('postId', '')
+                                if not post_id:
                                     failed_count += 1
-                                    print(f"❌ Failed to delete post {delete_post_id}: {response_status} - {response_text[:200]}")
+                                    continue
+                                
+                                try:
+                                    delete_data = {'action': 'delete', 'postId': post_id}
+                                    async with session.post(forum_api_url, json=delete_data, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as delete_resp:
+                                        if delete_resp.status == 200:
+                                            deleted_count += 1
+                                        else:
+                                            failed_count += 1
                                 except:
                                     failed_count += 1
-                                    print(f"❌ Failed to delete post {delete_post_id}: {response_status} (could not read response)")
-                    except asyncio.TimeoutError:
-                        failed_count += 1
-                        print(f"❌ Timeout deleting post {delete_post_id}")
-                    except Exception as delete_error:
-                        failed_count += 1
-                        print(f"❌ Error deleting post {delete_post_id}: {delete_error}")
-                        import traceback
-                        traceback.print_exc()
+                            
+                            kept_count = len(posts_to_keep)
+                except Exception as purge_error:
+                    print(f"❌ Error during bulk purge: {purge_error}")
+                    import traceback
+                    traceback.print_exc()
+                    deleted_count = 0
+                    failed_count = len(posts_to_delete)
+                    kept_count = len(posts_to_keep)
                 
                 # Create result embed
                 result_embed = discord.Embed(

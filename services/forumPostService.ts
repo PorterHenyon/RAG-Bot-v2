@@ -94,41 +94,28 @@ export const forumPostService = {
 
   async purgeForumPosts(keepPostIds: string[] = []): Promise<{ deleted: number; kept: number; failed: number }> {
     try {
-      // First, get all posts
-      const allPosts = await this.fetchForumPosts();
-      
-      // Filter posts to delete (exclude kept ones)
-      const postsToDelete = allPosts.filter(post => {
-        const postId = post.id || post.postId;
-        const postIdWithoutPrefix = postId.replace('POST-', '');
-        // Keep if it's in the keep list (check both formats)
-        return !keepPostIds.some(keepId => 
-          postId === keepId || 
-          postIdWithoutPrefix === keepId || 
-          postId === `POST-${keepId}` ||
-          postIdWithoutPrefix === keepId.replace('POST-', '')
-        );
+      // Use bulk purge action for better performance
+      const response = await fetch(getApiUrl(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'purge',
+          keepPostIds: keepPostIds,
+        }),
       });
-
-      // Delete each post
-      let deleted = 0;
-      let failed = 0;
       
-      for (const post of postsToDelete) {
-        try {
-          const postId = post.id || post.postId;
-          await this.deleteForumPost(postId);
-          deleted++;
-        } catch (error) {
-          console.error(`Failed to delete post ${post.id}:`, error);
-          failed++;
-        }
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || `Failed to purge forum posts: ${response.statusText}`);
       }
-
+      
+      const result = await response.json();
       return {
-        deleted,
-        kept: allPosts.length - postsToDelete.length,
-        failed,
+        deleted: result.deleted || 0,
+        kept: result.kept || 0,
+        failed: result.failed || 0,
       };
     } catch (error) {
       console.error('Error purging forum posts:', error);
