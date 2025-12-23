@@ -5928,16 +5928,70 @@ async def purge_forum_posts(interaction: discord.Interaction):
         ignored_post_ids = BOT_SETTINGS.get('ignored_post_ids', [])
         ignored_post_ids_set = {str(pid) for pid in ignored_post_ids}  # Convert to set for faster lookup
         
-        # Get the forum channel
-        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
-        forum_channel = bot.get_channel(forum_channel_id)
+        # Get the forum channel - try multiple sources
+        forum_channel_id_setting = BOT_SETTINGS.get('support_forum_channel_id', None)
+        
+        # Convert to int if it's a string
+        forum_channel_id = None
+        if forum_channel_id_setting:
+            try:
+                forum_channel_id = int(forum_channel_id_setting)
+            except (ValueError, TypeError):
+                forum_channel_id = None
+        
+        # Fallback to environment variable if BOT_SETTINGS value is invalid
+        if not forum_channel_id:
+            forum_channel_id = SUPPORT_FORUM_CHANNEL_ID
+        
+        print(f"🔍 Looking for forum channel with ID: {forum_channel_id}")
+        
+        # Try to get channel from the guild first (more reliable)
+        forum_channel = None
+        if interaction.guild:
+            forum_channel = interaction.guild.get_channel(forum_channel_id)
+            if forum_channel:
+                print(f"✅ Found channel via guild.get_channel: {forum_channel.name}")
+        
+        # Fallback to bot.get_channel if guild method didn't work
+        if not forum_channel:
+            forum_channel = bot.get_channel(forum_channel_id)
+            if forum_channel:
+                print(f"✅ Found channel via bot.get_channel: {forum_channel.name}")
+        
+        # If still not found, try to find any forum channel in the guild
+        if not forum_channel and interaction.guild:
+            print(f"⚠️ Channel {forum_channel_id} not found, searching for forum channels in guild...")
+            for channel in interaction.guild.channels:
+                if isinstance(channel, discord.ForumChannel):
+                    print(f"   Found forum channel: {channel.name} (ID: {channel.id})")
+                    # Use the first forum channel found, or prefer one matching the expected ID
+                    if not forum_channel or str(channel.id) == "1435455947551150171":
+                        forum_channel = channel
         
         if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
-            await interaction.followup.send(
-                f"❌ Forum channel not found or invalid. Channel ID: {forum_channel_id}",
-                ephemeral=False
+            error_msg = (
+                f"❌ Forum channel not found or invalid.\n"
+                f"**Tried Channel ID:** {forum_channel_id}\n"
+                f"**Expected Channel ID:** 1435455947551150171\n\n"
             )
+            if interaction.guild:
+                forum_channels = [ch for ch in interaction.guild.channels if isinstance(ch, discord.ForumChannel)]
+                if forum_channels:
+                    error_msg += f"**Available forum channels in this guild:**\n"
+                    for ch in forum_channels[:5]:
+                        error_msg += f"• {ch.name} (ID: {ch.id})\n"
+                    error_msg += f"\nPlease use `/set_forums_id` with the correct channel ID."
+                else:
+                    error_msg += f"No forum channels found in this guild."
+            else:
+                error_msg += f"Please use `/set_forums_id` to set the correct channel ID."
+            
+            await interaction.followup.send(error_msg, ephemeral=False)
             return
+        
+        # Update forum_channel_id to the actual found channel ID
+        forum_channel_id = forum_channel.id
+        print(f"📊 Using forum channel: {forum_channel.name} (ID: {forum_channel_id})")
         
         print(f"📊 Fetching all threads from forum channel: {forum_channel.name} (ID: {forum_channel_id})")
         print(f"📋 Ignored post IDs: {ignored_post_ids}")
