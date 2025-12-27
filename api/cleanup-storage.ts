@@ -122,11 +122,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           const deletedCount = initialCount - filteredPosts.length;
           
-          if (typeof kvClient.set === 'function') {
-            await kvClient.set('forum_posts', JSON.stringify(filteredPosts));
-          } else {
-            await kvClient.set('forum_posts', filteredPosts);
-          }
+          // Both Vercel KV and ioredis work with stringified JSON
+          await (kvClient as any).set('forum_posts', JSON.stringify(filteredPosts));
 
           return res.status(200).json({
             success: true,
@@ -139,11 +136,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (action === 'cleanup_pending_rag') {
         // Clear all pending RAG entries
-        if (typeof kvClient.set === 'function') {
-          await kvClient.set('pending_rag_entries', JSON.stringify([]));
-        } else {
-          await kvClient.set('pending_rag_entries', []);
-        }
+        // Both Vercel KV and ioredis require string values
+        await (kvClient as any).set('pending_rag_entries', JSON.stringify([]));
 
         return res.status(200).json({
           success: true,

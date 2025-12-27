@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { ForumPost, RagEntry, PostStatus, AutoResponse, Message, SlashCommand, BotSettings, PendingRagEntry } from '../types';
+import { ForumPost, RagEntry, AutoResponse, SlashCommand, BotSettings, PendingRagEntry } from '../types';
 import { dataService } from '../services/dataService';
 
 // RAG entries initial data - Updated from export on 2025-11-28
@@ -43,6 +43,30 @@ const initialRagEntries: RagEntry[] = [
         keywords: ['full', 'fullscreen', 'display', '100%', 'scaling', 'input', 'scaling', 'resolution'],
         createdAt: '2025-11-19T00:55:21.274Z',
         createdBy: 'Auto-generated',
+    },
+    {
+        id: 'RAG-WEREWOLF-001',
+        title: 'Werewolves Kill Bees - Bee Swarm Simulator Game Mechanic',
+        content: "**CRITICAL: Werewolves KILL Bees in Bee Swarm Simulator**\n\nWerewolves are hostile mobs that spawn in fields and **actively attack and kill your bees**. This is a fundamental game mechanic - werewolves killing bees is NORMAL gameplay, not a bug.\n\n**What Happens:**\n- Werewolves spawn periodically in various fields\n- When a werewolf encounters your bees, it attacks and kills them\n- Your bee count decreases when bees are killed\n- This can interrupt macro automation, causing field changes or resets\n\n**Solutions:**\n1. Upgrade defense equipment (masks, guards, boots) to protect bees\n2. Configure macro to avoid fields where werewolves frequently spawn\n3. Monitor bee count - significant drops indicate werewolf attacks\n4. Ensure macro can defeat werewolves before they kill too many bees\n\n**Important:** Bee deaths from werewolves are expected game behavior. Upgrade equipment or adjust macro settings to handle werewolf encounters.",
+        keywords: ['werewolf', 'werewolves', 'bees killed', 'bee death', 'macro interruption', 'hostile mob', 'BSS', 'equipment', 'defense'],
+        createdAt: new Date().toISOString(),
+        createdBy: 'Manual Entry',
+    },
+    {
+        id: 'RAG-BSS-MECHANICS-001',
+        title: 'Bee Swarm Simulator Core Game Mechanics',
+        content: "**BEE SWARM SIMULATOR - ESSENTIAL MECHANICS:**\n\n**Core Gameplay:**\n- Collect pollen from fields using tools and bees\n- Convert pollen to honey at hive (primary currency)\n- Use honey to purchase upgrades, eggs, equipment\n- Expand hive by hatching eggs\n\n**Bees:**\n- Rarities: Common, Rare, Epic, Legendary, Mythic, Event\n- Each bee has unique abilities (pollen collection, combat, special effects)\n- Upgrade/transform bees using Royal Jelly\n\n**Fields:**\n- Multiple fields with different pollen types (Red, Blue, White, Colorless)\n- Fields: Sunflower, Dandelion, Clover, Spider, Strawberry, Bamboo, Pineapple Patch, Pine Tree Forest, Cactus, Rose, Mountain Top, Coconut, Pepper Patch, Stump Field, and more\n- Higher-level fields = more pollen but stronger mobs\n\n**Hostile Mobs:**\n- **Werewolves:** Spawn in fields, attack and KILL your bees (normal gameplay)\n- **Vicious Bees:** Periodic spawns that can kill bees if not defeated\n- **Field Mobs:** Ladybugs, Rhino Beetles, Mantises, Spiders guard fields\n- Mobs drop loot when defeated (often required for quests)\n- **Bee deaths from mobs/werewolves/vicious bees are NORMAL**\n\n**Planters:**\n- Blue Clay, Red Clay, Plastic, Cactus, Petal planters\n- Produce nectar over time (provides buffs)\n- Require placement, watering, harvesting (manual or macro)\n\n**Equipment:**\n- Masks: Increase pollen collection, provide abilities\n- Guards: Provide defense, reduce bee deaths\n- Boots: Increase movement speed, special abilities\n- Amulets: Stat boosts and special effects\n- Higher-tier equipment = better efficiency\n\n**Quests & NPCs:**\n- Black Bear: Main quest giver\n- Mother Bear: Quest rewards\n- Spirit Bear: Advanced quests with better rewards\n- Completing quests rewards honey, tickets, items, rare bees",
+        keywords: ['BSS', 'bee swarm simulator', 'game mechanics', 'bees', 'fields', 'pollen', 'honey', 'planters', 'equipment', 'mobs', 'werewolves', 'vicious bee', 'quests', 'NPCs', 'bee death'],
+        createdAt: new Date().toISOString(),
+        createdBy: 'Research-Based Entry',
+    },
+    {
+        id: 'RAG-REVOLUTION-MACRO-001',
+        title: 'Revolution Macro Features and Troubleshooting',
+        content: "**REVOLUTION MACRO - FEATURES & TROUBLESHOOTING:**\n\n**Core Features:**\n- AI-powered automation for Bee Swarm Simulator\n- Cross-platform: Windows 10/11 and newer macOS\n- Modern .NET 8.0/WPF interface\n- Discord integration for notifications\n\n**Key Features:**\n- **AI Gather:** Vision-based token detection and collection, adapts to field layouts\n- **Vic Hop:** Server-hopping to locate/defeat vicious bees, supports alt coordination\n- **Planter Studio:** Automated planter management (planting, watering, harvesting, rotation)\n- **RBC Gather:** Automated alt coordination during Robo-bear Challenge events\n- **AI Stinger Hop:** Server hopping with AI detection for optimal farming\n- **AI Pathfinding:** Optimized routes using shortcuts (portals, cannons)\n- **Standard Features:** Pattern gathering, auto-conversion, hive claiming, field navigation, quest automation, dispenser collection\n- **RDP Support:** Full Remote Desktop Protocol support for alt account automations\n\n**Common Issues & Solutions:**\n- **Macro Reset:** Low-tier gear issue - upgrade equipment (especially gliders for travel speed)\n- **Pathfinding Problems:** Check field navigation settings, may need navmesh recalculation\n- **Bee Death Interruptions:** Werewolves/mobs killing bees is normal - upgrade defense equipment or configure macro to handle mobs\n- **Display/Rendering Issues:** Set display scaling to 100%, ensure Roblox is in windowed mode (not fullscreen)\n- **Initialization Errors:** Usually corrupt config files - reset configuration or reinstall\n- **Settings Not Saving:** Check file permissions, ensure macro has write access\n- **Game Window Detection:** Must use windowed mode - fullscreen causes detection issues\n- **Auto-Deposit Conflicts:** Character resetting often caused by auto-deposit conflicts - adjust timing or disable temporarily\n\n**Best Practices:**\n- Keep macro updated\n- Configure settings to match equipment and goals\n- Monitor bee count and adjust if deaths are excessive\n- Use appropriate fields for your bee/equipment level\n- Test settings before long AFK sessions",
+        keywords: ['revolution macro', 'AI gather', 'vic hop', 'planter studio', 'RBC gather', 'AI pathfinding', 'troubleshooting', 'macro reset', 'bee death', 'display scaling', 'initialization error', 'auto-deposit', 'RDP'],
+        createdAt: new Date().toISOString(),
+        createdBy: 'Research-Based Entry',
     }
 ];
 
