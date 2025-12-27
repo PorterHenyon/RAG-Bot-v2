@@ -1,0 +1,15 @@
+# Storage Cleanup Commands - Copy and Paste These!
+
+# STEP 1: Clean up old forum posts (keeps last 7 days)
+# This usually frees up 80-90% of your storage!
+
+curl -X POST https://rag-bot-v2-lcze.vercel.app/api/cleanup-storage -H "Content-Type: application/json" -d "{\"action\": \"cleanup_forum_posts\", \"options\": {\"retentionDays\": 7}}"
+
+# STEP 2: Clear pending RAG entries
+
+curl -X POST https://rag-bot-v2-lcze.vercel.app/api/cleanup-storage -H "Content-Type: application/json" -d "{\"action\": \"cleanup_pending_rag\"}"
+
+# STEP 3: Check storage usage (see how much space you freed!)
+
+curl https://rag-bot-v2-lcze.vercel.app/api/cleanup-storage
+

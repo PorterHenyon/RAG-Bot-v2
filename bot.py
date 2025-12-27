@@ -2385,6 +2385,11 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
     Returns:
         List of relevant RAG entries sorted by similarity
     """
+    # CPU OPTIMIZATION: Skip embeddings entirely if FORCE_KEYWORD_SEARCH is enabled
+    if FORCE_KEYWORD_SEARCH:
+        print("💰 FORCE_KEYWORD_SEARCH enabled - Using keyword search only (zero CPU cost)")
+        return find_relevant_rag_entries_keyword(query, db)
+    
     model = get_embedding_model()
     
     # Fallback to keyword search if embeddings not available
@@ -3728,7 +3733,7 @@ async def before_sync_task():
     await bot.wait_until_ready()
 
 # --- BOT EVENTS ---
-@tasks.loop(hours=2)  # Run every 2 hours (COST OPTIMIZATION: More frequent cleanup saves memory)
+@tasks.loop(hours=6)  # Run every 6 hours (CPU OPTIMIZATION: Reduced frequency to save CPU costs)
 async def cleanup_processed_threads():
     """Clean up old processed threads and prevent memory leaks - MEMORY OPTIMIZED"""
     global processed_threads, support_notification_messages, thread_images, thread_response_type, not_solved_retry_count
@@ -4065,7 +4070,7 @@ async def notify_support_channel_summary(ping_support=False):
 # REMOVED: Local backups disabled - all data stored in Vercel KV API only
 # Users can download backups anytime with /export_data command
 
-@tasks.loop(hours=4)  # Check every 4 hours (optimized to save CPU costs)
+@tasks.loop(hours=8)  # Check every 8 hours (CPU OPTIMIZATION: Reduced frequency to save CPU costs)
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
     try:

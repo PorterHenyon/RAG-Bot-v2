@@ -543,11 +543,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'GET') {
-    // Return all data
+    // Return all data with caching to reduce bandwidth
     try {
       const data = await getDataStore();
+      
+      // Generate ETag from data hash for conditional requests
+      const crypto = await import('crypto');
+      const dataString = JSON.stringify(data);
+      const etag = crypto.createHash('md5').update(dataString).digest('hex');
+      
+      // Check if client has cached version (conditional request)
+      const clientEtag = req.headers['if-none-match'];
+      if (clientEtag === etag) {
+        // Data hasn't changed, return 304 Not Modified (saves bandwidth!)
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate'); // Cache for 60 seconds
+        return res.status(304).end();
+      }
+      
       // Log what we're returning for debugging
       console.log(`📤 GET /api/data returning: ${data.ragEntries.length} RAG entries, ${data.autoResponses.length} auto-responses, ${data.slashCommands.length} slash commands`);
+      
+      // Set caching headers
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'public, max-age=60, must-revalidate'); // Cache for 60 seconds
+      res.setHeader('Content-Type', 'application/json');
+      
       return res.status(200).json(data);
     } catch (error) {
       console.error('Error fetching data:', error);

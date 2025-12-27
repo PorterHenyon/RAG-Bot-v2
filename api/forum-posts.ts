@@ -127,9 +127,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (req.method === 'GET') {
-    // Return all forum posts
+    // Return all forum posts with caching to reduce bandwidth
     try {
       const posts = await getForumPosts();
+      
+      // Generate ETag from posts hash for conditional requests
+      const crypto = await import('crypto');
+      const postsString = JSON.stringify(posts);
+      const etag = crypto.createHash('md5').update(postsString).digest('hex');
+      
+      // Check if client has cached version (conditional request)
+      const clientEtag = req.headers['if-none-match'];
+      if (clientEtag === etag) {
+        // Data hasn't changed, return 304 Not Modified (saves bandwidth!)
+        res.setHeader('ETag', etag);
+        res.setHeader('Cache-Control', 'public, max-age=30, must-revalidate'); // Cache for 30 seconds
+        return res.status(304).end();
+      }
+      
+      // Set caching headers
+      res.setHeader('ETag', etag);
+      res.setHeader('Cache-Control', 'public, max-age=30, must-revalidate'); // Cache for 30 seconds
+      res.setHeader('Content-Type', 'application/json');
+      
       return res.status(200).json(posts);
     } catch (error) {
       console.error('Error fetching forum posts:', error);

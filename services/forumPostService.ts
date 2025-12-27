@@ -12,16 +12,49 @@ const getApiUrl = (): string => {
   return '/api/forum-posts';
 };
 
+// Cache ETag to enable conditional requests
+let cachedPostsEtag: string | null = null;
+let cachedPosts: ForumPost[] | null = null;
+
 export const forumPostService = {
   async fetchForumPosts(): Promise<ForumPost[]> {
     try {
-      const response = await fetch(getApiUrl());
+      const headers: HeadersInit = {};
+      
+      // Add conditional request header if we have cached ETag
+      if (cachedPostsEtag) {
+        headers['If-None-Match'] = cachedPostsEtag;
+      }
+      
+      const response = await fetch(getApiUrl(), { headers });
+      
+      // If data hasn't changed (304 Not Modified), return cached data
+      if (response.status === 304) {
+        console.log('✓ Forum posts unchanged, using cache (saved bandwidth)');
+        return cachedPosts || [];
+      }
+      
       if (!response.ok) {
         throw new Error(`Failed to fetch forum posts: ${response.statusText}`);
       }
-      return await response.json();
+      
+      // Store ETag for next request
+      const etag = response.headers.get('ETag');
+      if (etag) {
+        cachedPostsEtag = etag;
+      }
+      
+      const posts = await response.json();
+      cachedPosts = posts; // Cache the posts
+      
+      return posts;
     } catch (error) {
       console.error('Error fetching forum posts:', error);
+      // Return cached posts if available on error
+      if (cachedPosts) {
+        console.log('⚠ Using cached forum posts due to error');
+        return cachedPosts;
+      }
       throw error;
     }
   },

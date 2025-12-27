@@ -16,16 +16,49 @@ const getApiUrl = (): string => {
 
 const API_URL = getApiUrl();
 
+// Cache ETag to enable conditional requests
+let cachedDataEtag: string | null = null;
+let cachedData: any = null;
+
 export const dataService = {
   async fetchData(): Promise<{ ragEntries: RagEntry[]; autoResponses: AutoResponse[]; slashCommands: SlashCommand[]; botSettings: BotSettings; pendingRagEntries: PendingRagEntry[] }> {
     try {
-      const response = await fetch(API_URL);
+      const headers: HeadersInit = {};
+      
+      // Add conditional request header if we have cached ETag
+      if (cachedDataEtag) {
+        headers['If-None-Match'] = cachedDataEtag;
+      }
+      
+      const response = await fetch(API_URL, { headers });
+      
+      // If data hasn't changed (304 Not Modified), return cached data
+      if (response.status === 304) {
+        console.log('✓ Data unchanged, using cache (saved bandwidth)');
+        return cachedData;
+      }
+      
       if (!response.ok) {
         throw new Error(`Failed to fetch data: ${response.statusText}`);
       }
-      return await response.json();
+      
+      // Store ETag for next request
+      const etag = response.headers.get('ETag');
+      if (etag) {
+        cachedDataEtag = etag;
+      }
+      
+      const data = await response.json();
+      cachedData = data; // Cache the data
+      
+      return data;
     } catch (error) {
       console.error('Error fetching data:', error);
+      // Return cached data if available on error
+      if (cachedData) {
+        console.log('⚠ Using cached data due to error');
+        return cachedData;
+      }
       throw error;
     }
   },

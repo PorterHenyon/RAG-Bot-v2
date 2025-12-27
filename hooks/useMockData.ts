@@ -398,27 +398,17 @@ export const useMockData = () => {
         let isMounted = true;
         const loadForumPosts = async () => {
             try {
-                const apiUrl = import.meta.env.VITE_API_URL 
-                    ? `${import.meta.env.VITE_API_URL}/api/forum-posts`
-                    : `${window.location.origin}/api/forum-posts`;
+                // Use forumPostService which handles conditional requests and caching
+                const { forumPostService } = await import('../services/forumPostService');
+                const posts = await forumPostService.fetchForumPosts();
                 
-                const response = await fetch(apiUrl);
-                if (response.ok) {
-                    const posts = await response.json();
-                    // Always update with API data, even if empty array (clears mock data)
-                    if (isMounted && posts && Array.isArray(posts)) {
-                        setForumPosts(posts);
-                        if (posts.length > 0) {
-                            console.log(`✓ Loaded ${posts.length} forum post(s) from API`);
-                        } else {
-                            console.log(`✓ API returned empty array - cleared mock posts`);
-                        }
-                    }
-                } else {
-                    console.warn(`Failed to load forum posts: HTTP ${response.status}`);
-                    // Clear posts if API fails (don't show mock data)
-                    if (isMounted) {
-                        setForumPosts([]);
+                // Always update with API data, even if empty array (clears mock data)
+                if (isMounted && posts && Array.isArray(posts)) {
+                    setForumPosts(posts);
+                    if (posts.length > 0) {
+                        console.log(`✓ Loaded ${posts.length} forum post(s) from API`);
+                    } else {
+                        console.log(`✓ API returned empty array - cleared mock posts`);
                     }
                 }
             } catch (error) {
@@ -432,13 +422,13 @@ export const useMockData = () => {
         
         // Load immediately on mount
         loadForumPosts();
-        // Refresh forum posts every 30 seconds (reduced from 5s to save bandwidth)
+        // Refresh forum posts every 5 minutes (reduced from 30s to save bandwidth)
         // Only poll when tab is visible to save resources
         const interval = setInterval(() => {
             if (isMounted && !document.hidden) {
                 loadForumPosts();
             }
-        }, 30000); // 30 seconds instead of 5
+        }, 300000); // 5 minutes instead of 30 seconds - saves 90% bandwidth
         return () => {
             isMounted = false;
             clearInterval(interval);
@@ -513,29 +503,9 @@ export const useMockData = () => {
         return () => clearTimeout(timeoutId);
     }, [ragEntries, autoResponses, slashCommands, botSettings, pendingRagEntries, isLoading]);
 
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setForumPosts(prevPosts => {
-                const openPosts = prevPosts.filter(p => p.status !== PostStatus.Closed && p.status !== PostStatus.Solved);
-                if (openPosts.length === 0) return prevPosts;
-                
-                const postToUpdate = openPosts[Math.floor(Math.random() * openPosts.length)];
-                const newMessage: Message = {
-                    author: 'User',
-                    content: 'Any updates on this?? I\'m still stuck',
-                    timestamp: new Date().toISOString()
-                };
-
-                return prevPosts.map(p => 
-                    p.id === postToUpdate.id 
-                        ? { ...p, conversation: [...p.conversation, newMessage] } 
-                        : p
-                );
-            });
-        }, 25000); // Add a new message every 25 seconds
-
-        return () => clearInterval(interval);
-    }, []);
+    // REMOVED: Mock data generation loop - this was causing unnecessary updates
+    // In production, data comes from the API, not generated locally
+    // This was adding fake messages every 25 seconds which triggered re-renders and syncs
 
     return { forumPosts, setForumPosts, ragEntries, setRagEntries, autoResponses, setAutoResponses, slashCommands, setSlashCommands, botSettings, setBotSettings, pendingRagEntries, setPendingRagEntries };
 };

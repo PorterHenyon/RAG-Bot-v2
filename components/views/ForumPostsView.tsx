@@ -163,14 +163,14 @@ const ForumPostsView: React.FC = () => {
       }
     };
     
-    // Load immediately and refresh every 30 seconds (reduced from 5s to save bandwidth)
+    // Load immediately and refresh every 5 minutes (reduced from 30s to save bandwidth)
     // Only poll when tab is visible to save resources
     refreshForumPosts();
     const interval = setInterval(() => {
       if (isMounted && !document.hidden) {
         refreshForumPosts();
       }
-    }, 30000); // 30 seconds instead of 5
+    }, 300000); // 5 minutes instead of 30 seconds - saves 90% bandwidth
     return () => {
       isMounted = false;
       clearInterval(interval);
