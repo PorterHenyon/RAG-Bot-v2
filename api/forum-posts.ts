@@ -268,6 +268,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'Missing postId' });
       }
 
+      if (action === 'cleanup') {
+        // Clean up old forum posts by retention days
+        const retentionDays = req.body.retentionDays || 7;
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
+        
+        try {
+          const posts = await getForumPosts();
+          const initialLength = posts.length;
+          
+          // Filter out old solved/closed posts
+          const filteredPosts = posts.filter((post: any) => {
+            if (post.status === 'Solved' || post.status === 'Closed') {
+              const postDate = new Date(post.createdAt || post.updatedAt);
+              return postDate > cutoffDate;
+            }
+            return true; // Keep unsolved posts
+          });
+          
+          await saveForumPosts(filteredPosts);
+          
+          const deleted = initialLength - filteredPosts.length;
+          console.log(`Cleaned up ${deleted} old forum posts (kept posts newer than ${retentionDays} days)`);
+          
+          return res.status(200).json({
+            success: true,
+            deleted,
+            kept: filteredPosts.length,
+            message: `Cleaned up ${deleted} old forum posts (kept posts newer than ${retentionDays} days)`
+          });
+        } catch (error: any) {
+          console.error('Error cleaning up forum posts:', error);
+          return res.status(500).json({ error: `Failed to cleanup posts: ${error.message}` });
+        }
+      }
+
       if (action === 'purge') {
         // Bulk purge forum posts (delete all except kept ones)
         const keepPostIds: string[] = req.body.keepPostIds || [];

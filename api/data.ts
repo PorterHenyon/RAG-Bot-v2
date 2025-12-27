@@ -583,6 +583,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.body && typeof req.body === 'object' && 'action' in req.body) {
       const action = req.body.action;
       
+      if (action === 'cleanup_pending_rag') {
+        // Clear all pending RAG entries
+        try {
+          await initKV();
+          if (!kvClient) {
+            return res.status(400).json({ error: 'No persistent storage configured' });
+          }
+          
+          const currentData = await getDataStore();
+          currentData.pendingRagEntries = [];
+          await saveDataStore(currentData);
+          
+          return res.status(200).json({
+            success: true,
+            message: 'Cleared all pending RAG entries'
+          });
+        } catch (error: any) {
+          console.error('Error clearing pending RAG entries:', error);
+          return res.status(500).json({ error: `Failed to clear pending RAG entries: ${error.message}` });
+        }
+      }
+
       if (action === 'update_leaderboard') {
         // Handle leaderboard update
         try {
