@@ -612,7 +612,7 @@ _rag_embeddings = {}  # {entry_id: embedding_vector} - Fallback for non-Pinecone
 _rag_embeddings_version = 0  # Increment when RAG database changes
 # MEMORY OPTIMIZATION: Cache query embeddings to avoid re-encoding same queries
 _query_embedding_cache = {}  # {query_hash: embedding_vector}
-_query_cache_max_size = 50  # Reduced from 100 to save memory (each vector is ~1.5KB)
+_query_cache_max_size = 200  # CPU OPTIMIZATION: Increased cache size to reduce encoding (each vector is ~1.5KB, 200 = ~300KB memory)
 
 def get_embedding_model():
     """Lazy load the embedding model (non-blocking, will fallback if fails)"""
@@ -2385,11 +2385,6 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
     Returns:
         List of relevant RAG entries sorted by similarity
     """
-    # CPU OPTIMIZATION: Skip embeddings entirely if FORCE_KEYWORD_SEARCH is enabled
-    if FORCE_KEYWORD_SEARCH:
-        print("💰 FORCE_KEYWORD_SEARCH enabled - Using keyword search only (zero CPU cost)")
-        return find_relevant_rag_entries_keyword(query, db)
-    
     model = get_embedding_model()
     
     # Fallback to keyword search if embeddings not available
@@ -2413,9 +2408,15 @@ def find_relevant_rag_entries(query, db=RAG_DATABASE, top_k=5, similarity_thresh
                 query_embedding_list = _query_embedding_cache[query_hash]
                 print(f"💾 Using cached query embedding (CPU saved!)")
             else:
-                # COST OPTIMIZATION: Use Pinecone for all vector operations (saves Railway CPU)
-                # Compute query embedding (minimal CPU - just encoding)
-                query_embedding = model.encode(query, convert_to_numpy=True)
+                # CPU OPTIMIZATION: Use Pinecone for all vector operations (saves Railway CPU)
+                # Compute query embedding with optimized settings for faster encoding
+                query_embedding = model.encode(
+                    query, 
+                    convert_to_numpy=True,
+                    show_progress_bar=False,  # Disable progress bar to save CPU
+                    batch_size=1,  # Single query, no batching overhead
+                    normalize_embeddings=False  # Pinecone handles normalization
+                )
                 query_embedding_list = query_embedding.tolist()
                 
                 # Cache the embedding (with size limit to prevent memory bloat)
