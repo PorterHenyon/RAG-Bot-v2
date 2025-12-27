@@ -60,6 +60,8 @@ const ForumPostsView: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [isPurging, setIsPurging] = useState<boolean>(false);
   const [showPurgeConfirm, setShowPurgeConfirm] = useState<boolean>(false);
+  const [isCleaning, setIsCleaning] = useState<boolean>(false);
+  const [showCleanupConfirm, setShowCleanupConfirm] = useState<boolean>(false);
 
   const filteredPosts = useMemo(() => {
     return forumPosts
@@ -114,6 +116,28 @@ const ForumPostsView: React.FC = () => {
       }
       // Re-throw so modal can handle it
       throw error;
+    }
+  };
+
+  const handleCleanupForumPosts = async () => {
+    try {
+      setIsCleaning(true);
+      setShowCleanupConfirm(false);
+      
+      // Cleanup old solved/closed posts (keeps last 7 days)
+      const result = await forumPostService.cleanupForumPosts(7);
+      
+      // Refresh forum posts
+      const posts = await forumPostService.fetchForumPosts();
+      setForumPosts(posts);
+      
+      // Show success message
+      alert(`✅ Cleanup complete!\n\nDeleted: ${result.deleted} old posts\nKept: ${result.kept} posts\n\n${result.message}`);
+    } catch (error) {
+      console.error('Error cleaning up forum posts:', error);
+      alert(`❌ Error cleaning up forum posts: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsCleaning(false);
     }
   };
 
@@ -209,6 +233,36 @@ const ForumPostsView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {showCleanupConfirm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-xl shadow-2xl p-6 border border-gray-700 max-w-md w-full">
+            <h3 className="text-xl font-bold text-white mb-4">🧹 Cleanup Old Posts</h3>
+            <p className="text-gray-300 mb-2">
+              This will delete old <strong className="text-orange-400">Solved</strong> and <strong className="text-orange-400">Closed</strong> posts older than 7 days.
+            </p>
+            <p className="text-gray-400 text-sm mb-6">
+              Active posts and recent solved/closed posts will be kept. This frees up storage space. This action cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleCleanupForumPosts}
+                disabled={isCleaning}
+                className="flex-1 px-4 py-2 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all"
+              >
+                {isCleaning ? 'Cleaning...' : 'Yes, Cleanup'}
+              </button>
+              <button
+                onClick={() => setShowCleanupConfirm(false)}
+                disabled={isCleaning}
+                className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-all"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showPurgeConfirm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">

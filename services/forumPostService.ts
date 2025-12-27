@@ -125,6 +125,36 @@ export const forumPostService = {
     }
   },
 
+  async cleanupForumPosts(retentionDays: number = 7): Promise<{ deleted: number; kept: number; message: string }> {
+    try {
+      const response = await fetch(getApiUrl(), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          action: 'cleanup',
+          retentionDays: retentionDays,
+        }),
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(errorData.error || `Failed to cleanup forum posts: ${response.statusText}`);
+      }
+      
+      const result = await response.json();
+      return {
+        deleted: result.deleted || 0,
+        kept: result.kept || 0,
+        message: result.message || 'Cleanup completed'
+      };
+    } catch (error) {
+      console.error('Error cleaning up forum posts:', error);
+      throw error;
+    }
+  },
+
   async purgeForumPosts(keepPostIds: string[] = []): Promise<{ deleted: number; kept: number; failed: number }> {
     try {
       // Use bulk purge action for better performance
