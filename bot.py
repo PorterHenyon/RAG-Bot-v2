@@ -5345,64 +5345,11 @@ async def on_thread_create(thread):
                     except Exception as final_error:
                         print(f"❌ CRITICAL: Even plain text send failed: {final_error}")
     
-        # Update forum post in API with bot response (must include all post data for full update)
-        if bot_response_text and 'your-vercel-app' not in DATA_API_URL:
-            print(f"🔗 Updating forum post with bot response...")
-            try:
-                # Determine status based on response type
-                # Status is "AI Response" since we always try to help with AI now (human escalation only happens if user is unsatisfied)
-                post_status = 'AI Response'
-                
-                forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-                
-                # Get full post data (include user info, title, etc.)
-                post_update = {
-                    'action': 'update',
-                    'post': {
-                        'id': f'POST-{thread.id}',
-                        'user': {
-                            'username': owner_name,
-                            'id': str(owner_id) if owner_id else str(thread.id),
-                            'avatarUrl': f'https://cdn.discordapp.com/avatars/{owner_id}/default.png' if owner_id else f'https://cdn.discordapp.com/embed/avatars/0.png'
-                        },
-                        'postTitle': thread.name,
-                        'status': post_status,
-                        'tags': [],
-                        'createdAt': (thread.created_at.isoformat() if hasattr(thread.created_at, 'isoformat') else datetime.now().isoformat()),
-                        'forumChannelId': str(thread.parent_id),
-                        'postId': str(thread.id),
-                        'conversation': [
-                            {
-                                'author': 'User',
-                                'content': initial_message,
-                                'timestamp': datetime.now().isoformat()
-                            },
-                            {
-                                'author': 'Bot',
-                                'content': bot_response_text,
-                                'timestamp': datetime.now().isoformat()
-                            }
-                        ]
-                    }
-                }
-                headers = {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(forum_api_url, json=post_update, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
-                        if response.status == 200:
-                            print(f"✓ Updated forum post with bot response in dashboard API")
-                        else:
-                            text = await response.text()
-                            print(f"⚠ Failed to update forum post: Status {response.status}, Response: {text[:200]}")
-                            print(f"   API URL: {forum_api_url}")
-                            print(f"   Request body: {json.dumps(post_update)[:200]}")
-            except Exception as e:
-                print(f"⚠ Error updating forum post with bot response: {type(e).__name__}: {str(e)}")
-                import traceback
-                traceback.print_exc()
+        # RAILWAY COST OPTIMIZATION: Skip API call for bot response update since forum posts aren't persisted
+        # Forum posts are in-memory only, so frequent API updates waste Railway bandwidth
+        # Just log locally to save Railway costs
+        if bot_response_text:
+            print(f"✓ Bot responded to forum post (in-memory only, not persisted to save Railway costs)")
     
     # Apply "Unsolved" tag to new forum post
     try:
