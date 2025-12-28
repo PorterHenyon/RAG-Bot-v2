@@ -3908,13 +3908,12 @@ async def archive_old_active_posts():
         
         forum_channel = bot.get_channel(int(forum_channel_id))
         if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
-            return
+            return 0
         
-        # Archive posts older than 14 days (configurable)
-        archive_days = BOT_SETTINGS.get('archive_active_posts_days', 14)
-        cutoff_date = datetime.now() - timedelta(days=archive_days)
+        # Archive posts older than specified days (default 3 days)
+        cutoff_date = datetime.now() - timedelta(days=days)
         
-        print(f"\n📦 Archiving old active posts (older than {archive_days} days)...")
+        print(f"\n📦 Archiving old active posts (older than {days} days)...")
         
         archived_count = 0
         active_threads = list(forum_channel.threads)
