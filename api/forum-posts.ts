@@ -27,49 +27,9 @@ interface CloseThreadRequest {
   channelId: string;
 }
 
-// Persistent storage using Vercel KV (Redis)
-// Falls back to in-memory if KV not configured
-let kvClient: any = null;
+// RESOURCE OPTIMIZATION: Forum posts are stored in-memory only (not persisted to Vercel KV to save costs)
+// Data resets on restart but saves significant storage and API costs
 let inMemoryForumPosts: ForumPost[] = [];
-
-// Initialize KV/Redis client if available (lazy import)
-async function initKV() {
-  if (kvClient) return; // Already initialized
-  
-  // Try Vercel KV first (REST API)
-  if (process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN) {
-    try {
-      const kvModule = await import('@vercel/kv');
-      kvClient = kvModule.kv;
-      console.log('✓ Using Vercel KV for forum posts (persistent storage)');
-      return;
-    } catch (e) {
-      console.log('⚠ Vercel KV not available, trying direct Redis connection...');
-    }
-  }
-  
-  // Try direct Redis connection (Redis Cloud, etc.)
-  // Check both REDIS_URL and STORAGE_URL (Vercel custom prefix)
-  const redisUrl = process.env.REDIS_URL || process.env.STORAGE_URL;
-  if (redisUrl) {
-    try {
-      const Redis = (await import('ioredis')).default;
-      kvClient = new Redis(redisUrl);
-      console.log('✓ Using direct Redis connection for forum posts (persistent storage)');
-      
-      // Test connection
-      await kvClient.ping();
-      return;
-    } catch (e) {
-      console.log('⚠ Redis connection failed:', e);
-      kvClient = null;
-    }
-  }
-  
-  if (!kvClient) {
-    console.log('⚠ No persistent storage configured for forum posts, using in-memory storage (data won\'t persist)');
-  }
-}
 
 // Helper functions to get/set forum posts
 async function getForumPosts(): Promise<ForumPost[]> {

@@ -1669,39 +1669,12 @@ class OSLogTutorialSelect(discord.ui.View):
 
 
 async def update_forum_post_status(thread_id, status):
-    """Helper function to update forum post status in dashboard"""
-    if 'your-vercel-app' in DATA_API_URL:
-        return
-    
-    try:
-        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
-                if get_resp.status == 200:
-                    all_posts = await get_resp.json()
-                    current_post = None
-                    for p in all_posts:
-                        if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
-                            current_post = p
-                            break
-                    
-                    if current_post:
-                        current_post['status'] = status
-                        update_payload = {
-                            'action': 'update',
-                            'post': current_post
-                        }
-                        headers = {
-                            'Content-Type': 'application/json',
-                            'Accept': 'application/json',
-                            'Accept-Encoding': 'gzip, deflate'
-                        }
-                        async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as update_resp:
-                            if update_resp.status == 200:
-                                print(f"✅ Updated forum post status to '{status}' for thread {thread_id}")
-    except Exception as e:
-        print(f"❌ Error updating status: {e}")
+    """Helper function to update forum post status in dashboard (in-memory only, not persisted)"""
+    # RAILWAY COST OPTIMIZATION: Skip API calls for forum post updates since they're not persisted anyway
+    # Forum posts are in-memory only, so frequent API updates waste Railway bandwidth
+    # Only log the status change locally
+    print(f"ℹ️ Forum post status changed to '{status}' for thread {thread_id} (in-memory only, not persisted)")
+    return
 
 # --- BOT SETTINGS FUNCTIONS ---
 def load_bot_settings():
