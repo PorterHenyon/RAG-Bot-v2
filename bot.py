@@ -731,7 +731,9 @@ def compute_rag_embeddings():
             keywords = ' '.join(entry.get('keywords', []))
             
             # Create a combined text for embedding
-            combined_text = f"{title}\n{keywords}\n{content[:500]}"  # Limit content to avoid huge embeddings
+            # CPU OPTIMIZATION: Limit content to 400 chars (balance between quality and CPU cost)
+            # Full content still stored in Pinecone metadata (1000 chars)
+            combined_text = f"{title}\n{keywords}\n{content[:400]}"
             
             try:
                 # Compute embedding (minimal CPU - just encoding)
@@ -1703,10 +1705,13 @@ async def save_bot_settings_to_api():
                 # Update with current BOT_SETTINGS (our changes take priority)
                 full_bot_settings.update(BOT_SETTINGS)
                 
-                # Include system prompt if we have it
-                if SYSTEM_PROMPT_TEXT:
+                # Always include system prompt (even if empty) to ensure it's saved to API
+                if SYSTEM_PROMPT_TEXT and len(SYSTEM_PROMPT_TEXT.strip()) > 0:
                     full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
                     print(f"🔍 DEBUG: Including custom system prompt ({len(SYSTEM_PROMPT_TEXT)} chars)")
+                else:
+                    # Don't include empty prompt, let API keep existing one
+                    print(f"🔍 DEBUG: System prompt empty or not set, not overwriting API prompt")
                 
                 current_data['botSettings'] = full_bot_settings
                 
@@ -1790,12 +1795,17 @@ async def fetch_data_from_api():
                     
                     # Update system prompt FIRST (before hash check) - always check even if other data unchanged
                     if new_settings and 'systemPrompt' in new_settings:
-                        old_prompt = SYSTEM_PROMPT_TEXT
-                        SYSTEM_PROMPT_TEXT = new_settings['systemPrompt']
-                        if old_prompt != SYSTEM_PROMPT_TEXT:
-                            print(f"✓ Updated system prompt from API ({len(SYSTEM_PROMPT_TEXT)} characters)")
-                        else:
-                            print(f"✓ System prompt unchanged ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                        new_prompt = new_settings['systemPrompt']
+                        # Only update if new prompt is not None and not empty string
+                        if new_prompt is not None and isinstance(new_prompt, str) and len(new_prompt.strip()) > 0:
+                            old_prompt = SYSTEM_PROMPT_TEXT
+                            SYSTEM_PROMPT_TEXT = new_prompt
+                            if old_prompt != SYSTEM_PROMPT_TEXT:
+                                print(f"✓ Updated system prompt from API ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                            else:
+                                print(f"✓ System prompt unchanged ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                        elif new_prompt is None or (isinstance(new_prompt, str) and len(new_prompt.strip()) == 0):
+                            print(f"⚠️ API returned empty system prompt, keeping existing prompt ({len(SYSTEM_PROMPT_TEXT) if SYSTEM_PROMPT_TEXT else 0} characters)")
                     
                     # Check if data actually changed using hash
                     import hashlib
@@ -3282,8 +3292,10 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     # DISABLED: Image processing
     image_parts = None
     
-    # Use API system prompt if available, otherwise use default
-    system_instruction = SYSTEM_PROMPT_TEXT if SYSTEM_PROMPT_TEXT else SYSTEM_PROMPT
+    # Use API system prompt if available (and not empty), otherwise use default
+    system_instruction = SYSTEM_PROMPT_TEXT if (SYSTEM_PROMPT_TEXT and len(SYSTEM_PROMPT_TEXT.strip()) > 0) else SYSTEM_PROMPT
+    prompt_source = "API (custom)" if (SYSTEM_PROMPT_TEXT and len(SYSTEM_PROMPT_TEXT.strip()) > 0) else "default (hardcoded)"
+    print(f"📝 Using system prompt from: {prompt_source} ({len(system_instruction)} characters)")
     
     # Get AI settings from bot settings
     temperature = BOT_SETTINGS.get('ai_temperature', 1.0)
@@ -4440,11 +4452,7 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
 
 @bot.event
 async def on_thread_create(thread):
-    """Handle new forum posts (threads created in forum channels) - MINIMAL PROCESSING FOR COST EFFICIENCY"""
-    # COST OPTIMIZATION: Minimal forum post processing - just log, no API calls, no storage
-    print(f"ℹ️ Forum post created: '{thread.name}' (ID: {thread.id}) - minimal processing only")
-    return  # Exit immediately - no processing, no API calls, no storage
-    
+    """Handle new forum posts (threads created in forum channels)"""
     # Check if this is a forum channel thread
     if not hasattr(thread, 'parent_id') or not thread.parent_id:
         print(f"⚠ Thread doesn't have parent_id attribute. Skipping.")
