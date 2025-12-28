@@ -4895,8 +4895,10 @@ async def on_thread_create(thread):
         # Continue anyway - the important part is answering the question
     user_question = f"{thread.name}\n{initial_message}"
     
-    # Send forum post to dashboard API
-    await send_forum_post_to_api(thread, owner_name, owner_id or thread.id, owner_avatar_url, initial_message)
+    # RAILWAY COST OPTIMIZATION: Skip API call for forum post creation since they're not persisted
+    # Forum posts are in-memory only, so creating them via API wastes Railway bandwidth
+    # Only log locally to save Railway costs
+    print(f"ℹ️ Forum post created (in-memory only, not persisted to save Railway costs): '{thread.name}' by {owner_name}")
 
     # --- LOGIC FLOW ---
     # Track which response type we used for satisfaction analysis
