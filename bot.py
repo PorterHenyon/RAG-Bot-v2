@@ -4239,25 +4239,9 @@ async def on_ready():
     sync_data_task.start()
     check_leaderboard_reset.start()
     
-    # Start thread count cache update task (lightweight, runs every 10 minutes)
-    if not update_thread_count_cache.is_running():
-        update_thread_count_cache.start()
-        print("✓ Started background task: update_thread_count_cache (runs every 10 minutes)")
-    
-    # Start old post check task
-    if not check_old_posts.is_running():
-        check_old_posts.start()
-        print("✓ Started background task: check_old_posts (runs every 8 hours)")
-    
-    # Start cleanup task for old solved posts
-    if not cleanup_old_solved_posts.is_running():
-        cleanup_old_solved_posts.start()
-        print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
-    
-    # Start archive task for old active posts (prevents hitting Discord forum limit)
-    if not archive_old_active_posts.is_running():
-        archive_old_active_posts.start()
-        print("✓ Started background task: archive_old_active_posts (runs daily)")
+    # RAILWAY COST OPTIMIZATION: All forum post tasks disabled to save CPU/memory/API costs
+    # Forum posts are no longer processed, monitored, or stored
+    print("ℹ️ Forum post tasks disabled to save Railway costs (check_old_posts, archive_old_active_posts, update_thread_count_cache)")
     
     # Start cleanup task for processed_threads memory leak prevention
     if not cleanup_processed_threads.is_running():
