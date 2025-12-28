@@ -4758,12 +4758,6 @@ async def on_thread_create(thread):
         # RAILWAY COST OPTIMIZATION: Skip API call for issue classification since forum posts aren't persisted
         # Just log locally to save Railway bandwidth
         print(f"✓ Classified issue as: {issue_type} (in-memory only, not persisted)")
-                                headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                                async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
-                                    if post_response.status == 200:
-                                        print(f"✓ Classified issue as: {issue_type}")
-            except Exception as e:
-                print(f"⚠ Could not update issue classification: {e}")
         
         print(f"⚡ Responded to '{thread.name}' with instant auto-response.")
     else:
