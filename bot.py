@@ -1549,15 +1549,9 @@ class SolvedButton(discord.ui.View):
                                         current_post = p
                                         break
                                 
-                                if current_post:
-                                    current_post['issueType'] = issue_type
-                                    update_payload = {'action': 'update', 'post': current_post}
-                                    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                                    async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
-                                        if post_response.status == 200:
-                                            print(f"✓ Classified issue as: {issue_type} (second attempt)")
-                except Exception as e:
-                    print(f"⚠ Could not update issue classification: {e}")
+            # RAILWAY COST OPTIMIZATION: Skip API call for issue classification since forum posts aren't persisted
+            # Just log locally to save Railway bandwidth
+            print(f"✓ Classified issue as: {issue_type} (in-memory only, not persisted)")
             
             await update_forum_post_status(self.thread_id, 'AI Response')
             
@@ -5180,29 +5174,9 @@ async def on_thread_create(thread):
             # Apply tag to Discord thread based on issue type
             await apply_issue_type_tag(thread, issue_type)
             
-            # Update forum post with classification
-            if 'your-vercel-app' not in DATA_API_URL:
-                try:
-                    forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
-                            if get_resp.status == 200:
-                                all_posts = await get_resp.json()
-                                current_post = None
-                                for p in all_posts:
-                                    if p.get('postId') == str(thread_id) or p.get('id') == f'POST-{thread_id}':
-                                        current_post = p
-                                        break
-                                
-                                if current_post:
-                                    current_post['issueType'] = issue_type
-                                    update_payload = {'action': 'update', 'post': current_post}
-                                    headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                                    async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as post_response:
-                                        if post_response.status == 200:
-                                            print(f"✓ Classified issue as: {issue_type}")
-                except Exception as e:
-                    print(f"⚠ Could not update issue classification: {e}")
+            # RAILWAY COST OPTIMIZATION: Skip API call for issue classification since forum posts aren't persisted
+            # Just log locally to save Railway bandwidth
+            print(f"✓ Classified issue as: {issue_type} (in-memory only, not persisted)")
         else:
             # No confident match - generate AI response using general Revolution Macro knowledge
             print(f"⚠ No confident RAG match found. Attempting AI response with general knowledge...")
