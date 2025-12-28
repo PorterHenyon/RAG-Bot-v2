@@ -4,7 +4,7 @@ import { useMockData } from '../../hooks/useMockData';
 const SETTINGS_STORAGE_KEY = 'rag_bot_settings';
 
 const SettingsView: React.FC = () => {
-    const { botSettings, setBotSettings } = useMockData();
+    const { botSettings, setBotSettings, ragEntries, autoResponses, slashCommands, pendingRagEntries } = useMockData();
     const [localPrompt, setLocalPrompt] = useState(botSettings.systemPrompt);
     const [saved, setSaved] = useState(false);
 
