@@ -525,7 +525,7 @@ for i, test_key in enumerate(GROQ_API_KEYS, 1):
         key_short = test_key[:15] + '...'
         client = Groq(api_key=test_key)
         # Try multiple Groq models to find one that works
-        test_models = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768', 'gemma2-9b-it']
+        test_models = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768', 'gemma2-9b-it']
         test_passed_for_key = False
         for model_name in test_models:
             try:
@@ -1788,6 +1788,15 @@ async def fetch_data_from_api():
                     rag_changed = len(new_rag) != old_rag_count
                     auto_changed = len(new_auto) != old_auto_count
                     
+                    # Update system prompt FIRST (before hash check) - always check even if other data unchanged
+                    if new_settings and 'systemPrompt' in new_settings:
+                        old_prompt = SYSTEM_PROMPT_TEXT
+                        SYSTEM_PROMPT_TEXT = new_settings['systemPrompt']
+                        if old_prompt != SYSTEM_PROMPT_TEXT:
+                            print(f"✓ Updated system prompt from API ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                        else:
+                            print(f"✓ System prompt unchanged ({len(SYSTEM_PROMPT_TEXT)} characters)")
+                    
                     # Check if data actually changed using hash
                     import hashlib
                     data_to_hash = json.dumps({
@@ -1870,12 +1879,8 @@ async def fetch_data_from_api():
                     else:
                         print("ℹ Embeddings disabled - using keyword search only (set ENABLE_EMBEDDINGS=true for Pinecone)")
                     
-                    # Update system prompt if available
-                    if new_settings and 'systemPrompt' in new_settings:
-                        SYSTEM_PROMPT_TEXT = new_settings['systemPrompt']
-                        print(f"✓ Loaded custom system prompt from API ({len(SYSTEM_PROMPT_TEXT)} characters)")
-                    
                     # Load bot settings from API (persists across deployments!)
+                    # Note: System prompt already updated above before hash check
                     if new_settings:
                         # IMPORTANT: Keep defaults, only override with API values (prevents reset on missing fields)
                         # This ensures that if API doesn't have a field, we keep the default
@@ -2092,7 +2097,7 @@ async def analyze_conversation(conversation_text: str):
             return None
         
         # Use Groq to analyze the conversation
-        models_to_try = ['llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768']
+        models_to_try = ['openai/gpt-oss-120b', 'llama-3.3-70b-versatile', 'llama-3.1-70b-versatile', 'mixtral-8x7b-32768']
         
         analysis_prompt = f"""Analyze the following support conversation and extract key information to create a knowledge base entry.
 
@@ -3286,7 +3291,8 @@ async def generate_ai_response(query, context_entries, image_parts=None):
     
     # Try Groq models in order - fast, cheap inference
     models_to_try = [
-        'llama-3.3-70b-versatile',  # Latest and most capable
+        'openai/gpt-oss-120b',  # Primary model
+        'llama-3.3-70b-versatile',  # Latest and most capable fallback
         'llama-3.1-70b-versatile',  # Previous generation, very reliable
         'mixtral-8x7b-32768',  # Good for longer context
         'gemma2-9b-it',  # Lightweight fallback
@@ -3540,7 +3546,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         print(f"🔄 Retry attempt {attempt + 1}: Trying key {key_short} with fallback models...")
         
         # Try the most reliable Groq models first
-        retry_models = ['llama-3.1-70b-versatile', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768']
+        retry_models = ['openai/gpt-oss-120b', 'llama-3.1-70b-versatile', 'llama-3.3-70b-versatile', 'mixtral-8x7b-32768']
         
         for model_name in retry_models:
             try:
@@ -7794,7 +7800,8 @@ async def test_api_keys(interaction: discord.Interaction):
         
         # Try multiple models to find one that works
         models_to_try = [
-            'llama-3.3-70b-versatile',  # Latest and most capable
+            'openai/gpt-oss-120b',  # Primary model
+            'llama-3.3-70b-versatile',  # Latest and most capable fallback
             'llama-3.1-70b-versatile',  # Previous generation, very reliable
             'mixtral-8x7b-32768',  # Good for longer context
             'gemma2-9b-it',  # Lightweight fallback
