@@ -4174,135 +4174,20 @@ async def notify_support_channel_summary(ping_support=False):
 # REMOVED: Local backups disabled - all data stored in Vercel KV API only
 # Users can download backups anytime with /export_data command
 
-@tasks.loop(minutes=10)  # Update thread count cache every 10 minutes (lightweight check)
+@tasks.loop(minutes=10)  # DISABLED - Thread count cache disabled to save Railway costs
 async def update_thread_count_cache():
-    """Lightweight background task to cache thread count for limit checking"""
-    try:
-        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
-        if not forum_channel_id:
-            return
-        
-        forum_channel = bot.get_channel(int(forum_channel_id))
-        if forum_channel and isinstance(forum_channel, discord.ForumChannel):
-            # RESOURCE OPTIMIZATION: Only get count, not full thread list
-            # This is much faster than fetching all thread objects
-            try:
-                # Get active thread count efficiently
-                active_threads = list(forum_channel.threads)
-                bot._cached_thread_count = len(active_threads)
-                bot._thread_count_cache_time = datetime.now()
-            except Exception as e:
-                print(f"⚠ Error updating thread count cache: {e}")
-    except Exception as e:
-        print(f"⚠ Error in update_thread_count_cache: {e}")
+    """Lightweight background task to cache thread count - DISABLED TO SAVE RAILWAY COSTS"""
+    # RAILWAY COST OPTIMIZATION: Thread count caching disabled to save CPU/memory costs
+    # Forum posts are no longer processed or monitored
+    return  # Exit immediately - no processing
 
-@tasks.loop(hours=8)  # Check every 8 hours (CPU OPTIMIZATION: Reduced frequency to save CPU costs)
+@tasks.loop(hours=8)  # DISABLED - Forum post checking disabled to save Railway costs
 async def check_old_posts():
-    """Background task to check for old unsolved posts and escalate them"""
-    try:
-        if 'your-vercel-app' in DATA_API_URL:
-            return  # Skip if API not configured
-        
-        inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
-        interval_hours = BOT_SETTINGS.get('high_priority_check_interval_hours', 1.0)
-        print(f"\n🔍 Checking for old unsolved posts (>{inactivity_threshold} hours, checking every {interval_hours}h)...")
-        
-        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-        
-        async with aiohttp.ClientSession() as session:
-            async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
-                if response.status != 200:
-                    print(f"⚠ Failed to fetch posts for age check: {response.status}")
-                    return
-                
-                all_posts = await response.json()
-                now = datetime.now()
-                escalated_count = 0
-                
-                for post in all_posts:
-                    status = post.get('status', '')
-                    
-                    # Skip if already solved, closed, or already escalated
-                    if status in ['Solved', 'Closed', 'High Priority']:
-                        continue
-                    
-                    # Check post age
-                    created_at_str = post.get('createdAt')
-                    if not created_at_str:
-                        continue
-                    
-                    try:
-                        # Parse ISO timestamp
-                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
-                        # Remove timezone info for comparison
-                        if created_at.tzinfo:
-                            created_at = created_at.replace(tzinfo=None)
-                        
-                        age_hours = (now - created_at).total_seconds() / 3600
-                        
-                        # Get inactivity threshold from settings (default: 12 hours)
-                        inactivity_threshold = BOT_SETTINGS.get('post_inactivity_hours', 12)
-                        
-                        if age_hours > inactivity_threshold:
-                            # Post is older than threshold and not solved
-                            thread_id = post.get('postId')
-                            post_title = post.get('postTitle', 'Unknown')
-                            
-                            print(f"⚠ Found old post: '{post_title}' ({age_hours:.1f} hours old, threshold: {inactivity_threshold}h)")
-                            
-                            # Update status to High Priority
-                            post['status'] = 'High Priority'
-                            
-                            update_payload = {
-                                'action': 'update',
-                                'post': post
-                            }
-                            
-                            headers = {'Content-Type': 'application/json', 'Accept': 'application/json'}
-                            async with session.post(forum_api_url, json=update_payload, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as update_response:
-                                if update_response.status == 200:
-                                    print(f"✅ Escalated to High Priority: '{post_title}'")
-                                    escalated_count += 1
-                                    
-                                    # Try to ping support in the thread (only once per thread)
-                                    try:
-                                        thread_channel = bot.get_channel(int(thread_id))
-                                        if thread_channel and thread_id not in escalated_threads and thread_id not in threads_with_high_priority_notifications:
-                                            escalate_embed = discord.Embed(
-                                                title="🚨 Support Team Notified",
-                                                description=f"This post has been open for {int(age_hours)} hours. Our support team has been pinged and will help you soon.",
-                                                color=0xE74C3C  # Red for high priority
-                                            )
-                                            escalate_embed.set_footer(text="Revolution Macro Support • Auto-escalation")
-                                            
-                                            notification_msg = await thread_channel.send(embed=escalate_embed)
-                                            # Track this message so we can delete it when classification is done
-                                            support_notification_messages[thread_id] = notification_msg.id
-                                            escalated_threads.add(thread_id)  # Mark as escalated
-                                            threads_with_high_priority_notifications.add(thread_id)  # Track that we've sent notification
-                                            print(f"📢 Sent high priority notification to thread {thread_id}")
-                                        elif thread_id in threads_with_high_priority_notifications:
-                                            print(f"ℹ️ Thread {thread_id} already received high priority notification - skipping")
-                                    except Exception as ping_error:
-                                        print(f"⚠ Could not send notification to thread {thread_id}: {ping_error}")
-                                else:
-                                    print(f"❌ Failed to escalate post '{post_title}': {update_response.status}")
-                    
-                    except Exception as parse_error:
-                        print(f"⚠ Error parsing timestamp for post: {parse_error}")
-                        continue
-                
-                if escalated_count > 0:
-                    print(f"✅ Escalated {escalated_count} old post(s) to High Priority")
-                    # Send summary of all high priority posts to support channel (ping on new escalation)
-                    await notify_support_channel_summary(ping_support=True)
-                else:
-                    print(f"✓ No old posts found needing escalation")
-    
-    except Exception as e:
-        print(f"❌ Error in check_old_posts task: {e}")
-        import traceback
-        traceback.print_exc()
+    """Background task to check for old unsolved posts - DISABLED TO SAVE RAILWAY COSTS"""
+    # RAILWAY COST OPTIMIZATION: Forum post checking completely disabled to save CPU/memory/API costs
+    # Forum posts are no longer processed or monitored
+    print(f"ℹ️ Forum post checking disabled to save Railway costs (skipping check)")
+    return  # Exit immediately - no processing
 
 @bot.event
 async def on_ready():
@@ -4669,10 +4554,12 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
 
 @bot.event
 async def on_thread_create(thread):
-    """Handle new forum posts (threads created in forum channels)"""
-    print(f"\n🔍 THREAD CREATED EVENT FIRED")
-    print(f"   Thread name: '{thread.name}'")
-    print(f"   Thread ID: {thread.id}")
+    """Handle new forum posts (threads created in forum channels) - DISABLED TO SAVE RAILWAY COSTS"""
+    # RAILWAY COST OPTIMIZATION: Forum post processing completely disabled to save CPU/memory costs
+    # Forum posts are no longer processed, monitored, or stored
+    # This saves significant Railway CPU, memory, and API call costs
+    print(f"ℹ️ Forum post created but processing disabled to save Railway costs: '{thread.name}' (ID: {thread.id})")
+    return  # Exit immediately - no processing
     
     # Check if this is a forum channel thread
     if not hasattr(thread, 'parent_id') or not thread.parent_id:
