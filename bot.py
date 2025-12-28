@@ -1535,20 +1535,6 @@ class SolvedButton(discord.ui.View):
             issue_type = classify_issue(user_question)
             await apply_issue_type_tag(thread, issue_type)
             
-            # Update forum post with classification
-            if 'your-vercel-app' not in DATA_API_URL:
-                try:
-                    forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-                    async with aiohttp.ClientSession() as session:
-                        async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as get_resp:
-                            if get_resp.status == 200:
-                                all_posts = await get_resp.json()
-                                current_post = None
-                                for p in all_posts:
-                                    if p.get('postId') == str(self.thread_id) or p.get('id') == f'POST-{self.thread_id}':
-                                        current_post = p
-                                        break
-                                
             # RAILWAY COST OPTIMIZATION: Skip API call for issue classification since forum posts aren't persisted
             # Just log locally to save Railway bandwidth
             print(f"✓ Classified issue as: {issue_type} (in-memory only, not persisted)")
