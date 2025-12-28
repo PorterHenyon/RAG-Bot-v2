@@ -7789,7 +7789,7 @@ async def test_api_keys(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="🔍 Testing API Keys",
-        description=f"Testing {len(GROQ_API_KEYS)} key(s)...",
+        description=f"Testing {len(GROQ_API_KEYS)} key(s) with primary model: `openai/gpt-oss-120b`...",
         color=discord.Color.blue()
     )
     await interaction.followup.send(embed=embed, ephemeral=True)
