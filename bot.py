@@ -3974,19 +3974,9 @@ async def archive_old_active_posts():
 
 
 async def cleanup_old_solved_posts():
-    """Background task to archive old active posts in Discord (forum posts no longer stored in Vercel to save costs)"""
-    try:
-        # RESOURCE OPTIMIZATION: Forum posts are no longer stored in Vercel KV to save costs
-        # Only archive old posts in Discord to prevent hitting forum limit
-        # Forum posts are stored in-memory only and reset on restart
-        await archive_old_active_posts()
-        
-        print(f"\n🧹 Forum posts cleanup skipped - posts are no longer stored in Vercel KV to save costs")
-        print(f"   Forum posts are stored in-memory only and reset on restart")
-        print(f"   Discord archiving still runs to prevent hitting forum post limit")
-        
-        # Skip API cleanup since forum posts aren't persisted
-        return
+    """Background task disabled - use /archive_old_posts command manually instead"""
+    # COST OPTIMIZATION: Cleanup task disabled - use /archive_old_posts command manually
+    return
         
         async with aiohttp.ClientSession() as session:
             async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:
@@ -4163,16 +4153,13 @@ async def notify_support_channel_summary(ping_support=False):
 @tasks.loop(minutes=10)  # DISABLED - Thread count cache disabled to save Railway costs
 async def update_thread_count_cache():
     """Lightweight background task to cache thread count - DISABLED TO SAVE RAILWAY COSTS"""
-    # RAILWAY COST OPTIMIZATION: Thread count caching disabled to save CPU/memory costs
-    # Forum posts are no longer processed or monitored
+    # COST OPTIMIZATION: Thread count caching disabled to save CPU/memory costs
     return  # Exit immediately - no processing
 
 @tasks.loop(hours=8)  # DISABLED - Forum post checking disabled to save Railway costs
 async def check_old_posts():
     """Background task to check for old unsolved posts - DISABLED TO SAVE RAILWAY COSTS"""
-    # RAILWAY COST OPTIMIZATION: Forum post checking completely disabled to save CPU/memory/API costs
-    # Forum posts are no longer processed or monitored
-    print(f"ℹ️ Forum post checking disabled to save Railway costs (skipping check)")
+    # COST OPTIMIZATION: Forum post checking disabled - use /archive_old_posts command manually instead
     return  # Exit immediately - no processing
 
 @bot.event
@@ -4524,12 +4511,10 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
 
 @bot.event
 async def on_thread_create(thread):
-    """Handle new forum posts (threads created in forum channels) - DISABLED TO SAVE RAILWAY COSTS"""
-    # RAILWAY COST OPTIMIZATION: Forum post processing completely disabled to save CPU/memory costs
-    # Forum posts are no longer processed, monitored, or stored
-    # This saves significant Railway CPU, memory, and API call costs
-    print(f"ℹ️ Forum post created but processing disabled to save Railway costs: '{thread.name}' (ID: {thread.id})")
-    return  # Exit immediately - no processing
+    """Handle new forum posts (threads created in forum channels) - MINIMAL PROCESSING FOR COST EFFICIENCY"""
+    # COST OPTIMIZATION: Minimal forum post processing - just log, no API calls, no storage
+    print(f"ℹ️ Forum post created: '{thread.name}' (ID: {thread.id}) - minimal processing only")
+    return  # Exit immediately - no processing, no API calls, no storage
     
     # Check if this is a forum channel thread
     if not hasattr(thread, 'parent_id') or not thread.parent_id:
