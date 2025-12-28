@@ -4021,21 +4021,19 @@ async def archive_old_active_posts():
 
 
 async def cleanup_old_solved_posts():
-    """Background task to delete old solved/closed posts and posts open for 30+ days"""
+    """Background task to archive old active posts in Discord (forum posts no longer stored in Vercel to save costs)"""
     try:
-        # First, archive old active posts in Discord to prevent hitting forum limit
+        # RESOURCE OPTIMIZATION: Forum posts are no longer stored in Vercel KV to save costs
+        # Only archive old posts in Discord to prevent hitting forum limit
+        # Forum posts are stored in-memory only and reset on restart
         await archive_old_active_posts()
         
-        if 'your-vercel-app' in DATA_API_URL:
-            return  # Skip if API not configured
+        print(f"\n🧹 Forum posts cleanup skipped - posts are no longer stored in Vercel KV to save costs")
+        print(f"   Forum posts are stored in-memory only and reset on restart")
+        print(f"   Discord archiving still runs to prevent hitting forum post limit")
         
-        retention_days = BOT_SETTINGS.get('solved_post_retention_days', 30)
-        open_post_retention_days = 30  # Delete posts open for 30+ days regardless of status
-        print(f"\n🧹 Cleaning up old posts from storage...")
-        print(f"   - Solved/Closed posts older than {retention_days} days")
-        print(f"   - Any posts open for {open_post_retention_days}+ days")
-        
-        forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
+        # Skip API cleanup since forum posts aren't persisted
+        return
         
         async with aiohttp.ClientSession() as session:
             async with session.get(forum_api_url, timeout=aiohttp.ClientTimeout(total=10)) as response:

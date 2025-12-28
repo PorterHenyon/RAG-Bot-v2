@@ -63,7 +63,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       } else {
         // Vercel KV - estimate based on known keys
-        const knownKeys = ['rag_entries', 'auto_responses', 'slash_commands', 'bot_settings', 'pending_rag_entries', 'forum_posts', 'leaderboard'];
+        // RESOURCE OPTIMIZATION: Removed 'forum_posts' from known keys - forum posts are not stored in Vercel KV to save costs
+        const knownKeys = ['rag_entries', 'auto_responses', 'slash_commands', 'bot_settings', 'pending_rag_entries', 'leaderboard'];
         for (const key of knownKeys) {
           try {
             const value = await kvClient.get(key);
@@ -101,37 +102,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (action === 'cleanup_forum_posts') {
-        // Clean up old forum posts
-        const retentionDays = options?.retentionDays || 7;
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
-
-        const forumPosts = await kvClient.get('forum_posts');
-        if (forumPosts) {
-          const posts = Array.isArray(forumPosts) ? forumPosts : JSON.parse(forumPosts as string);
-          const initialCount = posts.length;
-          
-          // Filter out old solved/closed posts
-          const filteredPosts = posts.filter((post: any) => {
-            if (post.status === 'Solved' || post.status === 'Closed') {
-              const postDate = new Date(post.createdAt || post.updatedAt);
-              return postDate > cutoffDate;
-            }
-            return true; // Keep unsolved posts
-          });
-
-          const deletedCount = initialCount - filteredPosts.length;
-          
-          // Both Vercel KV and ioredis work with stringified JSON
-          await (kvClient as any).set('forum_posts', JSON.stringify(filteredPosts));
-
-          return res.status(200).json({
-            success: true,
-            deleted: deletedCount,
-            kept: filteredPosts.length,
-            message: `Cleaned up ${deletedCount} old forum posts (kept posts newer than ${retentionDays} days)`
-          });
-        }
+        // RESOURCE OPTIMIZATION: Forum posts are no longer stored in Vercel KV to save costs
+        // This action is disabled - forum posts are only stored in-memory
+        return res.status(200).json({
+          success: true,
+          deleted: 0,
+          kept: 0,
+          message: 'Forum posts are no longer stored in Vercel KV to save costs. They are only stored in-memory and reset on restart.'
+        });
       }
 
       if (action === 'cleanup_pending_rag') {

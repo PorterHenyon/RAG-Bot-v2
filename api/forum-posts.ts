@@ -73,47 +73,17 @@ async function initKV() {
 
 // Helper functions to get/set forum posts
 async function getForumPosts(): Promise<ForumPost[]> {
-  await initKV();
-  if (kvClient) {
-    try {
-      let posts: any = await kvClient.get('forum_posts');
-      
-      // Parse JSON if using direct Redis (stored as string)
-      if (typeof posts === 'string') {
-        try {
-          posts = JSON.parse(posts);
-        } catch (e) {
-          posts = null;
-        }
-      }
-      
-      return posts || inMemoryForumPosts;
-    } catch (error) {
-      console.error('Error reading forum posts from Redis/KV:', error);
-      return inMemoryForumPosts;
-    }
-  }
+  // RESOURCE OPTIMIZATION: Forum posts are NOT loaded from Vercel KV to save costs
+  // Only return in-memory posts - data resets on restart but saves significant Vercel costs
   return inMemoryForumPosts;
 }
 
 async function saveForumPosts(posts: ForumPost[]): Promise<void> {
-  await initKV();
-  if (kvClient) {
-    try {
-      // Check if using direct Redis (ioredis) or Vercel KV
-      if (typeof kvClient.set === 'function') {
-        // Direct Redis - store as JSON string
-        await kvClient.set('forum_posts', JSON.stringify(posts));
-      } else {
-        // Vercel KV
-        await kvClient.set('forum_posts', posts);
-      }
-    } catch (error) {
-      console.error('Error saving forum posts to Redis/KV:', error);
-    }
-  } else {
-    inMemoryForumPosts = posts;
-  }
+  // RESOURCE OPTIMIZATION: Forum posts are NOT saved to Vercel KV to save storage costs
+  // Only use in-memory storage - data resets on restart but saves significant Vercel costs
+  // Bot still monitors and responds to forum posts, but doesn't persist them
+  inMemoryForumPosts = posts;
+  console.log(`💾 Forum posts stored in-memory only (${posts.length} posts) - NOT persisted to Vercel KV to save costs`);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
