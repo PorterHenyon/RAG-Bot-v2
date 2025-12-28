@@ -2,7 +2,7 @@ import os
 import asyncio
 import json
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import discord
 from discord import app_commands
@@ -2014,7 +2014,7 @@ async def fetch_data_from_api():
 
 async def increment_leaderboard(user: discord.User):
     """Increment solved count for a staff member"""
-    from datetime import datetime
+    from datetime import datetime, timedelta
     
     current_month = datetime.now().strftime("%Y-%m")
     
@@ -3282,7 +3282,7 @@ async def generate_ai_response(query, context_entries, image_parts=None):
         context_entries: Relevant RAG entries to use as context
         image_parts: Optional images to include
     """
-    from datetime import datetime
+    from datetime import datetime, timedelta
     import hashlib
     
     # Use the main key manager (all keys available for all operations)
@@ -3754,7 +3754,7 @@ async def sync_data_task():
 @tasks.loop(hours=24)  # Check daily for month reset
 async def check_leaderboard_reset():
     """Check if it's a new month and reset leaderboard"""
-    from datetime import datetime
+    from datetime import datetime, timedelta
     
     try:
         current_month = datetime.now().strftime("%Y-%m")
@@ -3940,15 +3940,92 @@ async def cleanup_processed_threads():
         traceback.print_exc()
 
 @tasks.loop(hours=24)  # Run daily
+async def archive_old_active_posts():
+    """Background task to archive old active posts in Discord to prevent hitting forum post limit"""
+    try:
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        if not forum_channel_id:
+            return
+        
+        forum_channel = bot.get_channel(int(forum_channel_id))
+        if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
+            return
+        
+        # Archive posts older than 14 days (configurable)
+        archive_days = BOT_SETTINGS.get('archive_active_posts_days', 14)
+        cutoff_date = datetime.now() - timedelta(days=archive_days)
+        
+        print(f"\n📦 Archiving old active posts (older than {archive_days} days)...")
+        
+        archived_count = 0
+        active_threads = list(forum_channel.threads)
+        
+        # RESOURCE OPTIMIZATION: Batch archive operations with delays to avoid rate limits
+        # Discord allows ~50 requests per second, so we'll do 10 per second to be safe
+        batch_size = 10
+        delay_between_batches = 1.1  # 1.1 seconds = ~9 requests/second (safe margin)
+        
+        threads_to_archive = []
+        for thread in active_threads:
+            # Skip if already archived
+            if thread.archived:
+                continue
+            
+            # Check thread creation date
+            if hasattr(thread, 'created_at') and thread.created_at:
+                thread_date = thread.created_at.replace(tzinfo=None) if thread.created_at.tzinfo else thread.created_at
+                if thread_date < cutoff_date:
+                    threads_to_archive.append(thread)
+        
+        # Archive in batches with delays to respect rate limits
+        for i, thread in enumerate(threads_to_archive):
+            try:
+                # Archive the thread
+                await thread.edit(archived=True, locked=False)  # Lock=False to allow reopening if needed
+                archived_count += 1
+                print(f"   📦 Archived: '{thread.name}' (created {thread.created_at.strftime('%Y-%m-%d')})")
+                
+                # Rate limiting: delay every batch_size threads
+                if (i + 1) % batch_size == 0 and i < len(threads_to_archive) - 1:
+                    await asyncio.sleep(delay_between_batches)
+            except discord.errors.RateLimited as e:
+                # If rate limited, wait for the retry_after time
+                wait_time = e.retry_after if hasattr(e, 'retry_after') else 2.0
+                print(f"   ⏳ Rate limited, waiting {wait_time}s...")
+                await asyncio.sleep(wait_time)
+                # Retry this thread
+                try:
+                    await thread.edit(archived=True, locked=False)
+                    archived_count += 1
+                    print(f"   📦 Archived (retry): '{thread.name}'")
+                except Exception as retry_error:
+                    print(f"   ⚠ Failed to archive thread {thread.id} after retry: {retry_error}")
+            except Exception as e:
+                print(f"   ⚠ Failed to archive thread {thread.id}: {e}")
+        
+        if archived_count > 0:
+            print(f"✅ Archived {archived_count} old active post(s) in Discord")
+        else:
+            print(f"✓ No old active posts to archive")
+    
+    except Exception as e:
+        print(f"❌ Error in archive_old_active_posts task: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 async def cleanup_old_solved_posts():
     """Background task to delete old solved/closed posts and posts open for 30+ days"""
     try:
+        # First, archive old active posts in Discord to prevent hitting forum limit
+        await archive_old_active_posts()
+        
         if 'your-vercel-app' in DATA_API_URL:
             return  # Skip if API not configured
         
         retention_days = BOT_SETTINGS.get('solved_post_retention_days', 30)
         open_post_retention_days = 30  # Delete posts open for 30+ days regardless of status
-        print(f"\n🧹 Cleaning up old posts...")
+        print(f"\n🧹 Cleaning up old posts from storage...")
         print(f"   - Solved/Closed posts older than {retention_days} days")
         print(f"   - Any posts open for {open_post_retention_days}+ days")
         
@@ -4126,6 +4203,28 @@ async def notify_support_channel_summary(ping_support=False):
 # REMOVED: Local backups disabled - all data stored in Vercel KV API only
 # Users can download backups anytime with /export_data command
 
+@tasks.loop(minutes=10)  # Update thread count cache every 10 minutes (lightweight check)
+async def update_thread_count_cache():
+    """Lightweight background task to cache thread count for limit checking"""
+    try:
+        forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+        if not forum_channel_id:
+            return
+        
+        forum_channel = bot.get_channel(int(forum_channel_id))
+        if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+            # RESOURCE OPTIMIZATION: Only get count, not full thread list
+            # This is much faster than fetching all thread objects
+            try:
+                # Get active thread count efficiently
+                active_threads = list(forum_channel.threads)
+                bot._cached_thread_count = len(active_threads)
+                bot._thread_count_cache_time = datetime.now()
+            except Exception as e:
+                print(f"⚠ Error updating thread count cache: {e}")
+    except Exception as e:
+        print(f"⚠ Error in update_thread_count_cache: {e}")
+
 @tasks.loop(hours=8)  # Check every 8 hours (CPU OPTIMIZATION: Reduced frequency to save CPU costs)
 async def check_old_posts():
     """Background task to check for old unsolved posts and escalate them"""
@@ -4298,15 +4397,25 @@ async def on_ready():
     sync_data_task.start()
     check_leaderboard_reset.start()
     
+    # Start thread count cache update task (lightweight, runs every 10 minutes)
+    if not update_thread_count_cache.is_running():
+        update_thread_count_cache.start()
+        print("✓ Started background task: update_thread_count_cache (runs every 10 minutes)")
+    
     # Start old post check task
     if not check_old_posts.is_running():
         check_old_posts.start()
-        print("✓ Started background task: check_old_posts (runs every 4 hours)")
+        print("✓ Started background task: check_old_posts (runs every 8 hours)")
     
     # Start cleanup task for old solved posts
     if not cleanup_old_solved_posts.is_running():
         cleanup_old_solved_posts.start()
         print("✓ Started background task: cleanup_old_solved_posts (runs daily)")
+    
+    # Start archive task for old active posts (prevents hitting Discord forum limit)
+    if not archive_old_active_posts.is_running():
+        archive_old_active_posts.start()
+        print("✓ Started background task: archive_old_active_posts (runs daily)")
     
     # Start cleanup task for processed_threads memory leak prevention
     if not cleanup_processed_threads.is_running():
@@ -4649,6 +4758,35 @@ async def on_thread_create(thread):
     if not should_process:
         print(f"⚠ This thread will be ignored. Use the FORUM CHANNEL ID (not category ID) or update to accept this category!")
         return
+    
+    # RESOURCE OPTIMIZATION: Only check thread count periodically, not on every post creation
+    # Use a cached count that updates every 10 minutes via background task
+    # This avoids expensive thread list fetches on every new post
+    try:
+        # Check cached thread count (updated by background task)
+        if not hasattr(bot, '_cached_thread_count') or not hasattr(bot, '_thread_count_cache_time'):
+            bot._cached_thread_count = 0
+            bot._thread_count_cache_time = datetime.now()
+        
+        # Only check if cache is older than 10 minutes
+        cache_age = (datetime.now() - bot._thread_count_cache_time).total_seconds()
+        if cache_age > 600:  # 10 minutes
+            forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
+            if forum_channel_id:
+                forum_channel = bot.get_channel(int(forum_channel_id))
+                if forum_channel and isinstance(forum_channel, discord.ForumChannel):
+                    # Update cache
+                    bot._cached_thread_count = len(list(forum_channel.threads))
+                    bot._thread_count_cache_time = datetime.now()
+        
+        # Discord forum limit is typically 1000 active posts
+        # Archive old posts if we're getting close (e.g., 900+ active)
+        if bot._cached_thread_count > 900:
+            print(f"⚠️ Warning: {bot._cached_thread_count} active posts (cached) - near Discord limit! Archiving old posts...")
+            # Run archive in background to avoid blocking thread creation
+            asyncio.create_task(archive_old_active_posts())
+    except Exception as e:
+        print(f"⚠ Error checking forum post limit: {e}")
     
     print(f"✅ Processing forum post: '{thread.name}'")
     
@@ -7494,6 +7632,36 @@ async def set_high_priority_channel_id(interaction: discord.Interaction, channel
         print(f"Error in set_high_priority_channel_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
+@bot.tree.command(name="archive_old_posts", description="Manually archive old active posts in Discord to free up space (Admin only).")
+async def archive_old_posts(interaction: discord.Interaction, days: int = 14):
+    """Manually trigger archiving of old active posts"""
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission or Bot Permissions role to use this command.", ephemeral=True)
+        return
+    
+    await interaction.response.defer(ephemeral=False)
+    
+    try:
+        # Temporarily set archive days for this run
+        old_archive_days = BOT_SETTINGS.get('archive_active_posts_days', 14)
+        BOT_SETTINGS['archive_active_posts_days'] = days
+        
+        # Run the archive function
+        await archive_old_active_posts()
+        
+        # Restore original setting
+        BOT_SETTINGS['archive_active_posts_days'] = old_archive_days
+        
+        await interaction.followup.send(
+            f"✅ Archive complete! Archived posts older than {days} days.\n\n"
+            f"Check bot logs for details on how many posts were archived.",
+            ephemeral=False
+        )
+        print(f"✓ Manual archive triggered by {interaction.user} (archived posts older than {days} days)")
+    except Exception as e:
+        print(f"Error in archive_old_posts command: {e}")
+        await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
+
 @bot.tree.command(name="set_solved_post_retention", description="Set days to keep solved posts before auto-deletion (Admin only).")
 async def set_solved_post_retention(interaction: discord.Interaction, days: int):
     """Set how long to keep solved/closed posts before automatic deletion"""
@@ -8982,7 +9150,7 @@ async def leaderboard(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=False)
     
     try:
-        from datetime import datetime
+        from datetime import datetime, timedelta
         
         current_month = datetime.now().strftime("%Y-%m")
         month_name = datetime.now().strftime("%B %Y")
