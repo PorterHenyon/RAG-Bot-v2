@@ -3941,7 +3941,7 @@ async def archive_old_active_posts():
                 # Archive the thread
                 await thread.edit(archived=True, locked=False)  # Lock=False to allow reopening if needed
                 archived_count += 1
-                print(f"   📦 Archived: '{thread.name}' (created {thread.created_at.strftime('%Y-%m-%d')})")
+                print(f"   📦 Archived: '{thread.name}' (created {thread_date.strftime('%Y-%m-%d')})")
                 
                 # Rate limiting: delay every batch_size threads
                 if (i + 1) % batch_size == 0 and i < len(threads_to_archive) - 1:
