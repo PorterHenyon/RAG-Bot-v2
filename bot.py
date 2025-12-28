@@ -4993,9 +4993,9 @@ async def on_thread_create(thread):
                 # Classify issue and remove notification if present
                 issue_type = classify_issue(user_question)
                 await remove_support_notification(thread_id)
-        # RAILWAY COST OPTIMIZATION: Skip API call for issue classification since forum posts aren't persisted
-        # Just log locally to save Railway bandwidth
-        print(f"✓ Classified issue as: {issue_type} (in-memory only, not persisted)")
+                # RAILWAY COST OPTIMIZATION: Skip API call for issue classification since forum posts aren't persisted
+                # Just log locally to save Railway bandwidth
+                print(f"✓ Classified issue as: {issue_type} (in-memory only, not persisted)")
                 
                 print(f"💡 Responded to '{thread.name}' with Revolution Macro AI assistance (no specific RAG match).")
                 
