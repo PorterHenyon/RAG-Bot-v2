@@ -32,8 +32,9 @@ const SettingsView: React.FC = () => {
         setLocalPrompt(botSettings.systemPrompt);
     }, [botSettings.systemPrompt]);
 
-    const handleSave = () => {
+    const handleSave = async () => {
         const newSettings = {
+            ...botSettings, // Preserve existing settings
             systemPrompt: localPrompt,
             updatedAt: new Date().toISOString()
         };
@@ -45,8 +46,17 @@ const SettingsView: React.FC = () => {
             console.error('Failed to save settings to localStorage:', e);
         }
         
-        // Update the bot settings with new prompt and current timestamp
+        // Update the bot settings - this will trigger auto-sync to API via useEffect
         setBotSettings(newSettings);
+        
+        // Also explicitly save to API immediately to ensure it's saved
+        try {
+            const { dataService } = await import('../../services/dataService');
+            await dataService.saveData(ragEntries, autoResponses, slashCommands, newSettings, pendingRagEntries);
+            console.log('✓ Settings saved to API');
+        } catch (error) {
+            console.error('Failed to save settings to API:', error);
+        }
         
         setSaved(true);
         setTimeout(() => setSaved(false), 3000);

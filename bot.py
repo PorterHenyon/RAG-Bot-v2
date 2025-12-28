@@ -1705,13 +1705,17 @@ async def save_bot_settings_to_api():
                 # Update with current BOT_SETTINGS (our changes take priority)
                 full_bot_settings.update(BOT_SETTINGS)
                 
-                # Always include system prompt (even if empty) to ensure it's saved to API
+                # Always include system prompt from SYSTEM_PROMPT_TEXT if available, otherwise preserve existing
+                # This ensures the bot's current system prompt is saved to API
                 if SYSTEM_PROMPT_TEXT and len(SYSTEM_PROMPT_TEXT.strip()) > 0:
                     full_bot_settings['systemPrompt'] = SYSTEM_PROMPT_TEXT
-                    print(f"🔍 DEBUG: Including custom system prompt ({len(SYSTEM_PROMPT_TEXT)} chars)")
+                    print(f"🔍 DEBUG: Including system prompt from bot ({len(SYSTEM_PROMPT_TEXT)} chars)")
+                elif 'systemPrompt' in existing_settings:
+                    # Preserve existing system prompt from API if bot doesn't have one set
+                    full_bot_settings['systemPrompt'] = existing_settings['systemPrompt']
+                    print(f"🔍 DEBUG: Preserving existing system prompt from API ({len(existing_settings['systemPrompt']) if existing_settings['systemPrompt'] else 0} chars)")
                 else:
-                    # Don't include empty prompt, let API keep existing one
-                    print(f"🔍 DEBUG: System prompt empty or not set, not overwriting API prompt")
+                    print(f"🔍 DEBUG: No system prompt to save")
                 
                 current_data['botSettings'] = full_bot_settings
                 
