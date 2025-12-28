@@ -4623,7 +4623,9 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
             pass
 
 async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url, initial_message):
-    """Send forum post data to the dashboard API with full Discord information"""
+    """Send forum post data to the dashboard API (in-memory only, not persisted to save costs)"""
+    # RESOURCE OPTIMIZATION: Forum posts are no longer persisted to Vercel KV to save costs
+    # Still send to API for dashboard display (in-memory), but it won't persist
     # Skip API call if URL is still the placeholder
     if 'your-vercel-app' in DATA_API_URL:
         print("ℹ Skipping forum post sync - Vercel URL not configured.")
@@ -4631,7 +4633,7 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
     
     try:
         forum_api_url = DATA_API_URL.replace('/api/data', '/api/forum-posts')
-        print(f"🔗 Sending forum post to: {forum_api_url}")
+        print(f"🔗 Sending forum post to API (in-memory only, not persisted): {forum_api_url}")
         
         # Get thread creation time
         thread_created = thread.created_at if hasattr(thread, 'created_at') else datetime.now()
@@ -4684,14 +4686,13 @@ async def send_forum_post_to_api(thread, owner_name, owner_id, owner_avatar_url,
         async with aiohttp.ClientSession() as session:
             async with session.post(forum_api_url, json=post_data, headers=headers, timeout=aiohttp.ClientTimeout(total=5)) as response:
                 if response.status == 200:
-                    print(f"✅ Forum post saved to dashboard (persisted to Vercel KV/Redis): '{thread.name}' by {owner_name}")
+                    print(f"✅ Forum post sent to dashboard (in-memory only, not persisted to save costs): '{thread.name}' by {owner_name}")
                 else:
                     text = await response.text()
-                    print(f"⚠ Failed to save forum post to API: Status {response.status}")
+                    print(f"⚠ Failed to send forum post to API: Status {response.status}")
                     print(f"   Response: {text[:200]}")
                     print(f"   API URL: {forum_api_url}")
-                    print(f"   Request body: {json.dumps(post_data)[:200]}")
-                    print(f"   ⚠️ Forum post will not persist - check API configuration")
+                    print(f"   Note: Forum posts are in-memory only (not persisted) to save Vercel costs")
     except aiohttp.ClientError as e:
         print(f"⚠ Network error sending forum post to API: {type(e).__name__}: {str(e)}")
         print(f"   API URL attempted: {forum_api_url}")
