@@ -3898,13 +3898,12 @@ async def cleanup_processed_threads():
         import traceback
         traceback.print_exc()
 
-@tasks.loop(hours=24)  # Run daily
-async def archive_old_active_posts():
-    """Background task to archive old active posts in Discord to prevent hitting forum post limit"""
+async def archive_old_active_posts(days: int = 3):
+    """Archive old active posts in Discord (standalone function, not a background task)"""
     try:
         forum_channel_id = BOT_SETTINGS.get('support_forum_channel_id', SUPPORT_FORUM_CHANNEL_ID)
         if not forum_channel_id:
-            return
+            return 0
         
         forum_channel = bot.get_channel(int(forum_channel_id))
         if not forum_channel or not isinstance(forum_channel, discord.ForumChannel):
@@ -7309,22 +7308,15 @@ async def archive_old_posts(interaction: discord.Interaction, days: int = 14):
     await interaction.response.defer(ephemeral=False)
     
     try:
-        # Temporarily set archive days for this run
-        old_archive_days = BOT_SETTINGS.get('archive_active_posts_days', 14)
-        BOT_SETTINGS['archive_active_posts_days'] = days
-        
-        # Run the archive function
-        await archive_old_active_posts()
-        
-        # Restore original setting
-        BOT_SETTINGS['archive_active_posts_days'] = old_archive_days
+        # Archive posts older than specified days (default 3 days)
+        archived_count = await archive_old_active_posts(days=days)
         
         await interaction.followup.send(
-            f"✅ Archive complete! Archived posts older than {days} days.\n\n"
-            f"Check bot logs for details on how many posts were archived.",
+            f"✅ Archive complete! Archived **{archived_count}** post(s) older than **{days} days**.\n\n"
+            f"Check bot logs for details.",
             ephemeral=False
         )
-        print(f"✓ Manual archive triggered by {interaction.user} (archived posts older than {days} days)")
+        print(f"✓ Manual archive triggered by {interaction.user} (archived {archived_count} posts older than {days} days)")
     except Exception as e:
         print(f"Error in archive_old_posts command: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
