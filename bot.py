@@ -1081,6 +1081,10 @@ not_solved_retry_count = {}  # {thread_id: count}
 # Track threads that have already received high priority notifications (to prevent duplicates)
 threads_with_high_priority_notifications = set()  # {thread_id}
 
+# Track daily issues for 24h summary (RESOURCE EFFICIENT: Simple in-memory tracking)
+# Format: {issue_key: {'count': int, 'thread_ids': [int], 'examples': [str], 'first_seen': datetime}}
+daily_issue_tracker = {}  # Cleared after sending daily summary
+
 # REMOVED: No local storage - all data in Vercel KV API only
 
 # --- SIMPLE, LOW-COST SATISFACTION ANALYZER (prevents NameError and avoids heavy API calls) ---
@@ -2205,6 +2209,149 @@ def classify_issue(question: str) -> str:
     
     # Default to 'Other' if no pattern matches
     return 'Other'
+
+def extract_issue_keywords(title: str, message: str) -> str:
+    """Extract key issue keywords from title and message for grouping (RESOURCE EFFICIENT: simple regex, no AI)"""
+    import re
+    combined = f"{title} {message}".lower()
+    
+    # Common issue keywords to extract (priority order)
+    issue_patterns = [
+        (r'\b(initialization|init|initialize|failed to init)\b', 'Failed to initialize'),
+        (r'\b(crash|crashes|crashing|stopped working|closed unexpectedly)\b', 'Application crashes'),
+        (r'\b(error|errors|exception|failed|failure)\b', 'Errors/Failures'),
+        (r'\b(not working|doesn\'t work|broken|malfunction)\b', 'Feature not working'),
+        (r'\b(slow|lag|lagging|performance|fps|frame rate)\b', 'Performance issues'),
+        (r'\b(freeze|frozen|stuck|hanging|unresponsive)\b', 'Freezing/Hanging'),
+        (r'\b(install|installation|setup|setup failed)\b', 'Installation issues'),
+        (r'\b(display|screen|graphics|visual|rendering)\b', 'Display/Graphics issues'),
+        (r'\b(connection|network|disconnect|timeout)\b', 'Connection issues'),
+        (r'\b(macro|automation|auto|gather|collect)\b', 'Macro/Automation issues'),
+    ]
+    
+    for pattern, keyword in issue_patterns:
+        if re.search(pattern, combined):
+            return keyword
+    
+    # Fallback: Use first few words of title
+    words = title.split()[:3]
+    return ' '.join(words) if words else 'Other issues'
+
+def track_issue_for_daily_summary(thread_id: int, title: str, message: str):
+    """Track issue for daily summary (RESOURCE EFFICIENT: simple in-memory tracking)"""
+    global daily_issue_tracker
+    
+    try:
+        # Extract issue keyword/description
+        issue_key = extract_issue_keywords(title, message)
+        
+        # Get or create entry
+        if issue_key not in daily_issue_tracker:
+            daily_issue_tracker[issue_key] = {
+                'count': 0,
+                'thread_ids': [],
+                'examples': [],
+                'first_seen': datetime.now()
+            }
+        
+        # Update entry
+        daily_issue_tracker[issue_key]['count'] += 1
+        daily_issue_tracker[issue_key]['thread_ids'].append(thread_id)
+        
+        # Keep up to 3 example titles (shortest ones for brevity)
+        if len(daily_issue_tracker[issue_key]['examples']) < 3:
+            daily_issue_tracker[issue_key]['examples'].append(title[:60])
+        elif len(title) < len(max(daily_issue_tracker[issue_key]['examples'], key=len)):
+            # Replace longest example if this one is shorter
+            examples = daily_issue_tracker[issue_key]['examples']
+            longest_idx = max(range(len(examples)), key=lambda i: len(examples[i]))
+            examples[longest_idx] = title[:60]
+    except Exception as e:
+        print(f"⚠ Error tracking issue for daily summary: {e}")
+
+async def send_daily_issue_summary():
+    """Send daily issue summary to developer channel (RESOURCE EFFICIENT: runs once daily)"""
+    global daily_issue_tracker
+    
+    DEVELOPER_CHANNEL_ID = 910980823132561428
+    
+    try:
+        # Filter issues from last 24 hours only
+        now = datetime.now()
+        cutoff_time = now - timedelta(hours=24)
+        
+        # Filter and sort issues
+        recent_issues = {}
+        for issue_key, data in daily_issue_tracker.items():
+            if data['first_seen'] >= cutoff_time:
+                recent_issues[issue_key] = data
+        
+        if not recent_issues:
+            print("📊 No issues to summarize in the last 24 hours")
+            daily_issue_tracker.clear()  # Clear tracker after processing
+            return
+        
+        # Sort by count (most common first)
+        sorted_issues = sorted(recent_issues.items(), key=lambda x: x[1]['count'], reverse=True)
+        
+        # Take top 10 issues
+        top_issues = sorted_issues[:10]
+        
+        # Get developer channel
+        channel = bot.get_channel(DEVELOPER_CHANNEL_ID)
+        if not channel:
+            print(f"⚠ Could not find developer channel {DEVELOPER_CHANNEL_ID}")
+            return
+        
+        # Build summary message (concise and informational)
+        embed = discord.Embed(
+            title="📊 Daily Issue Summary (Last 24h)",
+            description=f"Top {len(top_issues)} issues from support forum",
+            color=0x5865F2,
+            timestamp=now
+        )
+        
+        # Add top issues
+        summary_text = []
+        for i, (issue_key, data) in enumerate(top_issues, 1):
+            count = data['count']
+            example = data['examples'][0] if data['examples'] else "N/A"
+            summary_text.append(f"**{i}. {issue_key}** - {count} report(s)\n   *Example: {example}*")
+        
+        # Split into fields if needed (Discord limit: 1024 chars per field)
+        full_text = "\n\n".join(summary_text)
+        if len(full_text) <= 1024:
+            embed.add_field(name="Issues", value=full_text, inline=False)
+        else:
+            # Split into multiple fields
+            current_field = []
+            current_length = 0
+            for line in summary_text:
+                line_length = len(line) + 2  # +2 for \n\n
+                if current_length + line_length > 1000 and current_field:
+                    embed.add_field(name="Issues", value="\n\n".join(current_field), inline=False)
+                    current_field = []
+                    current_length = 0
+                current_field.append(line)
+                current_length += line_length
+            if current_field:
+                embed.add_field(name="Issues" if len(embed.fields) == 0 else "", value="\n\n".join(current_field), inline=False)
+        
+        # Add footer with total
+        total_issues = sum(data['count'] for _, data in top_issues)
+        embed.set_footer(text=f"Total reports: {total_issues} | Top {len(top_issues)} issues shown")
+        
+        # Send message
+        await channel.send(embed=embed)
+        print(f"✅ Sent daily issue summary to developer channel ({len(top_issues)} issues, {total_issues} total reports)")
+        
+        # Clear tracker after sending
+        daily_issue_tracker.clear()
+        
+    except Exception as e:
+        print(f"⚠ Error sending daily issue summary: {e}")
+        import traceback
+        traceback.print_exc()
 
 async def apply_issue_type_tag(thread, issue_type):
     """Apply a Discord forum tag based on issue type using configured tag IDs (only bot/mods can add tags)"""
@@ -3732,6 +3879,11 @@ async def sync_data_task():
     """Periodically sync data from the dashboard"""
     await fetch_data_from_api()
 
+@tasks.loop(hours=24)  # Run daily at same time
+async def send_daily_summary_task():
+    """Send daily issue summary to developer (RESOURCE EFFICIENT: runs once daily)"""
+    await send_daily_issue_summary()
+
 @tasks.loop(hours=24)  # Check daily for month reset
 async def check_leaderboard_reset():
     """Check if it's a new month and reset leaderboard"""
@@ -4671,6 +4823,9 @@ async def on_thread_create(thread):
         print(f"⚠ Could not send greeting (Discord restriction): {e}")
         # Continue anyway - the important part is answering the question
     user_question = f"{thread.name}\n{initial_message}"
+    
+    # RESOURCE EFFICIENT: Track issue for daily summary (simple keyword extraction, no AI)
+    track_issue_for_daily_summary(thread.id, thread.name, initial_message)
     
     # RAILWAY COST OPTIMIZATION: Skip API call for forum post creation since they're not persisted
     # Forum posts are in-memory only, so creating them via API wastes Railway bandwidth
