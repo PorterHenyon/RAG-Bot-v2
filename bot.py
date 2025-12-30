@@ -4332,6 +4332,11 @@ async def on_ready():
         cleanup_processed_threads.start()
         print("✓ Started background task: cleanup_processed_threads (runs every 6 hours)")
     
+    # Start daily summary task (runs once per day)
+    if not send_daily_summary_task.is_running():
+        send_daily_summary_task.start()
+        print("✓ Started background task: send_daily_summary_task (runs daily at same time)")
+    
     # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
     try:
