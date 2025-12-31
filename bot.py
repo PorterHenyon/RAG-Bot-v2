@@ -2353,7 +2353,8 @@ async def send_daily_issue_summary(user_id: int = None):
                 current_field.append(line)
                 current_length += line_length
             if current_field:
-                embed.add_field(name="Issues" if len(embed.fields) == 0 else "", value="\n\n".join(current_field), inline=False)
+                field_name = "Issues" if len(embed.fields) == 0 else ""
+                embed.add_field(name=field_name, value="\n\n".join(current_field), inline=False)
         
         # Add footer with total (improved design)
         total_issues = sum(data['count'] for _, data in top_issues)
