@@ -6093,7 +6093,7 @@ async def on_thread_delete(thread):
         traceback.print_exc()
 
 @bot.tree.command(name="daily_summary", description="Send daily issue summary via DM (optionally specify user_id) (Admin only).")
-async def test_daily_summary(interaction: discord.Interaction):
+async def daily_summary(interaction: discord.Interaction, user_id: str = None):
     """Test the daily summary by sending it immediately"""
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
