@@ -2301,7 +2301,10 @@ async def send_daily_issue_summary():
         channel = bot.get_channel(DEVELOPER_CHANNEL_ID)
         if not channel:
             print(f"⚠ Could not find developer channel {DEVELOPER_CHANNEL_ID}")
+            print(f"   Available channels: {[c.id for c in bot.get_all_channels() if hasattr(c, 'id')][:10]}...")
             return
+        
+        print(f"📤 Sending summary to channel {channel.name} (ID: {DEVELOPER_CHANNEL_ID})")
         
         # Build summary message (concise and informational)
         embed = discord.Embed(
@@ -3882,7 +3885,18 @@ async def sync_data_task():
 @tasks.loop(hours=24)  # Run daily at same time
 async def send_daily_summary_task():
     """Send daily issue summary to developer (RESOURCE EFFICIENT: runs once daily)"""
-    await send_daily_issue_summary()
+    try:
+        print(f"🕐 Daily summary task triggered at {datetime.now()}")
+        await send_daily_issue_summary()
+    except Exception as e:
+        print(f"❌ Error in daily summary task: {e}")
+        import traceback
+        traceback.print_exc()
+
+@send_daily_summary_task.before_loop
+async def before_daily_summary_task():
+    await bot.wait_until_ready()
+    print("⏰ Daily summary task waiting for bot to be ready...")
 
 @tasks.loop(hours=24)  # Check daily for month reset
 async def check_leaderboard_reset():
