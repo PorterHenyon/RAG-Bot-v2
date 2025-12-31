@@ -6071,6 +6071,29 @@ async def on_thread_delete(thread):
         import traceback
         traceback.print_exc()
 
+@bot.tree.command(name="test_daily_summary", description="Test daily issue summary (sends immediately) (Admin only).")
+async def test_daily_summary(interaction: discord.Interaction):
+    """Test the daily summary by sending it immediately"""
+    if is_friend_server(interaction):
+        await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
+        return
+    if not is_owner_or_admin(interaction):
+        await interaction.response.send_message("❌ You need Administrator permission to use this command.", ephemeral=True)
+        return
+    await interaction.response.defer(ephemeral=True)
+    
+    try:
+        global daily_issue_tracker
+        tracker_count = len(daily_issue_tracker)
+        await interaction.followup.send(f"📊 Testing daily summary... (tracker has {tracker_count} issue types)", ephemeral=True)
+        await send_daily_issue_summary()
+        await interaction.followup.send("✅ Daily summary sent! Check the developer channel.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error: {str(e)[:200]}", ephemeral=True)
+        print(f"Error in test_daily_summary: {e}")
+        import traceback
+        traceback.print_exc()
+
 @bot.tree.command(name="reload", description="Reloads data from dashboard (Admin only).")
 async def reload(interaction: discord.Interaction):
     if is_friend_server(interaction):
