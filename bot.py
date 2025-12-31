@@ -2287,9 +2287,14 @@ async def send_daily_issue_summary():
                 recent_issues[issue_key] = data
         
         if not recent_issues:
-            print("📊 No issues to summarize in the last 24 hours")
-            daily_issue_tracker.clear()  # Clear tracker after processing
-            return
+            print(f"📊 No issues to summarize in the last 24 hours (tracker has {len(daily_issue_tracker)} total entries)")
+            # For testing: if no recent issues but we have tracked issues, use all of them
+            if daily_issue_tracker:
+                print(f"   Using all tracked issues for summary (testing/debugging mode)")
+                recent_issues = daily_issue_tracker.copy()
+            else:
+                print("   No issues tracked at all - tracker is empty")
+                return
         
         # Sort by count (most common first)
         sorted_issues = sorted(recent_issues.items(), key=lambda x: x[1]['count'], reverse=True)
