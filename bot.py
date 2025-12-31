@@ -2269,11 +2269,15 @@ def track_issue_for_daily_summary(thread_id: int, title: str, message: str):
     except Exception as e:
         print(f"⚠ Error tracking issue for daily summary: {e}")
 
-async def send_daily_issue_summary():
-    """Send daily issue summary to developer channel (RESOURCE EFFICIENT: runs once daily)"""
+async def send_daily_issue_summary(user_id: int = None):
+    """Send daily issue summary to developer via DM (RESOURCE EFFICIENT: runs once daily)
+    
+    Args:
+        user_id: Optional user ID to send DM to. If None, uses default developer ID.
+    """
     global daily_issue_tracker
     
-    DEVELOPER_CHANNEL_ID = 910980823132561428
+    DEVELOPER_USER_ID = user_id if user_id else 910980823132561428
     
     try:
         # Filter issues from last 24 hours only
@@ -2302,29 +2306,35 @@ async def send_daily_issue_summary():
         # Take top 10 issues
         top_issues = sorted_issues[:10]
         
-        # Get developer channel
-        channel = bot.get_channel(DEVELOPER_CHANNEL_ID)
-        if not channel:
-            print(f"⚠ Could not find developer channel {DEVELOPER_CHANNEL_ID}")
-            print(f"   Available channels: {[c.id for c in bot.get_all_channels() if hasattr(c, 'id')][:10]}...")
+        # Get developer user and send DM
+        try:
+            developer = await bot.fetch_user(DEVELOPER_USER_ID)
+        except discord.NotFound:
+            print(f"⚠ Could not find user {DEVELOPER_USER_ID}")
+            return
+        except Exception as e:
+            print(f"⚠ Error fetching user {DEVELOPER_USER_ID}: {e}")
             return
         
-        print(f"📤 Sending summary to channel {channel.name} (ID: {DEVELOPER_CHANNEL_ID})")
+        print(f"📤 Sending summary DM to {developer.name} (ID: {DEVELOPER_USER_ID})")
         
-        # Build summary message (concise and informational)
+        # Build summary message (improved design, concise and informational)
         embed = discord.Embed(
-            title="📊 Daily Issue Summary (Last 24h)",
-            description=f"Top {len(top_issues)} issues from support forum",
+            title="📊 Daily Issue Summary",
+            description=f"**Last 24 Hours** • Top {len(top_issues)} issues from support forum",
             color=0x5865F2,
             timestamp=now
         )
+        embed.set_author(name="Revolution Macro Support", icon_url=bot.user.avatar.url if bot.user.avatar else None)
         
-        # Add top issues
+        # Add top issues (improved formatting)
         summary_text = []
         for i, (issue_key, data) in enumerate(top_issues, 1):
             count = data['count']
             example = data['examples'][0] if data['examples'] else "N/A"
-            summary_text.append(f"**{i}. {issue_key}** - {count} report(s)\n   *Example: {example}*")
+            # Use emoji for top 3 issues
+            emoji = "🔴" if i == 1 else "🟠" if i == 2 else "🟡" if i == 3 else f"`{i}.`"
+            summary_text.append(f"{emoji} **{issue_key}** - `{count}` report{'s' if count > 1 else ''}\n   └ *{example}*")
         
         # Split into fields if needed (Discord limit: 1024 chars per field)
         full_text = "\n\n".join(summary_text)
@@ -2345,13 +2355,18 @@ async def send_daily_issue_summary():
             if current_field:
                 embed.add_field(name="Issues" if len(embed.fields) == 0 else "", value="\n\n".join(current_field), inline=False)
         
-        # Add footer with total
+        # Add footer with total (improved design)
         total_issues = sum(data['count'] for _, data in top_issues)
-        embed.set_footer(text=f"Total reports: {total_issues} | Top {len(top_issues)} issues shown")
+        embed.set_footer(text=f"📈 {total_issues} total reports • Showing top {len(top_issues)} issues")
         
-        # Send message
-        await channel.send(embed=embed)
-        print(f"✅ Sent daily issue summary to developer channel ({len(top_issues)} issues, {total_issues} total reports)")
+        # Send DM to developer
+        try:
+            await developer.send(embed=embed)
+            print(f"✅ Sent daily issue summary DM to {developer.name} ({len(top_issues)} issues, {total_issues} total reports)")
+        except discord.Forbidden:
+            print(f"⚠ Could not send DM to {developer.name} - they may have DMs disabled")
+        except Exception as e:
+            print(f"⚠ Error sending DM: {e}")
         
         # Clear tracker after sending
         daily_issue_tracker.clear()
@@ -3889,10 +3904,10 @@ async def sync_data_task():
 
 @tasks.loop(hours=24)  # Run daily at same time
 async def send_daily_summary_task():
-    """Send daily issue summary to developer (RESOURCE EFFICIENT: runs once daily)"""
+    """Send daily issue summary to developer via DM (RESOURCE EFFICIENT: runs once daily)"""
     try:
         print(f"🕐 Daily summary task triggered at {datetime.now()}")
-        await send_daily_issue_summary()
+        await send_daily_issue_summary()  # Uses default developer ID
     except Exception as e:
         print(f"❌ Error in daily summary task: {e}")
         import traceback
