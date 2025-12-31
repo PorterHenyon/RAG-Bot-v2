@@ -6094,7 +6094,11 @@ async def on_thread_delete(thread):
 
 @bot.tree.command(name="daily_summary", description="Send daily issue summary via DM (optionally specify user_id) (Admin only).")
 async def daily_summary(interaction: discord.Interaction, user_id: str = None):
-    """Test the daily summary by sending it immediately"""
+    """Send daily issue summary to a user via DM
+    
+    Args:
+        user_id: Optional Discord user ID to send DM to. If not provided, uses default developer ID.
+    """
     if is_friend_server(interaction):
         await interaction.response.send_message("❌ This command is not available on this server. Only /ask is available.", ephemeral=True)
         return
@@ -6106,12 +6110,24 @@ async def daily_summary(interaction: discord.Interaction, user_id: str = None):
     try:
         global daily_issue_tracker
         tracker_count = len(daily_issue_tracker)
+        
+        # Parse user ID if provided
+        target_user_id = None
+        if user_id:
+            try:
+                target_user_id = int(user_id)
+            except ValueError:
+                await interaction.followup.send(f"❌ Invalid user ID: {user_id}. Must be a number.", ephemeral=True)
+                return
+        
         await interaction.followup.send(f"📊 Generating daily summary... (tracker has {tracker_count} issue types)", ephemeral=True)
-        await send_daily_issue_summary(user_id=None)  # Uses default developer ID
-        await interaction.followup.send("✅ Daily summary sent! Check DMs for default developer.", ephemeral=True)
+        await send_daily_issue_summary(user_id=target_user_id)
+        
+        target = f"user ID {target_user_id}" if target_user_id else "default developer"
+        await interaction.followup.send(f"✅ Daily summary sent! Check DMs for {target}.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {str(e)[:200]}", ephemeral=True)
-        print(f"Error in test_daily_summary: {e}")
+        print(f"Error in daily_summary command: {e}")
         import traceback
         traceback.print_exc()
 
