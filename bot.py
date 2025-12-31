@@ -6092,7 +6092,7 @@ async def on_thread_delete(thread):
         import traceback
         traceback.print_exc()
 
-@bot.tree.command(name="test_daily_summary", description="Test daily issue summary (sends immediately) (Admin only).")
+@bot.tree.command(name="daily_summary", description="Send daily issue summary via DM (optionally specify user_id) (Admin only).")
 async def test_daily_summary(interaction: discord.Interaction):
     """Test the daily summary by sending it immediately"""
     if is_friend_server(interaction):
@@ -6106,9 +6106,9 @@ async def test_daily_summary(interaction: discord.Interaction):
     try:
         global daily_issue_tracker
         tracker_count = len(daily_issue_tracker)
-        await interaction.followup.send(f"📊 Testing daily summary... (tracker has {tracker_count} issue types)", ephemeral=True)
-        await send_daily_issue_summary()
-        await interaction.followup.send("✅ Daily summary sent! Check the developer channel.", ephemeral=True)
+        await interaction.followup.send(f"📊 Generating daily summary... (tracker has {tracker_count} issue types)", ephemeral=True)
+        await send_daily_issue_summary(user_id=None)  # Uses default developer ID
+        await interaction.followup.send("✅ Daily summary sent! Check DMs for default developer.", ephemeral=True)
     except Exception as e:
         await interaction.followup.send(f"❌ Error: {str(e)[:200]}", ephemeral=True)
         print(f"Error in test_daily_summary: {e}")
