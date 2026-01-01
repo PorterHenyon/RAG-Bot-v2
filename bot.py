@@ -4402,6 +4402,11 @@ async def on_ready():
         
         # 1. Sync ALL commands to main guild
         print(f'🔄 Syncing ALL commands to main guild {DISCORD_GUILD_ID}...')
+        
+        # First, get all global commands to verify they exist
+        global_commands = bot.tree.get_commands()
+        print(f'📋 Found {len(global_commands)} global commands: {[c.name for c in global_commands]}')
+        
         bot.tree.copy_global_to(guild=guild)
         
         # Remove translate from main guild AFTER copying (in case it was copied)
@@ -4420,7 +4425,9 @@ async def on_ready():
         missing = [cmd for cmd in required_commands if cmd not in command_names]
         if missing:
             print(f'⚠️ WARNING: Missing commands: {missing}')
-            print(f'   All registered commands: {[c.name for c in bot.tree.get_commands()]}')
+            print(f'   All global commands: {[c.name for c in global_commands]}')
+            print(f'   All synced commands: {command_names}')
+            print(f'   💡 Try using /fix_duplicate_commands to force re-sync')
         
         # 2. For friend's guild: Explicitly add ONLY /ask command
         print(f'🔄 Setting up friend\'s guild {FRIEND_SERVER_ID}...')
