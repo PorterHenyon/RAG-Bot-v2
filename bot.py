@@ -6350,7 +6350,7 @@ async def set_ignore_post_id(interaction: discord.Interaction, post_id: str):
         print(f"Error in set_ignore_post_id: {e}")
         await interaction.followup.send(f"❌ Error: {str(e)}", ephemeral=True)
 
-@bot.tree.command(name="purge_forum_posts", description="⚠️ PERMANENTLY DELETE all Discord forum threads except main posts (ignored posts). This cannot be undone! (Admin only)")
+@bot.tree.command(name="purge_forum_posts", description="⚠️ PERMANENTLY DELETE all forum threads (except ignored). Cannot be undone! (Admin)")
 async def purge_forum_posts(interaction: discord.Interaction):
     """Permanently delete all Discord forum threads except those in the ignore list"""
     if is_friend_server(interaction):
