@@ -4385,6 +4385,16 @@ async def on_ready():
     # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
     try:
+        # CRITICAL: First check if commands are actually registered
+        all_commands_before_sync = bot.tree.get_commands()
+        print(f'🔍 Checking command registration...')
+        print(f'   Found {len(all_commands_before_sync)} commands in command tree: {[c.name for c in all_commands_before_sync[:10]]}{"..." if len(all_commands_before_sync) > 10 else ""}')
+        
+        if len(all_commands_before_sync) == 0:
+            print(f'❌ CRITICAL ERROR: No commands found in command tree!')
+            print(f'   Commands may not be registered. Check for errors during bot initialization.')
+            return
+        
         # ULTRA-SIMPLE APPROACH: Sync separately to each guild
         guild = discord.Object(id=DISCORD_GUILD_ID)
         friend_guild = discord.Object(id=FRIEND_SERVER_ID)
@@ -4406,6 +4416,10 @@ async def on_ready():
         # Copy all global commands to the guild
         bot.tree.copy_global_to(guild=guild)
         
+        # Verify commands are in guild tree
+        guild_commands_before_sync = bot.tree.get_commands(guild=guild)
+        print(f'   Commands in guild tree before sync: {len(guild_commands_before_sync)}')
+        
         # Remove translate from main guild AFTER copying (in case it was copied)
         try:
             bot.tree.remove_command("translate", guild=guild)
@@ -4415,15 +4429,19 @@ async def on_ready():
         
         # Sync to Discord
         try:
+            print(f'   Syncing to Discord API...')
             synced_main = await bot.tree.sync(guild=guild)
             command_names = [c.name for c in synced_main]
             print(f'✅ {len(synced_main)} commands synced to main guild: {", ".join(command_names[:10])}{"..." if len(command_names) > 10 else ""}')
             
+            if len(synced_main) == 0:
+                print(f'❌ CRITICAL: Sync returned 0 commands! This means no commands were synced to Discord.')
+            
             # Verify new commands are present
-            required_commands = ['daily_summary', 'archive_old_posts']
+            required_commands = ['daily_summary', 'archive_old_posts', 'ask', 'reload']
             missing = [cmd for cmd in required_commands if cmd not in command_names]
             if missing:
-                print(f'⚠️ WARNING: Missing commands: {missing}')
+                print(f'⚠️ WARNING: Missing expected commands: {missing}')
                 print(f'   All synced commands: {command_names}')
                 print(f'   💡 Commands may need time to propagate (5-10 minutes)')
         except Exception as sync_error:
