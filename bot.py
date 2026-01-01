@@ -4407,27 +4407,33 @@ async def on_ready():
         global_commands = bot.tree.get_commands()
         print(f'📋 Found {len(global_commands)} global commands: {[c.name for c in global_commands]}')
         
-        bot.tree.copy_global_to(guild=guild)
-        
-        # Remove translate from main guild AFTER copying (in case it was copied)
-        try:
-            bot.tree.remove_command("translate", guild=guild)
-            print(f'🗑️ Removed /translate from main guild')
-        except Exception as e:
-            print(f'   (translate not in main guild: {e})')
-        
-        synced_main = await bot.tree.sync(guild=guild)
-        command_names = [c.name for c in synced_main]
-        print(f'✓ {len(synced_main)} commands synced to main guild: {", ".join(command_names)}')
-        
-        # Verify new commands are present
-        required_commands = ['daily_summary', 'archive_old_posts']
-        missing = [cmd for cmd in required_commands if cmd not in command_names]
-        if missing:
-            print(f'⚠️ WARNING: Missing commands: {missing}')
-            print(f'   All global commands: {[c.name for c in global_commands]}')
-            print(f'   All synced commands: {command_names}')
-            print(f'   💡 Try using /fix_duplicate_commands to force re-sync')
+        if len(global_commands) == 0:
+            print(f'❌ ERROR: No global commands found! Commands may not be registered.')
+            print(f'   This is a critical error - commands will not work!')
+        else:
+            # Copy global commands to guild
+            bot.tree.copy_global_to(guild=guild)
+            
+            # Remove translate from main guild AFTER copying (in case it was copied)
+            try:
+                bot.tree.remove_command("translate", guild=guild)
+                print(f'🗑️ Removed /translate from main guild')
+            except Exception as e:
+                print(f'   (translate not in main guild: {e})')
+            
+            # Sync to Discord
+            synced_main = await bot.tree.sync(guild=guild)
+            command_names = [c.name for c in synced_main]
+            print(f'✓ {len(synced_main)} commands synced to main guild: {", ".join(command_names)}')
+            
+            # Verify new commands are present
+            required_commands = ['daily_summary', 'archive_old_posts']
+            missing = [cmd for cmd in required_commands if cmd not in command_names]
+            if missing:
+                print(f'⚠️ WARNING: Missing commands: {missing}')
+                print(f'   All global commands: {[c.name for c in global_commands]}')
+                print(f'   All synced commands: {command_names}')
+                print(f'   💡 Commands may need time to propagate (5-10 minutes)')
         
         # 2. For friend's guild: Explicitly add ONLY /ask command
         print(f'🔄 Setting up friend\'s guild {FRIEND_SERVER_ID}...')
