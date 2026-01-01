@@ -3908,11 +3908,20 @@ async def send_daily_summary_task():
     """Send daily issue summary to developer via DM (RESOURCE EFFICIENT: runs once daily)"""
     try:
         print(f"🕐 Daily summary task triggered at {datetime.now()}")
-        await send_daily_issue_summary()  # Uses default developer ID
+        # Always use default developer ID (910980823132561428)
+        await send_daily_issue_summary(user_id=None)
+        print(f"✅ Daily summary task completed successfully")
     except Exception as e:
         print(f"❌ Error in daily summary task: {e}")
         import traceback
         traceback.print_exc()
+
+@send_daily_summary_task.before_loop
+async def before_daily_summary_task():
+    await bot.wait_until_ready()
+    # Wait a bit more to ensure bot is fully ready
+    await asyncio.sleep(5)
+    print("⏰ Daily summary task ready - will run every 24 hours and DM developer")
 
 @send_daily_summary_task.before_loop
 async def before_daily_summary_task():
@@ -4367,10 +4376,11 @@ async def on_ready():
         cleanup_processed_threads.start()
         print("✓ Started background task: cleanup_processed_threads (runs every 6 hours)")
     
-    # Start daily summary task (runs once per day)
+    # Start daily summary task (runs once per day, DMs developer at 910980823132561428)
     if not send_daily_summary_task.is_running():
         send_daily_summary_task.start()
-        print("✓ Started background task: send_daily_summary_task (runs daily at same time)")
+        print("✓ Started background task: send_daily_summary_task (runs every 24h, DMs developer)")
+        print(f"   Next run will be in ~24 hours, will DM user ID: 910980823132561428")
     
     # No local backups - all data in Vercel KV (use /export_data to download anytime)
     
