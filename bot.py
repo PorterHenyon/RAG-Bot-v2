@@ -4402,7 +4402,15 @@ async def on_ready():
             print(f'   (translate not in main guild: {e})')
         
         synced_main = await bot.tree.sync(guild=guild)
-        print(f'✓ {len(synced_main)} commands synced to main guild')
+        command_names = [c.name for c in synced_main]
+        print(f'✓ {len(synced_main)} commands synced to main guild: {", ".join(command_names)}')
+        
+        # Verify new commands are present
+        required_commands = ['daily_summary', 'archive_old_posts']
+        missing = [cmd for cmd in required_commands if cmd not in command_names]
+        if missing:
+            print(f'⚠️ WARNING: Missing commands: {missing}')
+            print(f'   All registered commands: {[c.name for c in bot.tree.get_commands()]}')
         
         # 2. For friend's guild: Explicitly add ONLY /ask command
         print(f'🔄 Setting up friend\'s guild {FRIEND_SERVER_ID}...')
