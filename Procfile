@@ -1,2 +1,2 @@
-worker: python -u bot.py
+worker: python -u ticket_tracker.py
 

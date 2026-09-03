@@ -1,11 +1,11 @@
-# Quick start script for Revolution Macro Bot
-Write-Host "🚀 Starting Revolution Macro Bot..." -ForegroundColor Green
+# Quick start script for Support Ticket Tracker
+Write-Host "🚀 Starting Support Ticket Tracker..." -ForegroundColor Green
 Write-Host ""
 
 # Check if .env exists
 if (-not (Test-Path .env)) {
     Write-Host "❌ ERROR: .env file not found!" -ForegroundColor Red
-    Write-Host "   Create a .env file with DISCORD_BOT_TOKEN, GEMINI_API_KEY, etc." -ForegroundColor Yellow
+    Write-Host "   Create a .env file with DISCORD_BOT_TOKEN, SUPPORT_FORUM_CHANNEL_ID, etc." -ForegroundColor Yellow
     exit 1
 }
 
@@ -20,9 +20,9 @@ Write-Host "📦 Activating virtual environment..." -ForegroundColor Cyan
 & .\venv\Scripts\Activate.ps1
 
 # Check if dependencies are installed
-if (-not (Test-Path venv\Lib\site-packages\discord.py)) {
+if (-not (Test-Path venv\Lib\site-packages\discord)) {
     Write-Host "📥 Installing dependencies..." -ForegroundColor Cyan
-    pip install -r requirements.txt
+    pip install -r requirements-tracker.txt
 }
 
 # Start the bot
@@ -30,5 +30,5 @@ Write-Host ""
 Write-Host "🤖 Starting bot..." -ForegroundColor Green
 Write-Host "   Press Ctrl+C to stop" -ForegroundColor Yellow
 Write-Host ""
-python bot.py
+python ticket_tracker.py
 
