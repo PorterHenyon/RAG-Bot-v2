@@ -7,13 +7,13 @@ No auto-responding, no RAG, no dashboard. Just reads tickets and reports.
 import asyncio
 import os
 import re
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import discord
-from discord import app_commands
-from discord.ext import commands, tasks
+from discord.ext import commands
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,6 +28,7 @@ STALE_HOURS = int(os.getenv("STALE_HOURS", "12"))
 NEW_HOURS = int(os.getenv("NEW_HOURS", "24"))
 SOLVED_TAG_ID = os.getenv("SOLVED_TAG_ID")
 UNSOLVED_TAG_ID = os.getenv("UNSOLVED_TAG_ID")
+RUN_ONCE = os.getenv("RUN_ONCE", "").lower() == "true" or "--once" in sys.argv
 
 LOG_EXTENSIONS = {".log", ".txt", ".dmp", ".crash"}
 LOG_NAME_PATTERN = re.compile(r"log|crash|dump|error|debug", re.IGNORECASE)
@@ -394,19 +395,6 @@ async def send_daily_summary(user_id: Optional[int] = None) -> bool:
         return False
 
 
-@tasks.loop(hours=24)
-async def daily_summary_task():
-    print(f"🕐 Daily summary task running at {_utcnow().isoformat()}")
-    await send_daily_summary()
-
-
-@daily_summary_task.before_loop
-async def before_daily_summary():
-    await bot.wait_until_ready()
-    await asyncio.sleep(10)
-    print(f"⏰ Daily summary scheduled every 24h → DM user {LIAM_USER_ID}")
-
-
 @bot.event
 async def on_ready():
     print(f"✓ Logged in as {bot.user} ({bot.user.id})")
@@ -414,8 +402,14 @@ async def on_ready():
     print(f"  Liam DM target: {LIAM_USER_ID}")
     print(f"  Stale threshold: {STALE_HOURS}h")
 
-    if not daily_summary_task.is_running():
-        daily_summary_task.start()
+    if RUN_ONCE:
+        print("📤 One-shot mode — sending summary then shutting down")
+        await send_daily_summary()
+        await bot.close()
+        return
+
+    print("⏰ Daily summaries run automatically via GitHub Actions (9 AM MT)")
+    print("   Use /daily_summary in Discord to send one manually")
 
 
 @bot.event
@@ -469,4 +463,7 @@ if __name__ == "__main__":
         raise SystemExit("DISCORD_BOT_TOKEN is required")
     if not SUPPORT_FORUM_CHANNEL_ID:
         raise SystemExit("SUPPORT_FORUM_CHANNEL_ID is required")
-    bot.run(DISCORD_BOT_TOKEN)
+    try:
+        bot.run(DISCORD_BOT_TOKEN)
+    except KeyboardInterrupt:
+        pass

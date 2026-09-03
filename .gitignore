@@ -40,3 +40,4 @@ ENV/
 # Bot local storage
 bot_settings.json
 localrag/
+logs/

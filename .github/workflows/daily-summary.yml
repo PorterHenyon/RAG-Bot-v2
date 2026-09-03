@@ -1,0 +1,30 @@
+name: Daily Ticket Summary
+
+on:
+  schedule:
+    # 9:00 AM Mountain Time (UTC-6) = 15:00 UTC
+    - cron: "0 15 * * *"
+  workflow_dispatch: # manual trigger from GitHub Actions tab
+
+jobs:
+  send-summary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-tracker.txt
+
+      - name: Send daily summary to Liam
+        env:
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          SUPPORT_FORUM_CHANNEL_ID: ${{ secrets.SUPPORT_FORUM_CHANNEL_ID }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          LIAM_USER_ID: ${{ secrets.LIAM_USER_ID }}
+          STAFF_ROLE_ID: ${{ secrets.STAFF_ROLE_ID }}
+          RUN_ONCE: "true"
+        run: python ticket_tracker.py --once
