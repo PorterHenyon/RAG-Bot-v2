@@ -16,16 +16,33 @@ import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # --- Config ---
+def _require_int(name: str, default: str = "0") -> int:
+    raw = (os.getenv(name) or default).strip()
+    if not raw or raw.upper() == "PASTE_HERE" or raw.startswith("your_"):
+        raise SystemExit(
+            f"FATAL: {name} is not set. Edit .env and set it to a numeric Discord ID."
+        )
+    try:
+        return int(raw)
+    except ValueError:
+        raise SystemExit(
+            f"FATAL: {name} must be a number, got: {raw!r}. Check your .env file."
+        )
+
+
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-SUPPORT_FORUM_CHANNEL_ID = int(os.getenv("SUPPORT_FORUM_CHANNEL_ID", "0"))
-DISCORD_GUILD_ID = int(os.getenv("DISCORD_GUILD_ID", "0"))
-LIAM_USER_ID = int(os.getenv("LIAM_USER_ID", "910980823132561428"))
-STAFF_ROLE_ID = int(os.getenv("STAFF_ROLE_ID", "1422106035337826315"))
-STALE_HOURS = int(os.getenv("STALE_HOURS", "12"))
-NEW_HOURS = int(os.getenv("NEW_HOURS", "24"))
+if not DISCORD_BOT_TOKEN or DISCORD_BOT_TOKEN.strip().upper() == "PASTE_HERE":
+    raise SystemExit("FATAL: DISCORD_BOT_TOKEN is not set. Edit .env with your bot token.")
+
+SUPPORT_FORUM_CHANNEL_ID = _require_int("SUPPORT_FORUM_CHANNEL_ID")
+DISCORD_GUILD_ID = _require_int("DISCORD_GUILD_ID")
+LIAM_USER_ID = _require_int("LIAM_USER_ID", "910980823132561428")
+STAFF_ROLE_ID = _require_int("STAFF_ROLE_ID", "1422106035337826315")
+STALE_HOURS = _require_int("STALE_HOURS", "12")
+NEW_HOURS = _require_int("NEW_HOURS", "24")
 SOLVED_TAG_ID = os.getenv("SOLVED_TAG_ID")
 UNSOLVED_TAG_ID = os.getenv("UNSOLVED_TAG_ID")
 RUN_ONCE = os.getenv("RUN_ONCE", "").lower() == "true" or "--once" in sys.argv
@@ -459,10 +476,6 @@ async def scan_cmd(interaction: discord.Interaction):
 
 
 if __name__ == "__main__":
-    if not DISCORD_BOT_TOKEN:
-        raise SystemExit("DISCORD_BOT_TOKEN is required")
-    if not SUPPORT_FORUM_CHANNEL_ID:
-        raise SystemExit("SUPPORT_FORUM_CHANNEL_ID is required")
     try:
         bot.run(DISCORD_BOT_TOKEN)
     except KeyboardInterrupt:
