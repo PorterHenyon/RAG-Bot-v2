@@ -1,34 +1,23 @@
-# Quick start script for Support Ticket Tracker
-Write-Host "🚀 Starting Support Ticket Tracker..." -ForegroundColor Green
-Write-Host ""
+# Quick start — runs bot in foreground so you can see errors immediately
+Write-Host "Starting Support Ticket Tracker..." -ForegroundColor Green
 
-# Check if .env exists
+$ProjectRoot = $PSScriptRoot
+Set-Location $ProjectRoot
+
 if (-not (Test-Path .env)) {
-    Write-Host "❌ ERROR: .env file not found!" -ForegroundColor Red
-    Write-Host "   Create a .env file with DISCORD_BOT_TOKEN, SUPPORT_FORUM_CHANNEL_ID, etc." -ForegroundColor Yellow
+    Write-Host "ERROR: .env file not found!" -ForegroundColor Red
     exit 1
 }
 
-# Check if virtual environment exists
 if (-not (Test-Path venv)) {
-    Write-Host "⚠️  Virtual environment not found. Creating one..." -ForegroundColor Yellow
+    Write-Host "Creating virtual environment..." -ForegroundColor Yellow
     python -m venv venv
 }
 
-# Activate virtual environment
-Write-Host "📦 Activating virtual environment..." -ForegroundColor Cyan
-& .\venv\Scripts\Activate.ps1
+Write-Host "Installing dependencies..." -ForegroundColor Cyan
+& .\venv\Scripts\python.exe -m pip install -q -r requirements-tracker.txt
 
-# Check if dependencies are installed
-if (-not (Test-Path venv\Lib\site-packages\discord)) {
-    Write-Host "📥 Installing dependencies..." -ForegroundColor Cyan
-    pip install -r requirements-tracker.txt
-}
-
-# Start the bot
 Write-Host ""
-Write-Host "🤖 Starting bot..." -ForegroundColor Green
-Write-Host "   Press Ctrl+C to stop" -ForegroundColor Yellow
+Write-Host "Starting bot (Ctrl+C to stop)..." -ForegroundColor Green
 Write-Host ""
-python ticket_tracker.py
-
+& .\venv\Scripts\python.exe -u ticket_tracker.py

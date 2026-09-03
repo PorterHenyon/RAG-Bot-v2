@@ -41,3 +41,4 @@ ENV/
 bot_settings.json
 localrag/
 logs/
+!.gitkeep
