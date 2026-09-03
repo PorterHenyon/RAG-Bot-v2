@@ -10,13 +10,19 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Optional
 
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
 
-load_dotenv(override=True)
+# Always load .env from the project folder (not whatever directory you run from)
+PROJECT_ROOT = Path(__file__).resolve().parent
+ENV_FILE = PROJECT_ROOT / ".env"
+if not ENV_FILE.exists():
+    raise SystemExit(f"FATAL: .env not found at {ENV_FILE}")
+load_dotenv(ENV_FILE, override=True)
 
 # --- Config ---
 def _require_int(name: str, default: str = "0") -> int:
@@ -33,9 +39,12 @@ def _require_int(name: str, default: str = "0") -> int:
         )
 
 
-DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-if not DISCORD_BOT_TOKEN or DISCORD_BOT_TOKEN.strip().upper() == "PASTE_HERE":
-    raise SystemExit("FATAL: DISCORD_BOT_TOKEN is not set. Edit .env with your bot token.")
+DISCORD_BOT_TOKEN = (os.getenv("DISCORD_BOT_TOKEN") or "").strip()
+if not DISCORD_BOT_TOKEN or DISCORD_BOT_TOKEN.upper() == "PASTE_HERE":
+    raise SystemExit(
+        f"FATAL: DISCORD_BOT_TOKEN is not set in {ENV_FILE}. "
+        "Paste your bot token on the DISCORD_BOT_TOKEN= line and save the file."
+    )
 
 SUPPORT_FORUM_CHANNEL_ID = _require_int("SUPPORT_FORUM_CHANNEL_ID")
 DISCORD_GUILD_ID = _require_int("DISCORD_GUILD_ID")
